@@ -13,12 +13,19 @@ export function extrasImportsPy(hasReservations: boolean, hasReports: boolean): 
   return l;
 }
 
-export function extrasFunctionsPy(hasReservations: boolean, hasReports: boolean): string[] {
+export function extrasFunctionsPy(hasReservations: boolean, hasReports: boolean, hasSubscription = false): string[] {
   const l: string[] = [];
   if (hasReservations) {
-    l.push(`    async def _reserve(*, customer_id: str, job_id: str, amount: int):`);
-    l.push(`        """EC:C10 — hold budget before long-running work starts."""`);
-    l.push(`        return await reserve_budget(customer_id=customer_id, job_id=job_id, amount=amount, policy=policy, ledger=ledger, clock=clock)`);
+    if (hasSubscription) {
+      l.push(`    async def _reserve(*, customer_id: str, job_id: str, amount: int, subscription_id: str | None = None):`);
+      l.push(`        """EC:C10 — hold budget before long-running work starts. EC:C11 — an unentitled subscription is refused."""`);
+      l.push(`        sub = await repo.subscriptions.get(subscription_id) if subscription_id else await current_subscription(customer_id)`);
+      l.push(`        return await reserve_budget(customer_id=customer_id, job_id=job_id, amount=amount, policy=policy, ledger=ledger, clock=clock, sub=sub)`);
+    } else {
+      l.push(`    async def _reserve(*, customer_id: str, job_id: str, amount: int):`);
+      l.push(`        """EC:C10 — hold budget before long-running work starts."""`);
+      l.push(`        return await reserve_budget(customer_id=customer_id, job_id=job_id, amount=amount, policy=policy, ledger=ledger, clock=clock)`);
+    }
     l.push('');
     l.push(`    async def _commit(*, customer_id: str, job_id: str, amount: int):`);
     l.push(`        """EC:C10 — the job succeeded: charge what it used (<= reserved)."""`);

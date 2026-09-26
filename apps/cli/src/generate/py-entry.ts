@@ -63,7 +63,7 @@ export function generateIndexPy(config: PaykitConfig): string {
   l.push('');
   l.push(`from typing import Any`);
   l.push('');
-  l.push(`from boilpayment.core import Clock, ConsoleLogger, Deps, LedgerStore, Logger, Money, NoopLogger, Notifier, Payment, PaymentProvider, Period, Plan, PlanPrice, Policy, Repo, Subscription, resolve_policy`);
+  l.push(`from boilpayment.core import ${hasSubscription && hasCredits ? 'INACTIVE_SUBSCRIPTION_STATUSES, ' : ''}Clock, ConsoleLogger, Deps, LedgerStore, Logger, Money, NoopLogger, Notifier, Payment, ${hasSubscription && hasCredits ? 'PaymentKitError, ' : ''}PaymentProvider, Period, Plan, PlanPrice, Policy, Repo, Subscription, resolve_policy`);
   l.push(`from boilpayment.postgres import verify_schema`);
   if (config.infra.logging === 'postgres') {
     l.push(`from boilpayment.postgres import PostgresLogger`);
@@ -326,8 +326,21 @@ export function generateIndexPy(config: PaykitConfig): string {
     l.push('');
   }
   if (hasCredits) {
+    if (hasSubscription) {
+      l.push(`    async def current_subscription(customer_id: str) -> Subscription | None:`);
+      l.push(`        """EC:C11 — the customer's current (latest) subscription, for entitlement checks the kit owns."""`);
+      l.push(`        subs = await repo.subscriptions.list(customer_id=customer_id)`);
+      l.push(`        return max(subs, key=lambda s: s.created_at) if subs else None`);
+      l.push('');
+    }
     l.push(`    async def consume(**kwargs: Any):`);
     l.push(`        """EC:B3 B4 B5 B14 — atomic consume against the ledger."""`);
+    if (hasSubscription) {
+      l.push(`        # EC:C11 — an unpaid subscription (paused, incomplete) spends nothing; canceled/expired keep bought credits.`);
+      l.push(`        sub = await current_subscription(kwargs["customer_id"])`);
+      l.push(`        if sub is not None and sub.status in INACTIVE_SUBSCRIPTION_STATUSES:`);
+      l.push(`            raise PaymentKitError(f"subscription {sub.id} is {sub.status}", "subscription_inactive")`);
+    }
     l.push(`        return await consume_credits(ConsumeCreditsInput(policy=policy, ledger=ledger, clock=clock, **kwargs))`);
   } else {
     l.push(`    async def consume(**kwargs: Any):`);
@@ -344,7 +357,7 @@ export function generateIndexPy(config: PaykitConfig): string {
     l.push(`        return await check_usage(policy=policy, repo=repo, ledger=ledger, clock=clock, **kwargs)`);
     l.push('');
   }
-  l.push(...extrasFunctionsPy(hasReservations, hasReports));
+  l.push(...extrasFunctionsPy(hasReservations, hasReports, hasSubscription));
   l.push(`    async def refund(extra: dict[str, Any] | None = None, **kwargs: Any):`);
   l.push(`        """EC:D* — policy-driven refund evaluation. Caller executes with a resolved provider."""`);
   l.push(`        decision = await evaluate_refund(EvaluateInput(policy=policy, ledger=ledger, repo=repo, clock=clock, **kwargs))`);
