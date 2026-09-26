@@ -409,3 +409,24 @@ provider.refund(...)                                           # outside the loc
 Without the lock, two requests with different keys for one payment both read the same `committed`
 and both pass; Postgres race test before the fix: 600 + 600 on a 1000 payment refunded 1200 in 4 of
 5 rounds (TS) and 5 of 5 (Py).
+
+
+## [EC:D18] 외부 환불 회수는 고객 잠금 안에서, grant 버킷에 묶어서
+
+```pseudo
+onExternalRefund(event):
+   ... payment, pending, settlementAmount 확인 (잠금 밖, 읽기만) ...
+   return ledger.transaction(payment.customerId, () =>          # consume 과 같은 고객 잠금
+      balance = ledger.balance(customer, 'paid', now)
+      creditsToRevoke = pending ? heldCredits : min(raw, granted - alreadyRevoked, balance.available)
+      parts = split creditsToRevoke over live paid grant buckets:
+                 grants of this payment first, then earliest expiry, then oldest
+      excess = creditsToRevoke - sum(parts)                     # 승인된 allow_negative pending 만 > 0
+      if excess > 0: append revoke(-excess, key revoke:refund:{refundId})           # grant 없음
+      for (grantId, n) in parts: append revoke(-n, grantId, key revoke:refund:{refundId}:{grantId})
+      put refund; update payment status
+      if clamped or no amount: open reconcile case)
+```
+
+grant 에 묶이지 않은 회수는 잔액만 줄이고 버킷은 그대로 두어, 이어지는 consume 이 회수된 크레딧을
+다시 쓸 수 있었다(잔액 -100).
