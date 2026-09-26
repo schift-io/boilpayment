@@ -381,8 +381,10 @@ def test_ec_f_schedule_payment_sends_post_with_full_body_and_time_to_pay() -> No
 
 def test_ec_f_capabilities_scheduling_reflects_config() -> None:
     transport = RecordingTransport()
-    provider_default = make_provider(transport)
+    provider_default = make_provider(transport, scheduling="provider")
     assert provider_default.capabilities().scheduling == "provider"
+    unset = PortoneProvider(PortoneProviderConfig(api_secret="s", store_id="st", webhook_secret="whsec_c2VjcmV0"))
+    assert unset.capabilities().scheduling == "self"  # EC:A43
     provider_self = make_provider(transport, scheduling="self")
     assert provider_self.capabilities().scheduling == "self"
 

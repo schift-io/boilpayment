@@ -52,12 +52,12 @@ export function computeWarnings(config: PaykitConfig, env: NodeJS.ProcessEnv = p
     });
   }
   const selfSchedulingProviders = config.providers.filter(
-    (pr) => pr === 'toss' || (pr === 'portone' && config.infra.scheduler === 'self'),
+    (pr) => pr === 'toss' || pr === 'portone', // EC:A43 — PortOne renews through the kit's scheduler
   );
   if (config.models.includes('subscription') && selfSchedulingProviders.length > 0) {
     warnings.push({
       code: 'F(Toss/Portone self)',
-      message: `${selfSchedulingProviders.join(', ')} 는 self 스케줄링입니다(Toss 는 항상 self, Portone 은 infra.scheduler 를 따름). ` +
+      message: `${selfSchedulingProviders.join(', ')} 는 self 스케줄링입니다(EC:A43: Toss·PortOne 모두 self). ` +
         'cron.schedulerTick() (ts) / cron["scheduler_tick"] (py) 을 주기적으로 호출하는 크론 작업을 직접 구성해야 합니다.',
     });
   }

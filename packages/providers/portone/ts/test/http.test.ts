@@ -210,10 +210,12 @@ describe('[EC:F] PortoneProvider.schedulePayment — provider-side scheduled bil
     expect(result).toEqual(SCHEDULE_RESPONSE);
   });
 
-  it("[EC:F] capabilities().scheduling reflects the constructor's scheduling option ('provider' by default)", () => {
+  it("[EC:F] [EC:A43] capabilities().scheduling reflects the constructor's scheduling option ('self' by default)", () => {
     const { fetchStub } = makeCapturingFetch(() => ({ status: 200, body: {} }));
     const providerDefault = makeProvider(fetchStub);
     expect(providerDefault.capabilities().scheduling).toBe('provider');
+    const unset = new PortoneProvider({ apiSecret: 's', storeId: 'st', webhookSecret: 'whsec_c2VjcmV0' }, fetchStub);
+    expect(unset.capabilities().scheduling).toBe('self'); // EC:A43
     const providerSelf = makeProvider(fetchStub, 'self');
     expect(providerSelf.capabilities().scheduling).toBe('self');
   });

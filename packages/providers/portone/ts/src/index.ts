@@ -211,7 +211,11 @@ export interface PortoneProviderConfig {
   /** EC:E20 — secrets being rotated out; a stored webhook signed with one still re-verifies. */
   previousWebhookSecrets?: string[];
   channelKey?: string;
-  /** 'provider' = PortOne schedule API drives renewals; 'self' = our scheduler calls chargeBillingKey. Default 'provider'. */
+  /**
+   * EC:A43 — 'self' (default): lifecycle.scheduler.tick charges the billing key each period (the path the kit
+   * implements and tests). 'provider' leaves renewals to PortOne's schedule API: the app must call
+   * schedulePayment itself and route the resulting webhook; the kit does neither.
+   */
   scheduling?: 'provider' | 'self';
   /** Override the API host, e.g. the local mock: "http://127.0.0.1:12212". Defaults to https://api.portone.io. */
   apiBase?: string;
@@ -260,7 +264,7 @@ export class PortoneProvider implements PaymentProvider {
     this.webhookSecret = config.webhookSecret;
     this.previousWebhookSecrets = config.previousWebhookSecrets ?? [];
     this.channelKey = config.channelKey;
-    this.scheduling = config.scheduling ?? 'provider';
+    this.scheduling = config.scheduling ?? 'self';
     this.fetchImpl = fetchImpl;
     this.baseUrl = config.apiBase ?? BASE_URL;
     this.logger = config.logger ?? new NoopLogger();

@@ -214,9 +214,22 @@ async def recover_missing_grants(input: RecoverMissingGrantsInput) -> list[CsCas
             input.since and payment.occurred_at < input.since
         ) or payment.kind == "overage":
             continue
+        # EC:A46 -- a declined charge bought nothing; a pending self-scheduled attempt belongs to the scheduler.
+        if payment.status == "failed":
+            continue
+        raw = payment.raw if isinstance(payment.raw, dict) else {}
+        if payment.status == "pending" and raw.get("boilpaymentAttemptKey"):
+            continue
         entries = await input.ledger.entries(payment.customer_id, kind="grant")
         if any(entry.reference.payment_id == payment.id for entry in entries):
             continue
+        # EC:A46 -- already handed to a person: report the open case again, do not re-notify.
+        recorded = await input.repo.operations.get(f"support-case:regrant:{payment.customer_id}:{payment.id}:")
+        if recorded and recorded.status == "done":
+            open_case = await input.repo.cs_cases.get(deserialize_cs_case(recorded.result).id)
+            if open_case is not None and open_case.status == "needs_human":
+                results.append(open_case)
+                continue
         results.append(
             await recover_missing_grant(
                 RecoverMissingGrantInput(

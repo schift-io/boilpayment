@@ -113,7 +113,8 @@ schedulePayment({billingKey, amount, orderId, customerRef, timeToPay}) -> extra:
                      amount: {total: amount.amountMinor}, currency, customer: {id: customerRef}},
           timeToPay }
   return raw   # { schedule: { id, ... } }
-  # scheduling='provider' 일 때 lifecycle 이 매 갱신 시점마다 이걸 호출해 다음 결제를 예약한다.
+  # EC:A43 (2026-09-27) — 이 kit 의 lifecycle 은 schedulePayment 를 부르지 않는다. 기본값은 scheduling='self' 이고
+  # scheduler.tick 이 매 기간 chargeBillingKey 로 청구한다. 'provider' 를 고른 앱은 이 호출과 그 웹훅을 직접 처리한다.
 
 cancelSchedules({billingKey?, scheduleIds?}) -> extra:   # 둘 중 하나 필수
   # 확인됨(2026-09-09, OpenAPI): 실제 취소 엔드포인트는 DELETE /payment-schedules
@@ -305,7 +306,7 @@ verifyWebhook({headers, rawBody}) -> NormalizedEvent:
 ## self-scheduler 계약
 
 `scheduling='self'` 일 때는 toss.pseudo.md 의 self-scheduler 계약과 동일 (`chargeBillingKey` 반복 호출).
-`scheduling='provider'` 일 때는 `lifecycle` 이 최초 1회만 `schedulePayment` 를 호출해 다음 결제를 예약하고,
+(EC:A43 이전 설계 — 지금 lifecycle 은 이 경로를 구현하지 않는다. 기본값 'self', 위 참고.) `scheduling='provider'` 일 때는 `lifecycle` 이 최초 1회만 `schedulePayment` 를 호출해 다음 결제를 예약하고,
 PortOne 이 자체적으로 결제를 실행한 뒤 `Transaction.Paid`/`Transaction.Failed` 웹훅으로 결과를 통지한다 —
 이 경우 `lifecycle.scheduler.tick` 은 due_subscriptions 를 폴링하지 않고 webhook 만 기다린다
 (구현 갈림길이므로 lifecycle 쪽에 `scheduling` 값을 전달해 분기해야 함 — 계약 확인 필요, 최종 보고 기재).

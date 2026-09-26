@@ -57,6 +57,10 @@
 | A40 | 연체(past_due) 중 기간 끝 취소를 해도 dunning 이 다음 기간을 청구함 | — | 연체 중 `cancelAtPeriodEnd` 가 켜지면 dunning 재시도는 청구하지 않고 구독을 canceled 로 끝낸다. 스케줄러도 연체 구독의 기간 끝 취소를 마무리한다(오너 결정 2026-09-27: 취소한 고객에게 더 청구하지 않는다) | lifecycle | P0 |
 | A41 | 결과를 모르던 스케줄러 청구가 나중에 거절로 확정돼도 스마트 재시도가 예약되지 않음 | `policy.dunning.retry_attempts` | 스케줄러 자신의 시도가 거절로 처음 확정되는 tick 에서 dunning 을 한 번 시작한다(유예 재시작, 재시도 1 예약) | lifecycle | P1 |
 | A42 | TS 와 Python 이 dunning outbox payload 키를 다르게 써서(subscriptionId / subscription_id) 공유 DB 에서 다른 쪽 kit 의 항목을 읽다 멈춤 | — | 두 kit 모두 `{subscriptionId, attempt, dueAt}` 를 쓴다. Python 은 이전 릴리스의 snake_case 항목도 읽는다 | lifecycle | P1 |
+| A43 | PortOne 구독이 생성 앱에서 한 번도 갱신되지 않음(마법사 기본 `provider` 모드는 아무도 `schedulePayment` 를 부르지 않고, `self` 모드는 생성 코드가 scheduling 을 넘기지 않음) | — | PortOne 도 Toss 처럼 항상 이 kit 의 스케줄러로 갱신한다. 어댑터 기본값이 `scheduling='self'` 이고, 마법사의 스케줄러 질문은 없앴으며, 생성 코드가 `scheduling: 'self'` 를 넘긴다. `provider` 는 앱이 `schedulePayment` 와 그 웹훅을 직접 처리할 때만 명시적으로 쓴다. 로컬 목·샌드박스 호스트는 `PORTONE_API_BASE` 로 지정한다 | portone + cli | P0 |
+| A44 | 생성 앱의 consume·reserve 가 `usageDuringGrace='block'` 을 무시하고, reserve 가 넘겨받은 구독의 주인을 확인하지 않음 | `policy.dunning.usage_during_grace` | 연체 중이고 정책이 block 이면 `grace_usage_blocked` 로 거절한다. reserve 는 다른 고객의 구독 id 를 `subscription_not_owned` 로 거절한다 | cli | P1 |
+| A45 | PortOne 자체 스케줄 갱신 결제의 `Transaction.Paid` 웹훅이 충전 분기로 가서 매번 실패함 | — | 이벤트가 구독을 모르더라도, 로컬 결제 행이 구독 결제(kind subscription)면 그 구독의 갱신으로 처리한다(행을 succeeded 로 기록하고 `onRenewalPaid`, 멱등). 성공하지 않은 결제는 기록을 실패로 남긴다 | webhook | P1 |
+| A46 | `cron.reconcile` 이 거절된 갱신 시도마다 사람 케이스를 열고 실행할 때마다 알림을 다시 보냄 | — | 거절된 결제와 스케줄러가 가진 pending 시도는 미지급 복구 대상이 아니다. 이미 담당자에게 넘긴 케이스는 다시 알리지 않고 그대로 돌려준다 | cs | P1 |
 
 ## B. 크레딧 원장
 

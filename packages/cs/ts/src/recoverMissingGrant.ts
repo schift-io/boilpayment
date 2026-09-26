@@ -61,8 +61,18 @@ export async function recoverMissingGrants(input: RecoverMissingGrantsInput): Pr
   const results: CsCase[] = [];
   for (const payment of payments) {
     if ((input.since && payment.occurredAt < input.since) || payment.kind === 'overage') continue;
+    // EC:A46 — a declined charge bought nothing, and a self-scheduled attempt still pending belongs to
+    // the scheduler (EC:A36 A38): neither is a missing grant.
+    if (payment.status === 'failed') continue;
+    if (payment.status === 'pending' && (payment.raw as { boilpaymentAttemptKey?: unknown } | undefined)?.boilpaymentAttemptKey) continue;
     const entries = await input.ledger.entries(payment.customerId, { kind: 'grant' });
     if (entries.some((entry) => entry.reference.paymentId === payment.id)) continue;
+    // EC:A46 — already handed to a person: the scan reports the open case again, it does not re-notify.
+    const recorded = await input.repo.operations.get(`support-case:regrant:${payment.customerId}:${payment.id}:`);
+    if (recorded?.status === 'done') {
+      const open = await input.repo.csCases.get(deserializeCsCase(recorded.result).id);
+      if (open?.status === 'needs_human') { results.push(open); continue; }
+    }
     results.push(await recoverMissingGrant({ ...input, customerId: payment.customerId, paymentId: payment.id }));
   }
   return results;

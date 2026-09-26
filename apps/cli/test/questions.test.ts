@@ -95,13 +95,8 @@ describe('when() gating', () => {
     expect(q.when?.(cfg)).toBe(false);
   });
 
-  it('infra.scheduler question only fires with portone (not toss alone)', () => {
-    const q = QUESTIONS.find((x) => x.id === 'infra_scheduler')!;
-    expect(q.when?.({ ...base(), providers: [] } as WizardConfig)).toBe(false);
-    expect(q.when?.({ ...base(), providers: ['toss'] } as WizardConfig)).toBe(false);
-    expect(q.when?.({ ...base(), providers: ['stripe'] } as WizardConfig)).toBe(false);
-    expect(q.when?.({ ...base(), providers: ['portone'] } as WizardConfig)).toBe(true);
-    expect(q.when?.({ ...base(), providers: ['toss', 'portone'] } as WizardConfig)).toBe(true);
+  it('[EC:A43] no scheduler question: PortOne renews through the kit scheduler like Toss', () => {
+    expect(QUESTIONS.find((x) => x.id === 'infra_scheduler')).toBeUndefined();
   });
 
   it('policy authority is always configured while only API key depends on reporting', () => {

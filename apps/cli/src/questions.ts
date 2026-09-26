@@ -868,20 +868,4 @@ export const QUESTIONS: Question[] = [
     ],
     default: 'postgres',
   },
-  {
-    id: 'infra_scheduler',
-    configPath: 'infra.scheduler',
-    ec: ['F(Toss/Portone self)'],
-    type: 'select',
-    group: 'infra',
-    // Toss 는 네이티브 구독이 없어 항상 자체 스케줄러를 씁니다 (질문 없이 강제). Portone 은
-    // V2 schedule API 로 provider 측 예약도 가능해서 여기서만 선택을 묻는다.
-    when: (c) => hasPortone(c),
-    message: 'Portone 갱신 결제 스케줄링 방식 (Scheduler, Toss 는 네이티브 구독이 없어 항상 self)',
-    options: [
-      { value: 'provider', label: 'Provider 스케줄 (Portone V2 schedule API)', hint: '기본, provider 가 예약 결제 실행' },
-      { value: 'self', label: '자체 스케줄러 (cron + billing key)', hint: '우리 cron 이 직접 결제 실행' },
-    ],
-    default: 'provider',
-  },
 ];

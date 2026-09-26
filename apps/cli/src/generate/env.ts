@@ -15,7 +15,7 @@ const PROVIDER_ENV: Record<string, string[]> = {
     '# 출금은 없습니다. 다른 BIN 은 빌링키는 발급돼도 결제 단계에서 NOT_SUPPORTED_CARD_TYPE 로 거부될 수',
     '# 있습니다 (2026-09-09 실측, packages/providers/toss/spec/toss.pseudo.md 참고).',
   ],
-  portone: ['PORTONE_API_SECRET=...', 'PORTONE_STORE_ID=store-...', 'PORTONE_WEBHOOK_SECRET=...', '# 웹훅 서명 비밀값을 바꿀 때: 새 값을 위에, 옛 값을 아래에 쉼표로 둡니다. 이미 받은 웹훅의 재처리가 옛 값으로 검증됩니다(EC:E20).', 'PORTONE_WEBHOOK_PREVIOUS_SECRETS='],
+  portone: ['PORTONE_API_SECRET=...', 'PORTONE_STORE_ID=store-...', 'PORTONE_WEBHOOK_SECRET=...', '# 웹훅 서명 비밀값을 바꿀 때: 새 값을 위에, 옛 값을 아래에 쉼표로 둡니다. 이미 받은 웹훅의 재처리가 옛 값으로 검증됩니다(EC:E20).', 'PORTONE_WEBHOOK_PREVIOUS_SECRETS=', '# 비워 두면 https://api.portone.io. 로컬 목·샌드박스 호스트를 쓸 때만 채웁니다.', 'PORTONE_API_BASE='],
 };
 
 export interface GenerateEnvExampleOptions {

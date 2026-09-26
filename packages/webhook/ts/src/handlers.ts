@@ -220,6 +220,21 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
           await lifecycle.onRenewalPaid({ sub, payment, policy, ledger: scopedLedger, repo, clock });
         });
       }
+    } else if (payment.kind === 'subscription' && payment.subscriptionId) {
+      // EC:A45 — a self-scheduled renewal's own payment (PortOne sends Transaction.Paid for the charge
+      // our scheduler made; the event names no subscription). It completes that renewal, never a top-up.
+      if (payment.status !== 'succeeded') {
+        throw new PaymentKitError('Renewal payment has not succeeded', 'renewal_payment_not_succeeded', { paymentId: payment.id, status: payment.status });
+      }
+      const stored = await repo.payments.get(payment.id);
+      if (stored && stored.status === 'pending') await repo.payments.put({ ...stored, status: 'succeeded', providerRef: payment.providerRef, amount: payment.amount, failure: null });
+      if (lifecycle) {
+        await retryOnVersionConflict(async () => {
+          const sub = await repo.subscriptions.get(payment.subscriptionId as string);
+          if (!sub) return markUnknownProviderRef('subscription', payment.subscriptionId as string, ctx.provider.name);
+          await lifecycle.onRenewalPaid({ sub, payment, policy, ledger: scopedLedger, repo, clock });
+        });
+      }
     } else if (credits) {
       // EC:E19 — only money that arrived buys credits: the status re-fetched from the provider must be
       // 'succeeded' (a forged or early notification, a pending virtual account, or a payment refunded

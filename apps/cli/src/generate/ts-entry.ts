@@ -44,7 +44,7 @@ function providerConstructionTs(config: PaykitConfig): string {
     lines.push(`  providers.toss = new TossProvider({ secretKey: env.TOSS_SECRET_KEY, clientKey: env.TOSS_CLIENT_KEY, allowedWebhookIps: (env.TOSS_WEBHOOK_ALLOWED_IPS ?? '').split(',').map((ip: string) => ip.trim()).filter(Boolean), logger });`);
   }
   if (config.providers.includes('portone')) {
-    lines.push(`  providers.portone = new PortoneProvider({ apiSecret: env.PORTONE_API_SECRET, storeId: env.PORTONE_STORE_ID, webhookSecret: env.PORTONE_WEBHOOK_SECRET, previousWebhookSecrets: (env.PORTONE_WEBHOOK_PREVIOUS_SECRETS ?? '').split(',').map((v: string) => v.trim()).filter(Boolean), logger });`);
+    lines.push(`  providers.portone = new PortoneProvider({ apiSecret: env.PORTONE_API_SECRET, storeId: env.PORTONE_STORE_ID, webhookSecret: env.PORTONE_WEBHOOK_SECRET, scheduling: 'self', ...(env.PORTONE_API_BASE ? { apiBase: env.PORTONE_API_BASE } : {}), previousWebhookSecrets: (env.PORTONE_WEBHOOK_PREVIOUS_SECRETS ?? '').split(',').map((v: string) => v.trim()).filter(Boolean), logger });`);
   }
   return lines.join('\n');
 }
@@ -63,9 +63,9 @@ export function generateIndexTs(config: PaykitConfig): string {
   const hasSubscription = config.models.includes('subscription');
   const hasUsage = config.models.includes('usage') || config.goods.includes('usage_quota');
   // Toss has no native subscriptions and is always self-scheduled. Portone follows
-  // infra.scheduler (defaults to provider-side V2 schedule API).
+  // EC:A43 — Toss and PortOne are both self-scheduled: our cron charges the billing key each period.
   const selfSchedulingProviders = config.providers.filter(
-    (pr) => pr === 'toss' || (pr === 'portone' && config.infra.scheduler === 'self'),
+    (pr) => pr === 'toss' || pr === 'portone', // EC:A43 — PortOne renews through the kit's scheduler
   );
   const hasSelfScheduler = hasSubscription && selfSchedulingProviders.length > 0;
   const hasReservations = hasCredits && config.reservations === true; // EC:C10
@@ -116,7 +116,7 @@ export function generateIndexTs(config: PaykitConfig): string {
   if (config.providers.includes('stripe')) { l.push(`  STRIPE_SECRET_KEY: string;`); l.push(`  STRIPE_WEBHOOK_SECRET: string;`); l.push(`  STRIPE_WEBHOOK_PREVIOUS_SECRETS?: string; // comma list, secrets being rotated out (EC:E20)`); }
   if (config.providers.includes('polar')) { l.push(`  POLAR_ACCESS_TOKEN: string;`); l.push(`  POLAR_WEBHOOK_SECRET: string;`); l.push(`  POLAR_WEBHOOK_PREVIOUS_SECRETS?: string; // comma list, secrets being rotated out (EC:E20)`); }
   if (config.providers.includes('toss')) { l.push(`  TOSS_SECRET_KEY: string;`); l.push(`  TOSS_CLIENT_KEY: string;`); l.push(`  TOSS_WEBHOOK_ALLOWED_IPS?: string; // comma list; empty refuses every Toss webhook (EC:E19)`); }
-  if (config.providers.includes('portone')) { l.push(`  PORTONE_API_SECRET: string;`); l.push(`  PORTONE_STORE_ID: string;`); l.push(`  PORTONE_WEBHOOK_SECRET: string;`); l.push(`  PORTONE_WEBHOOK_PREVIOUS_SECRETS?: string; // comma list, secrets being rotated out (EC:E20)`); }
+  if (config.providers.includes('portone')) { l.push(`  PORTONE_API_SECRET: string;`); l.push(`  PORTONE_STORE_ID: string;`); l.push(`  PORTONE_WEBHOOK_SECRET: string;`); l.push(`  PORTONE_WEBHOOK_PREVIOUS_SECRETS?: string; // comma list, secrets being rotated out (EC:E20)`); l.push(`  PORTONE_API_BASE?: string; // local mock / sandbox host; empty = https://api.portone.io`); }
   if (config.infra.notify.email === 'resend') { l.push(`  RESEND_API_KEY: string;`); l.push(`  RESEND_FROM_EMAIL: string;`); l.push(`  RESEND_TO_EMAIL: string; // fallback recipient when a notification has no per-customer email`); }
   if (config.infra.notify.email === 'smtp') { l.push(`  SMTP_HOST: string; SMTP_PORT: string; SMTP_USER: string; SMTP_PASS: string; SMTP_FROM_EMAIL: string;`); l.push(`  SMTP_TO_EMAIL: string; // fallback recipient when a notification has no per-customer email`); }
   if (config.infra.notify.slack) l.push(`  SLACK_WEBHOOK_URL: string;`);
@@ -270,6 +270,8 @@ export function generateIndexTs(config: PaykitConfig): string {
       l.push(`    // EC:C11 — an unpaid subscription (paused, incomplete) spends nothing; canceled/expired keep bought credits.`);
       l.push(`    const sub = await currentSubscription(input.customerId);`);
       l.push(`    if (sub && INACTIVE_SUBSCRIPTION_STATUSES.includes(sub.status)) throw new PaymentKitError(\`subscription \${sub.id} is \${sub.status}\`, 'subscription_inactive');`);
+      l.push(`    // EC:A44 — policy.dunning.usageDuringGrace = 'block' stops spending while a renewal is unpaid.`);
+      l.push(`    if (sub && sub.status === 'past_due' && policy.dunning.usageDuringGrace === 'block') throw new PaymentKitError(\`subscription \${sub.id} is past due\`, 'grace_usage_blocked');`);
     }
     l.push(`    return consumeCredits({ ...input, policy, ledger: full.ledger, clock: full.clock });`);
     l.push(`  }`);
@@ -296,6 +298,9 @@ export function generateIndexTs(config: PaykitConfig): string {
       l.push(`    // EC:C11 — the subscription is passed so a paused/incomplete/canceled/expired one is refused.`);
       l.push(`    reserve: async (input: { customerId: string; jobId: string; amount: number; subscriptionId?: string }) => {`);
       l.push(`      const sub = input.subscriptionId ? await full.repo.subscriptions.get(input.subscriptionId) : await currentSubscription(input.customerId);`);
+      l.push(`      // EC:A44 — only the customer's own subscription counts; grace blocks spending when the policy says so.`);
+      l.push(`      if (sub && sub.customerId !== input.customerId) throw new PaymentKitError('subscription does not belong to this customer', 'subscription_not_owned');`);
+      l.push(`      if (sub && sub.status === 'past_due' && policy.dunning.usageDuringGrace === 'block') throw new PaymentKitError(\`subscription \${sub.id} is past due\`, 'grace_usage_blocked');`);
       l.push(`      return reserveBudget({ customerId: input.customerId, jobId: input.jobId, amount: input.amount, sub: sub ?? undefined, policy, ledger: full.ledger, clock: full.clock });`);
       l.push(`    },`);
     } else {
@@ -379,7 +384,7 @@ export function generateIndexTs(config: PaykitConfig): string {
   }
   if (hasSelfScheduler) {
     l.push(`    schedulerTick: async () => {`);
-    l.push(`      // self-scheduling providers: ${selfSchedulingProviders.join(', ')} (Toss is always self; Portone follows infra.scheduler).`);
+    l.push(`      // self-scheduling providers: ${selfSchedulingProviders.join(', ')} (EC:A43: Toss and PortOne always self).`);
     l.push(`      const selfSchedulingProviders: ProviderName[] = [${selfSchedulingProviders.map((p) => `'${p}'`).join(', ')}];`);
     l.push(`      const charged: Subscription[] = [];`);
     l.push(`      const failed: Subscription[] = [];`);

@@ -81,7 +81,7 @@ export function emptyConfig(): PaykitConfig {
       notify: { email: 'none', slack: false },
       // Toss 는 네이티브 구독이 없어 항상 self 로 동작 (이 필드와 무관). Portone 은 이 필드를
       // 따르며 기본값은 provider 측 스케줄 (V2 schedule API).
-      scheduler: 'provider',
+      scheduler: 'self',
       // database 가 항상 'postgres' 라 기본값도 postgres — CS 는 결제 실패에 대한 지원이 제품이라
       // 증거 트레일이 없으면 조사가 안 된다 (docs/EDGE_CASES.md §L 배경 설명 참고).
       logging: 'postgres',

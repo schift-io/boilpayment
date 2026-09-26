@@ -270,7 +270,9 @@ class PortoneProviderConfig:
     # EC:E20 -- secrets being rotated out; a stored webhook signed with one still re-verifies.
     previous_webhook_secrets: list[str] | None = None
     channel_key: str | None = None
-    scheduling: Literal["provider", "self"] = "provider"
+    # EC:A43 -- "self" (default): the kit's scheduler charges the billing key each period. "provider"
+    # leaves renewals to PortOne's schedule API; the app must call schedule_payment and route the webhook.
+    scheduling: Literal["provider", "self"] = "self"
     # Override the API host, e.g. the local mock: "http://127.0.0.1:12212". Only used when
     # no explicit `client` is passed to PortoneProvider(). Defaults to https://api.portone.io.
     api_base: str | None = None

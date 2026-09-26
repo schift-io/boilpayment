@@ -15,12 +15,12 @@ function ts(config: PaykitConfig): boolean {
 function py(config: PaykitConfig): boolean {
   return config.languages.includes('py');
 }
-/** Providers we must charge ourselves on a schedule (Toss always; PortOne when infra.scheduler=self). */
+/** Providers we must charge ourselves on a schedule (EC:A43: Toss and PortOne). */
 function selfScheduled(config: PaykitConfig): string[] {
   if (!config.models.includes('subscription')) return [];
   const out: string[] = [];
   if (config.providers.includes('toss')) out.push('toss');
-  if (config.providers.includes('portone') && config.infra.scheduler === 'self') out.push('portone');
+  if (config.providers.includes('portone')) out.push('portone');
   return out;
 }
 /** Providers whose payment is started by a client-side widget and confirmed server-side. */

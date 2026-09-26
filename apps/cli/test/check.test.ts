@@ -49,9 +49,9 @@ describe('computeWarnings', () => {
     expect(computeWarnings(config, {}).map((w) => w.code)).toContain('F(Toss/Portone self)');
   });
 
-  it('F(Toss/Portone self): portone only warns when infra.scheduler=self', () => {
-    const providerOnly = cleanConfig({ providers: ['portone'], infra_scheduler: 'provider' });
-    expect(computeWarnings(providerOnly, {}).map((w) => w.code)).not.toContain('F(Toss/Portone self)');
+  it('F(Toss/Portone self) [EC:A43]: portone always warns to run schedulerTick, whatever an old config says', () => {
+    const oldConfig = cleanConfig({ providers: ['portone'], infra_scheduler: 'provider' });
+    expect(computeWarnings(oldConfig, {}).map((w) => w.code)).toContain('F(Toss/Portone self)');
     const selfScheduled = cleanConfig({ providers: ['portone'], infra_scheduler: 'self' });
     expect(computeWarnings(selfScheduled, {}).map((w) => w.code)).toContain('F(Toss/Portone self)');
   });

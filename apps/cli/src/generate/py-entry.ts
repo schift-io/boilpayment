@@ -31,7 +31,7 @@ function providerConstructionPy(config: PaykitConfig): string[] {
   if (config.providers.includes('polar')) lines.push(`    providers["polar"] = PolarProvider(access_token=_env(env, "POLAR_ACCESS_TOKEN"), webhook_secret=_env(env, "POLAR_WEBHOOK_SECRET"), previous_webhook_secrets=[v.strip() for v in (env.get("POLAR_WEBHOOK_PREVIOUS_SECRETS") or "").split(",") if v.strip()], logger=logger)`);
   // EC:E19 — no allowlist means every Toss webhook is refused at receipt (fail closed).
   if (config.providers.includes('toss')) lines.push(`    providers["toss"] = TossProvider(TossProviderConfig(secret_key=_env(env, "TOSS_SECRET_KEY"), client_key=_env(env, "TOSS_CLIENT_KEY"), allowed_webhook_ips=[ip.strip() for ip in (env.get("TOSS_WEBHOOK_ALLOWED_IPS") or "").split(",") if ip.strip()], logger=logger))`);
-  if (config.providers.includes('portone')) lines.push(`    providers["portone"] = PortoneProvider(PortoneProviderConfig(api_secret=_env(env, "PORTONE_API_SECRET"), store_id=_env(env, "PORTONE_STORE_ID"), webhook_secret=_env(env, "PORTONE_WEBHOOK_SECRET"), previous_webhook_secrets=[v.strip() for v in (env.get("PORTONE_WEBHOOK_PREVIOUS_SECRETS") or "").split(",") if v.strip()], logger=logger))`);
+  if (config.providers.includes('portone')) lines.push(`    providers["portone"] = PortoneProvider(PortoneProviderConfig(api_secret=_env(env, "PORTONE_API_SECRET"), store_id=_env(env, "PORTONE_STORE_ID"), webhook_secret=_env(env, "PORTONE_WEBHOOK_SECRET"), scheduling="self", api_base=env.get("PORTONE_API_BASE") or None, previous_webhook_secrets=[v.strip() for v in (env.get("PORTONE_WEBHOOK_PREVIOUS_SECRETS") or "").split(",") if v.strip()], logger=logger))`);
   return lines;
 }
 
@@ -51,7 +51,7 @@ export function generateIndexPy(config: PaykitConfig): string {
   const hasReports = config.reports === true; // EC:I10
   const hasUsage = config.models.includes('usage') || config.goods.includes('usage_quota');
   const selfSchedulingProviders = config.providers.filter(
-    (pr) => pr === 'toss' || (pr === 'portone' && config.infra.scheduler === 'self'),
+    (pr) => pr === 'toss' || pr === 'portone', // EC:A43 — PortOne renews through the kit's scheduler
   );
   const hasSelfScheduler = hasSubscription && selfSchedulingProviders.length > 0;
 
@@ -340,6 +340,9 @@ export function generateIndexPy(config: PaykitConfig): string {
       l.push(`        sub = await current_subscription(kwargs["customer_id"])`);
       l.push(`        if sub is not None and sub.status in ("paused", "incomplete"):  # INACTIVE_SUBSCRIPTION_STATUSES`);
       l.push(`            raise PaymentKitError(f"subscription {sub.id} is {sub.status}", "subscription_inactive")`);
+      l.push(`        # EC:A44 — policy.dunning.usage_during_grace = 'block' stops spending while a renewal is unpaid.`);
+      l.push(`        if sub is not None and sub.status == "past_due" and policy.dunning.usage_during_grace == "block":`);
+      l.push(`            raise PaymentKitError(f"subscription {sub.id} is past due", "grace_usage_blocked")`);
     }
     l.push(`        return await consume_credits(ConsumeCreditsInput(policy=policy, ledger=ledger, clock=clock, **kwargs))`);
   } else {
@@ -428,7 +431,7 @@ export function generateIndexPy(config: PaykitConfig): string {
   l.push('');
   l.push(`    async def _cron_scheduler_tick():`);
   if (hasSelfScheduler) {
-    l.push(`        # self-scheduling providers: ${selfSchedulingProviders.join(', ')} (Toss is always self; Portone follows infra.scheduler).`);
+    l.push(`        # self-scheduling providers: ${selfSchedulingProviders.join(', ')} (EC:A43: Toss and PortOne always self).`);
     l.push(`        self_scheduling_providers = [${selfSchedulingProviders.map((p) => `"${p}"`).join(', ')}]`);
     l.push(`        charged = []`);
     l.push(`        failed = []`);
@@ -443,7 +446,7 @@ export function generateIndexPy(config: PaykitConfig): string {
     l.push(`            errors.extend({"subscription_id": e.subscription_id, "code": e.code, "message": e.message} for e in result.errors)`);
     l.push(`            # EC:A34 -- due dunning retries charge through the same per-period attempt records as the tick.`);
     l.push(`            for item in await dunning.retry_due(dunning.RetryDueInput(repo=repo, clock=clock)):`);
-    l.push(`                sub = await repo.subscriptions.get(item.payload["subscription_id"])`);
+    l.push(`                sub = await repo.subscriptions.get(item.payload.get("subscriptionId", item.payload.get("subscription_id")))`);
     l.push(`                if sub is None or sub.provider != name:`);
     l.push(`                    continue`);
     l.push(`                try:`);

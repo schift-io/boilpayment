@@ -347,6 +347,30 @@ def default_handlers(
                     )
 
                 await _retry_on_version_conflict(_attempt)
+        elif payment.kind == "subscription" and payment.subscription_id:
+            # EC:A45 -- a self-scheduled renewal's own payment (PortOne Transaction.Paid for the charge our
+            # scheduler made; the event names no subscription). It completes that renewal, never a top-up.
+            if payment.status != "succeeded":
+                raise PaymentKitError(
+                    "Renewal payment has not succeeded", "renewal_payment_not_succeeded",
+                    {"payment_id": payment.id, "status": payment.status},
+                )
+            stored = await repo.payments.get(payment.id)
+            if stored is not None and stored.status == "pending":
+                await repo.payments.put(dataclasses.replace(
+                    stored, status="succeeded", provider_ref=payment.provider_ref, amount=payment.amount, failure=None,
+                ))
+            if lifecycle is not None:
+                async def _renew(sub_id: str = payment.subscription_id) -> None:
+                    sub = await repo.subscriptions.get(sub_id)
+                    if sub is None:
+                        await mark_unknown_provider_ref("subscription", sub_id, ctx.provider.name)
+                        return
+                    await lifecycle.on_renewal_paid(
+                        sub=sub, payment=payment, policy=policy, ledger=scoped_ledger, repo=repo, clock=clock,
+                    )
+
+                await _retry_on_version_conflict(_renew)
         elif credits is not None:
             # EC:E19 -- only money that arrived buys credits: the status re-fetched from the provider
             # must be 'succeeded' (a forged or early notification, a pending virtual account, or a

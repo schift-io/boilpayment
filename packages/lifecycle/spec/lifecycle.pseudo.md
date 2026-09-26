@@ -675,3 +675,13 @@ tick: past_due + cancelAtPeriodEnd + period over -> canceled                    
 tick: scheduler's own attempt (renewal key) declines on a past_due sub (fresh) -> onPaymentFailed once  # EC:A41
 dunning outbox payload = { subscriptionId, attempt, dueAt } in both kits; Python reads subscription_id too  # EC:A42
 ```
+
+## [EC:A43] PortOne renewals: always self-scheduled
+
+PortOne renewals: scheduling 'self' (adapter default) -> the same tick/dunning path as Toss.
+EC:A44 (cli) — generated consume/reserve: past_due + usageDuringGrace 'block' -> grace_usage_blocked;
+               reserve with another customer's subscriptionId -> subscription_not_owned.
+EC:A45 (webhook) — payment.succeeded with no subscriptionRef whose local row is kind 'subscription' ->
+               renewal of row.subscriptionId (row recorded succeeded, onRenewalPaid), never top-up.
+EC:A46 (cs) — recoverMissingGrants skips failed rows and pending attempt rows; an open needs_human case is
+               returned again without a new notice.
