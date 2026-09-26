@@ -32,7 +32,7 @@ function integer(value: unknown): number {
 function price(value: unknown): PlanPrice {
   if (!record(value)) throw new PaymentKitError('invalid purchase price', 'purchase_snapshot_invalid');
   const providerPriceRefs: Partial<Record<ProviderName, string>> = {};
-  if (record(value.providerPriceRefs)) for (const provider of ['stripe', 'polar', 'toss', 'portone'] as const) {
+  if (record(value.providerPriceRefs)) for (const provider of ['stripe', 'polar', 'toss', 'portone', 'apple', 'google_play'] as const) {
     const ref = value.providerPriceRefs[provider];
     if (typeof ref === 'string') providerPriceRefs[provider] = ref;
   }
@@ -41,7 +41,7 @@ function price(value: unknown): PlanPrice {
 export function parseCheckoutSnapshot(value: unknown): CheckoutSnapshot {
   if (!record(value) || !record(value.plan) || !Array.isArray(value.plan.prices)) throw new PaymentKitError('purchase snapshot is missing', 'purchase_snapshot_invalid');
   const provider = value.provider;
-  if (provider !== 'stripe' && provider !== 'polar' && provider !== 'toss' && provider !== 'portone') throw new PaymentKitError('invalid purchase provider', 'purchase_snapshot_invalid');
+  if (provider !== 'stripe' && provider !== 'polar' && provider !== 'toss' && provider !== 'portone' && provider !== 'apple' && provider !== 'google_play') throw new PaymentKitError('invalid purchase provider', 'purchase_snapshot_invalid');
   const interval = value.plan.interval;
   if (interval !== null && interval !== 'month' && interval !== 'year') throw new PaymentKitError('invalid purchase interval', 'purchase_snapshot_invalid');
   const plan: Plan = { id: text(value.plan.id), name: text(value.plan.name), interval,

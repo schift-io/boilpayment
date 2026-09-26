@@ -17,6 +17,7 @@ MODULE_FILES: dict[str, str] = {
     "webhook": "0004_webhook.sql",
     "refund": "0005_refund.sql",
     "cs": "0006_cs.sql",
+    "iap": "0008_iap.sql",  # EC:N1 -- only for projects with an in-app purchase store
 }
 
 _PKG_DIR = Path(__file__).resolve().parent
@@ -44,10 +45,14 @@ class MigrationFile:
         self.sql = sql
 
 
+# Modules applied only when asked for by name (EC:N1): a default migrate() keeps its schema.
+OPT_IN_MODULES: tuple[str, ...] = ("iap",)
+
+
 def load_migrations(modules: list[str] | None = None) -> list[MigrationFile]:
     """Loads the .sql text for the requested modules (default: all), always including
     0001_core.sql since every other module's tables FK into customers/subscriptions/payments."""
-    wanted = set(modules) if modules else set(MODULE_FILES.keys())
+    wanted = set(modules) if modules else {m for m in MODULE_FILES if m not in OPT_IN_MODULES}
     wanted.add("core")
     wanted_files = {file for mod, file in MODULE_FILES.items() if mod in wanted}
     wanted_files.add("0007_subscription_provider_ref_nullable.sql")

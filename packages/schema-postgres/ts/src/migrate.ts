@@ -17,6 +17,7 @@ export const MODULE_FILES: Record<string, string> = {
   webhook: '0004_webhook.sql',
   refund: '0005_refund.sql',
   cs: '0006_cs.sql',
+  iap: '0008_iap.sql', // EC:N1 — only for projects with an in-app purchase store
 };
 
 export interface MigrationFile {
@@ -28,8 +29,11 @@ export interface MigrationFile {
  * since every other module's tables FK into customers/subscriptions/payments. Sorted by filename
  * so base modules and subsequent core updates always apply in order. Used both by migrate() and by apps/cli to copy files into a
  * generated project's paykit/migrations/ without needing a live DB connection. */
+/** Modules applied only when asked for by name (EC:N1): a default `migrate()` keeps its schema. */
+export const OPT_IN_MODULES: readonly string[] = ['iap'];
+
 export function loadMigrations(modules?: string[]): MigrationFile[] {
-  const wanted = modules && modules.length ? new Set(modules) : new Set(Object.keys(MODULE_FILES));
+  const wanted = modules && modules.length ? new Set(modules) : new Set(Object.keys(MODULE_FILES).filter((m) => !OPT_IN_MODULES.includes(m)));
   wanted.add('core');
   const files = readdirSync(SQL_DIR)
     .filter((f) => f.endsWith('.sql'))

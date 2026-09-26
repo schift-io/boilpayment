@@ -69,7 +69,7 @@ def _number(value: JsonValue) -> int:
 
 def _provider(value: JsonValue) -> ProviderName:
     match value:
-        case "stripe" | "polar" | "toss" | "portone":
+        case "stripe" | "polar" | "toss" | "portone" | "apple" | "google_play":
             return value
         case _:
             raise PaymentKitError(

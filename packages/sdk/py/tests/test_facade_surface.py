@@ -13,7 +13,7 @@ SUBMODULES = {
     "core": "core", "credits": "credits", "lifecycle": "lifecycle", "refund": "refund",
     "usage": "usage", "webhook": "webhook", "notify": "notify", "cs": "cs",
     "postgres": "schema_postgres", "stripe": "stripe", "toss": "toss",
-    "portone": "portone", "polar": "polar",
+    "portone": "portone", "polar": "polar", "apple": "apple", "google_play": "google_play",
 }
 
 

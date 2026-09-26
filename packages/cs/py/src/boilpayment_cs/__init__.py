@@ -78,6 +78,12 @@ from .settlement_report import (
     SettlementReport,
     settlement_report,
 )
+from .store_purchase import (  # EC:N1
+    RegisterStorePurchaseInput,
+    StorePurchaseResult,
+    reack_store_purchases,
+    register_store_purchase,
+)
 from .support import SupportDeps, SupportPaymentInput, resolve_topup_credits
 from .timeline import (
     TimelineEvent,
@@ -128,6 +134,7 @@ __all__ = [
     "RefundExecuteFn",
     "RefundLine",
     "RegisterCompletedCheckoutInput",
+    "RegisterStorePurchaseInput",
     "RegrantInput",
     "RegrantPlan",
     "RejectInput",
@@ -135,6 +142,7 @@ __all__ = [
     "ResolveInput",
     "SettlementReport",
     "StartCheckoutInput",
+    "StorePurchaseResult",
     "SubmitInput",
     "SubmitResult",
     "SupportDeps",
@@ -160,11 +168,13 @@ __all__ = [
     "export_customer",
     "finish_refund_cases",
     "open_case",
+    "reack_store_purchases",
     "reconcile",
     "recover_missing_grant",
     "recover_missing_grants",
     "refund_assist",
     "register_completed_checkout",
+    "register_store_purchase",
     "regrant",
     "reject",
     "request_refund",

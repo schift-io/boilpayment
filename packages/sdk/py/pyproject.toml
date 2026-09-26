@@ -21,6 +21,8 @@ dependencies = [
   "boilpayment-toss==0.1.0",
   "boilpayment-portone==0.1.0",
   "boilpayment-polar==0.1.0",
+  "boilpayment-apple==0.1.0",
+  "boilpayment-google-play==0.1.0",
 ]
 classifiers = [
   "Development Status :: 3 - Alpha",

@@ -82,6 +82,9 @@ const REQUIRED_ENV: Record<ProviderName, string[]> = {
   toss: ['TOSS_SECRET_KEY'],
   portone: ['PORTONE_API_SECRET', 'PORTONE_STORE_ID', 'PORTONE_WEBHOOK_SECRET'],
   polar: ['POLAR_ACCESS_TOKEN', 'POLAR_WEBHOOK_SECRET'],
+  // EC:N1 — store purchases happen on a device; `live` cannot buy one and reports SKIP (see below).
+  apple: ['APPLE_BUNDLE_ID', 'APPLE_ISSUER_ID', 'APPLE_KEY_ID', 'APPLE_PRIVATE_KEY'],
+  google_play: ['GOOGLE_PLAY_PACKAGE_NAME', 'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON'],
 };
 
 function missingEnv(provider: ProviderName, env: Record<string, string | undefined>): string[] {
@@ -727,6 +730,10 @@ export async function runLive(outDir: string, parsed: ParsedArgv): Promise<void>
         break;
       case 'polar':
         await runPolar(env, config, r, dryRun);
+        break;
+      case 'apple':
+      case 'google_play':
+        r.record('SKIP', providerName, 'all steps', 'in-app purchases happen on a device; use the sandbox tester flow in INTEGRATION.md (EC:N1)');
         break;
     }
     console.log('');

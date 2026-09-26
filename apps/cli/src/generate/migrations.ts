@@ -16,6 +16,7 @@ const MODULE_FILES: { file: string; when: (c: PaykitConfig) => boolean }[] = [
   { file: '0005_refund.sql', when: () => true },
   { file: '0006_cs.sql', when: () => true },
   { file: '0007_subscription_provider_ref_nullable.sql', when: () => true },
+  { file: '0008_iap.sql', when: (c) => c.providers.some((p) => p === 'apple' || p === 'google_play') }, // EC:N1
 ];
 
 async function dirHasSqlFiles(dir: string): Promise<boolean> {

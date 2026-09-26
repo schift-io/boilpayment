@@ -42,6 +42,8 @@ export type { RecoverMissingGrantInput, RecoverMissingGrantsInput, SupportGrants
 export { resolveTopupCredits } from './support.js';
 export type { SupportDeps, SupportPaymentInput } from './support.js';
 export { startCheckout, registerCompletedCheckout } from './checkoutSupport.js';
+export { registerStorePurchase, reackStorePurchases } from './storePurchase.js'; // EC:N1
+export type { RegisterStorePurchaseInput, StorePurchaseResult } from './storePurchase.js';
 export type { StartCheckoutInput, RegisterCompletedCheckoutInput } from './checkoutSupport.js';
 export { applyPurchasedGrant } from './applyPurchasedGrant.js';
 export type { ApplyPurchasedGrantInput } from './applyPurchasedGrant.js';

@@ -1,7 +1,7 @@
 {
   "name": "boilpayment-sdk",
   "version": "0.1.0",
-  "description": "boilpayment — single-install facade re-exporting every boilpayment-* package via subpaths",
+  "description": "boilpayment \u2014 single-install facade re-exporting every boilpayment-* package via subpaths",
   "license": "MIT",
   "keywords": [
     "schift",
@@ -71,6 +71,14 @@
       "types": "./dist/polar.d.ts",
       "import": "./dist/polar.js"
     },
+    "./apple": {
+      "types": "./dist/apple.d.ts",
+      "import": "./dist/apple.js"
+    },
+    "./google-play": {
+      "types": "./dist/google-play.d.ts",
+      "import": "./dist/google-play.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -99,7 +107,9 @@
     "boilpayment-stripe": "workspace:*",
     "boilpayment-toss": "workspace:*",
     "boilpayment-portone": "workspace:*",
-    "boilpayment-polar": "workspace:*"
+    "boilpayment-polar": "workspace:*",
+    "boilpayment-apple": "workspace:*",
+    "boilpayment-google-play": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

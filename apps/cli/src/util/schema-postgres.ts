@@ -12,6 +12,7 @@ export function modulesFor(config: PaykitConfig): string[] {
   if (config.goods.includes('credits')) mods.push('credits');
   if (config.models.includes('usage') || config.goods.includes('usage_quota')) mods.push('usage');
   mods.push('cs');
+  if (config.providers.some((p) => p === 'apple' || p === 'google_play')) mods.push('iap'); // EC:N1
   return mods;
 }
 

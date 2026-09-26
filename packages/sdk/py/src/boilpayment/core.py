@@ -2,6 +2,7 @@
 helpers, idempotency helpers, in-memory reference implementations, logging). This is also
 re-exported in full from the package root (boilpayment).
 """
+
 from __future__ import annotations
 
 from boilpayment_core import (
@@ -35,6 +36,7 @@ from boilpayment_core import (
     DunningPolicy,
     ExpiringBucket,
     FixedClock,
+    IapSettings,
     IdGen,
     InMemoryLedger,
     InMemoryRepo,
@@ -79,6 +81,8 @@ from boilpayment_core import (
     RetentionPolicy,
     RunIdempotentResult,
     SequentialIdGen,
+    StoreProof,
+    StorePurchaseProvider,
     Subscription,
     SubscriptionPolicy,
     SystemClock,
@@ -89,6 +93,7 @@ from boilpayment_core import (
     UsageEvent,
     UsagePolicy,
     UuidIdGen,
+    VerifiedStorePurchase,
     WebhookEventRecord,
     WebhookSignatureError,
     add_money,
@@ -102,9 +107,13 @@ from boilpayment_core import (
     deserialize_subscription,
     elapsed_ratio,
     hash_payload,
+    iap_settings_from_dict,
     idempotent,
+    is_store_purchase_provider,
     logger,
     memory,
+    minor_units_from_decimal,
+    minor_units_from_milliunits,
     money,
     mul_money_ratio,
     next_period,
@@ -122,6 +131,8 @@ from boilpayment_core import (
     serialize_refund,
     serialize_subscription,
     stable_stringify,
+    store,
+    store_account_token,
     types,
     validate_policy,
 )
@@ -157,6 +168,7 @@ __all__ = [
     "DunningPolicy",
     "ExpiringBucket",
     "FixedClock",
+    "IapSettings",
     "IdGen",
     "InMemoryLedger",
     "InMemoryRepo",
@@ -201,6 +213,8 @@ __all__ = [
     "RetentionPolicy",
     "RunIdempotentResult",
     "SequentialIdGen",
+    "StoreProof",
+    "StorePurchaseProvider",
     "Subscription",
     "SubscriptionPolicy",
     "SystemClock",
@@ -211,6 +225,7 @@ __all__ = [
     "UsageEvent",
     "UsagePolicy",
     "UuidIdGen",
+    "VerifiedStorePurchase",
     "WebhookEventRecord",
     "WebhookSignatureError",
     "add_money",
@@ -224,9 +239,13 @@ __all__ = [
     "deserialize_subscription",
     "elapsed_ratio",
     "hash_payload",
+    "iap_settings_from_dict",
     "idempotent",
+    "is_store_purchase_provider",
     "logger",
     "memory",
+    "minor_units_from_decimal",
+    "minor_units_from_milliunits",
     "money",
     "mul_money_ratio",
     "next_period",
@@ -244,6 +263,8 @@ __all__ = [
     "serialize_refund",
     "serialize_subscription",
     "stable_stringify",
+    "store",
+    "store_account_token",
     "types",
     "validate_policy",
 ]

@@ -14,9 +14,54 @@ from boilpayment_core import (
 from .process import HandlerCtx
 
 
+async def _store_refund_event(ctx: HandlerCtx, notifier: Notifier) -> NormalizedEvent:
+    """EC:N6 -- store refunds (Google voided purchases) carry no amount, and one-time voids no
+    productId (`p|?|<token>`). Resolve both from the local payment; quantity-based partial voids
+    need a person."""
+    event = ctx.event
+
+    async def fail(reason: str) -> NormalizedEvent:
+        await notifier.send(
+            Notification(
+                type="reconcile.mismatch",
+                customer_id=None,
+                payload={"provider": ctx.provider.name, "eventId": event.id, "reason": reason},
+            )
+        )
+        raise PaymentKitError(reason, "refund_reconciliation_required")
+
+    payment_ref = event.payment_ref
+    if payment_ref and payment_ref.startswith("p|?|"):
+        token = payment_ref[4:]
+        matches = [
+            p
+            for p in await ctx.repo.payments.list(provider=ctx.provider.name)
+            if p.provider_ref.endswith(f"|{token}")
+        ]
+        if len(matches) != 1:
+            return await fail("store refund could not be matched to one local payment")
+        payment_ref = matches[0].provider_ref
+    if event.amount is not None:
+        return replace(event, payment_ref=payment_ref)
+    raw = event.raw if isinstance(event.raw, dict) else {}
+    voided = raw.get("voidedPurchaseNotification") or {}
+    if voided.get("refundType") == 2:
+        return await fail("quantity-based partial store refund needs review")
+    payments = (
+        await ctx.repo.payments.list(provider=ctx.provider.name, provider_ref=payment_ref)
+        if payment_ref
+        else []
+    )
+    if not payments:
+        return await fail("store refund payment was not found")
+    return replace(event, payment_ref=payment_ref, amount=payments[0].amount)
+
+
 async def authoritative_refund_event(
     ctx: HandlerCtx, notifier: Notifier
 ) -> NormalizedEvent:
+    if getattr(ctx.provider.capabilities(), "checkout", "hosted") == "on_device":
+        return await _store_refund_event(ctx, notifier)
     if ctx.provider.name not in ("toss", "portone"):
         return ctx.event
     refund_ref = ctx.event.refund_ref
