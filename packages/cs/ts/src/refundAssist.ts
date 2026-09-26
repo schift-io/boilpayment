@@ -3,7 +3,7 @@
 // (same shapes as refund.evaluate/refund.execute) so `cs` stays decoupled from `refund`'s package tree.
 import {
   Clock, CsCase, IdGen, LedgerStore, Notifier, Payment, PaymentProvider, Policy, Refund, RefundDecision,
-  Repo, Subscription, deserializeCsCase, runIdempotent, serializeCsCase,
+  RefundReasonCategory, Repo, Subscription, deserializeCsCase, runIdempotent, serializeCsCase,
 } from 'boilpayment-core';
 import { escalate, OnCaseEvent, openCase, reject, resolve } from './cases.js';
 import { ChurnReason, record as recordChurn } from './churn.js';
@@ -12,7 +12,15 @@ import { LicenseReporter } from './metrics.js';
 export type RefundEvaluateFn = (input: {
   payment: Payment; sub?: Subscription | null; policy: Policy; ledger: LedgerStore; repo: Repo; clock: Clock;
   requestedAmount?: { amountMinor: number; currency: string } | null; providerFeeMinor?: number | null;
+  /** EC:D16 — refund reason category (+ evidence reference); policy.refund.reasons decides the effect. */
+  reason?: RefundReasonInput | null;
 }) => Promise<RefundDecision>;
+
+/** EC:D16 — same shape as refund's RefundReasonInput (cs does not import refund). */
+export interface RefundReasonInput {
+  category: RefundReasonCategory;
+  evidenceRef?: string | null;
+}
 
 export type RefundExecuteFn = (input: {
   decision: RefundDecision; provider: PaymentProvider; ledger: LedgerStore; repo: Repo; clock: Clock; ids: IdGen;
@@ -36,6 +44,8 @@ export interface RefundAssistInput {
   refundExecute: RefundExecuteFn;
   requestedAmount?: { amountMinor: number; currency: string } | null;
   providerFeeMinor?: number | null;
+  /** EC:D16 */
+  reason?: RefundReasonInput | null;
   notifier?: Notifier | null;
   churnReason?: ChurnReason | null;
   churnText?: string | null;
@@ -69,6 +79,7 @@ export async function refundAssist(input: RefundAssistInput): Promise<CsCase> {
       requestedAmount: input.requestedAmount ?? null,
       providerFeeMinor: input.providerFeeMinor ?? null,
       churnReason: input.churnReason ?? null,
+      reason: input.reason ?? null,
     },
     serialize: serializeCsCase,
     deserialize: deserializeCsCase,
@@ -80,14 +91,14 @@ export async function refundAssist(input: RefundAssistInput): Promise<CsCase> {
 async function doRefundAssist(input: RefundAssistInput): Promise<CsCase> {
   const {
     case: csCase, payment, sub, ledger, repo, clock, ids, provider, refundEvaluate, refundExecute,
-    requestedAmount, providerFeeMinor, notifier, churnReason, churnText, onCaseEvent, reporter, correlationId,
+    requestedAmount, providerFeeMinor, notifier, churnReason, churnText, onCaseEvent, reporter, correlationId, reason,
   } = input;
 
   const policy = csCase.policySnapshot;
   if (payment.customerId !== csCase.customerId) {
     return reject({ case: csCase, reason: "payment does not belong to case customer", repo, clock, onCaseEvent, reporter });
   }
-  const decision = await refundEvaluate({ payment, sub, policy, ledger, repo, clock, requestedAmount, providerFeeMinor });
+  const decision = await refundEvaluate({ payment, sub, policy, ledger, repo, clock, requestedAmount, providerFeeMinor, reason });
   if (!decision.eligible) {
     return reject({ case: csCase, reason: decision.reason, repo, clock, onCaseEvent, reporter });
   }

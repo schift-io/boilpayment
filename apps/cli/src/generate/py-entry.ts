@@ -9,7 +9,7 @@
 //   - lifecycle exports `dunning` and `scheduler` as submodules (`from . import dunning, scheduler`),
 //     so their Input dataclasses hang off the submodule object itself (`dunning.OnGraceExpiredInput(...)`).
 import type { PaykitConfig } from '../config.js';
-import { supportPy } from './support.js';
+import { hasReasonRules, supportPy } from './support.js';
 
 function providerImportsPy(config: PaykitConfig): string[] {
   const lines: string[] = [];
@@ -106,6 +106,7 @@ export function generateIndexPy(config: PaykitConfig): string {
   l.push(`    EvaluateInput,`);
   l.push(`    ExecuteInput,`);
   l.push(`    OnExternalRefundInput,`);
+  if (hasReasonRules(config)) l.push(`    RefundReasonInput,`);
   l.push(`    evaluate as evaluate_refund,`);
   l.push(`    execute as execute_refund,`);
   l.push(`    on_external_refund,`);
@@ -274,7 +275,7 @@ export function generateIndexPy(config: PaykitConfig): string {
     l.push(`    async def _resolve_topup_credits(payment):`);
     l.push(`        return await resolve_topup_credits(payment=payment, repo=repo)`);
   }
-  l.push(supportPy(hasCredits));
+  l.push(supportPy(hasCredits, hasReasonRules(config)));
   l.push(`    handlers = default_handlers(`);
   l.push(`        policy=policy, ledger=ledger, repo=repo, notifier=notifier, clock=clock, ids=ids,`);
   l.push(`        lifecycle=${hasSubscription ? '_LifecycleDeps()' : 'None'},`);

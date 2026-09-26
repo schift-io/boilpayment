@@ -1,8 +1,10 @@
-// spec/refund.pseudo.md — EC:D1 D2 D3 D4 D5 D6 D7 D10 B13 A22 B8
+// spec/refund.pseudo.md — EC:D1 D2 D3 D4 D5 D6 D7 D10 D16 B13 A22 B8
 import type {
   Clock, LedgerEntry, LedgerStore, Payment, Policy, RefundDecision, Repo, Subscription,
 } from 'boilpayment-core';
 import { applyRounding, daysBetween, prorationRatio, weightedAvgUnitPrice } from './util.js';
+import { ruleForReason } from './reason.js';
+import type { RefundReasonInput } from './reason.js';
 
 export interface EvaluateInput {
   payment: Payment;
@@ -15,6 +17,8 @@ export interface EvaluateInput {
   requestedAmount?: { amountMinor: number; currency: string } | null;
   /** D7: PG fee, unknown to us unless the caller supplies it (provider-specific). */
   providerFeeMinor?: number | null;
+  /** EC:D16 — why the customer asks; policy.refund.reasons decides what that changes. */
+  reason?: RefundReasonInput | null;
 }
 
 function ineligible(payment: Payment, subId: string | null, ruleId: string, reason: string): RefundDecision {
@@ -65,6 +69,10 @@ export async function evaluate(input: EvaluateInput): Promise<RefundDecision> {
     return ineligible(payment, subId, 'D-status', `payment status '${payment.status}' is not refundable`);
   }
 
+  // EC:D16 — reason rules (defaults 'rules' change nothing)
+  const ruling = ruleForReason(policy, input.reason);
+  if (ruling.deny) return ineligible(payment, subId, 'D16', ruling.deny);
+
   const now = clock.now();
   const daysSince = daysBetween(payment.occurredAt, now);
   const customerId = payment.customerId;
@@ -91,12 +99,14 @@ export async function evaluate(input: EvaluateInput): Promise<RefundDecision> {
   let ruleId: string;
   let reason: string;
 
-  if (daysSince <= policy.refund.noQuestionsDays) {
-    // EC:D1
+  if (ruling.full || daysSince <= policy.refund.noQuestionsDays) {
+    // EC:D1 (and EC:D16 technical_failure -> full, outside the window too)
     amountMinor = Math.max(0, payment.amount.amountMinor - alreadyRefundedMinor);
     creditsToRevoke = Math.max(0, totalGranted - alreadyRevoked);
-    ruleId = 'D1';
-    reason = `D1: no-questions window (${daysSince}/${policy.refund.noQuestionsDays}d) -> full ${amountMinor} minor, revoke ${creditsToRevoke} credits`;
+    ruleId = daysSince <= policy.refund.noQuestionsDays ? 'D1' : 'D16';
+    reason = ruleId === 'D1'
+      ? `D1: no-questions window (${daysSince}/${policy.refund.noQuestionsDays}d) -> full ${amountMinor} minor, revoke ${creditsToRevoke} credits`
+      : `D16: technical_failure -> full ${amountMinor} minor, revoke ${creditsToRevoke} credits`;
   } else {
     // EC:D2 D3 D4 B8
     const method = policy.refund.method;
@@ -149,8 +159,8 @@ export async function evaluate(input: EvaluateInput): Promise<RefundDecision> {
     }
   }
 
-  // EC:D5 — annual plan refund window
-  if (sub) {
+  // EC:D5 — annual plan refund window (a technical failure on our side is refunded regardless)
+  if (sub && !ruling.full) {
     const plan = await repo.plans.get(sub.planId);
     if (plan && plan.interval === 'year' && policy.refund.annualMethod === 'deny_after_days') {
       const limit = policy.refund.annualDenyAfterDays;
@@ -187,7 +197,8 @@ export async function evaluate(input: EvaluateInput): Promise<RefundDecision> {
   // EC:B13 — revoke shortfall
   const available = Math.max(0, (await ledger.balance(customerId, 'paid', clock.now())).available);
   if (available < creditsToRevoke) {
-    const behavior = policy.refund.revokeShortfall;
+    // EC:D16 — a full refund for our technical failure is not reduced by what the customer already used.
+    const behavior = ruling.full ? 'clamp_to_zero' : policy.refund.revokeShortfall;
     if (behavior === 'clamp_and_reduce_refund') {
       const ratio = creditsToRevoke > 0 ? available / creditsToRevoke : 1;
       amountMinor = Math.floor(amountMinor * ratio);
@@ -209,6 +220,10 @@ export async function evaluate(input: EvaluateInput): Promise<RefundDecision> {
   const currency = payment.amount.currency;
 
   let needsHuman = amountMinor > policy.cs.autoApprove.maxAmountMinor || creditsToRevoke > policy.cs.autoApprove.maxCredits;
+  if (ruling.human) {
+    needsHuman = true;
+    reason += `; ${ruling.human}`;
+  }
   if (velocityTriggered) {
     needsHuman = true;
     ruleId = 'D10';

@@ -84,6 +84,20 @@ output: amountMinor, creditsToRevoke, ruleId, reason
 idempotency: none
 ```
 
+## [EC:D16] evaluate — 환불 사유별 처리
+
+```pseudo
+input.reason = { category: technical_failure | dissatisfied | user_error | other, evidenceRef? } | null
+r = policy.refund.reasons                          # defaults all 'rules' = no effect
+user_error and r.userError == 'deny'         -> ineligible(ruleId 'D16')             # before any math
+technical_failure and r.technicalFailure == 'full':
+    take the D1 branch even outside noQuestionsDays (ruleId 'D16'), skip D5,
+    B13 behaves as clamp_to_zero: revoke what is left, never reduce the amount
+dissatisfied and r.dissatisfied == 'needs_human'                    -> needsHuman
+dissatisfied and r.dissatisfied == 'evidence_required' and !evidenceRef -> needsHuman
+other / 'rules'                              -> unchanged
+```
+
 ## [EC:D5] evaluate — 연간 플랜 환불 창
 
 ```pseudo

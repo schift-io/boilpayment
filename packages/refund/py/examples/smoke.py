@@ -22,8 +22,15 @@ from boilpayment_core import (
     PaymentKitError,
     Refund,
     SequentialIdGen,
+    resolve_policy,
 )
-from boilpayment_refund import EvaluateInput, ExecuteInput, evaluate, execute
+from boilpayment_refund import (
+    EvaluateInput,
+    ExecuteInput,
+    RefundReasonInput,
+    evaluate,
+    execute,
+)
 
 
 class FakeProvider:
@@ -214,6 +221,25 @@ async def main() -> None:
     print(
         "\n[evaluate #2 @ day20, method=unused_credits]",
         json.dumps(_to_dict(decision2), indent=2),
+    )
+
+    # EC:D16 -- same payment, reason rules on
+    strict = resolve_policy(
+        {"refund": {"reasons": {"technicalFailure": "full", "dissatisfied": "evidence_required", "userError": "deny"}}}
+    )
+
+    async def ev(category: str):
+        return await evaluate(
+            EvaluateInput(
+                payment=payment2, policy=strict, ledger=ledger, repo=repo, clock=clock,
+                reason=RefundReasonInput(category=category),
+            )
+        )
+
+    tf, ue, ds = await ev("technical_failure"), await ev("user_error"), await ev("dissatisfied")
+    print(
+        "[evaluate D16] technical_failure:", tf.eligible, tf.rule_id, tf.amount.amount_minor, tf.credits_to_revoke,
+        "| user_error:", ue.eligible, ue.rule_id, "| dissatisfied no evidence: needsHuman", ds.needs_human, ds.amount.amount_minor,
     )
 
     # -- Scenario 3: EC:D13 -- Toss virtual-account refund missing refund_receive_account --

@@ -97,6 +97,9 @@
 | D12 | 환불 실패 (카드 만료·계좌 폐쇄) | (구현 규칙) | 원장 회수 롤백 없음 → `refund_attempts` 재시도 → 실패 시 CS 케이스 (`manual_payout`) | refund · cs | P0 |
 | D13 | Toss 가상계좌 환불 — 환불 계좌 필요 | (provider) | `refundReceiveAccount` 필수 입력 → Widget 이 수집 | providers.toss · cs | P0 |
 | D14 | 할부 결제 환불 (KR) | (provider) | 전액 취소만 지원하는 PG 존재 → 부분 환불 불가 시 `deny_partial` | providers | P1 |
+| D16 | 환불 사유별 처리 — 기술 실패 | `policy.refund.reasons.technical_failure` | **`rules`** (위 금액 규칙) / `full` (환불 창·방식·연간 제한과 무관하게 남은 결제 전액, 크레딧은 남은 만큼만 회수하고 금액은 줄이지 않음) | refund | P0 |
+| D16 | 환불 사유별 처리 — 결과 불만족 | `policy.refund.reasons.dissatisfied` | **`rules`** / `evidence_required` (요청에 `evidenceRef` 가 없으면 담당자 확인) / `needs_human` | refund · cs | P0 |
+| D16 | 환불 사유별 처리 — 사용자 과실 | `policy.refund.reasons.user_error` | **`rules`** / `deny`. 사유는 `support.requestRefund({ ..., reason: { category, evidenceRef } })` 로 넘기고, 카테고리는 `technical_failure` · `dissatisfied` · `user_error` · `other`(항상 금액 규칙) | refund · cs | P0 |
 | D15 | 환불 중 소비 시도 (회수 전) | (구현 규칙) | 환불 시작 시 `hold` 행으로 잔액 선차감. 실패 시 hold 해제 | refund · credits | P0 |
 
 ## E. 결제 실패 · 복구 (CS 수익의 본체)
@@ -263,7 +266,7 @@ kit 을 붙이기 전부터 결제 중인 고객이 있으면, 그 고객의 구
 8. 취소: A5 A6
 9. 트라이얼: A9 (있을 때만)
 10. 갱신 실패: A13 A14 A15 A16 A17
-11. 환불: D1 D2 D3 B13 (D7 D10 은 고급)
+11. 환불: D1 D2 D3 B13 (D7 D10 D16 은 고급)
 12. 이용량: C1 C2 C5 (usage 선택 시), C10 (예산 예약을 켠 경우)
 13. 분쟁: B11 D9
 14. 현금영수증(KR): K2 K3 K5 — provider 에 toss/portone 선택 시만

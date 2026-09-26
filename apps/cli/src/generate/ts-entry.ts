@@ -17,7 +17,7 @@
 //   - refund.execute and cs.dispute/openCase/reconcile all require `ids: IdGen` in addition to
 //     what ARCHITECTURE.md's short-form signature lists.
 import type { PaykitConfig } from '../config.js';
-import { supportTs } from './support.js';
+import { hasReasonRules, supportTs } from './support.js';
 
 function providerImportsTs(config: PaykitConfig): string {
   const lines: string[] = [];
@@ -311,7 +311,7 @@ export function generateIndexTs(config: PaykitConfig): string {
   l.push(`  }`);
   l.push('');
 
-  l.push(supportTs(hasCredits));
+  l.push(supportTs(hasCredits, hasReasonRules(config)));
   l.push(`  const cron = {`);
   if (hasCredits) {
     l.push(`    /** credits.expireDue is per-customer (see NAMING ASSUMPTION note at the top of this file) — sweep all customers. */`);

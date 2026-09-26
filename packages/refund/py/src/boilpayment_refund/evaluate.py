@@ -1,4 +1,4 @@
-"""spec/refund.pseudo.md — EC:D1 D2 D3 D4 D5 D6 D7 D10 B13 A22 B8"""
+"""spec/refund.pseudo.md — EC:D1 D2 D3 D4 D5 D6 D7 D10 D16 B13 A22 B8"""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from boilpayment_core import (
     Subscription,
 )
 
+from .reason import RefundReasonInput, rule_for_reason
 from .util import apply_rounding, days_between, proration_ratio, weighted_avg_unit_price
 
 
@@ -31,6 +32,8 @@ class EvaluateInput:
     requested_amount: dict | None = None  # {"amount_minor": int, "currency": str}
     # D7: PG fee, unknown to us unless the caller supplies it (provider-specific).
     provider_fee_minor: int | None = None
+    # EC:D16 -- why the customer asks; policy.refund.reasons decides what that changes.
+    reason: RefundReasonInput | None = None
 
 
 def _ineligible(
@@ -110,6 +113,11 @@ async def evaluate(input: EvaluateInput) -> RefundDecision:
             f"payment status '{payment.status}' is not refundable",
         )
 
+    # EC:D16 -- reason rules (defaults "rules" change nothing)
+    ruling = rule_for_reason(policy, input.reason)
+    if ruling.deny:
+        return _ineligible(payment, sub_id, "D16", ruling.deny)
+
     now = clock.now()
     days_since = days_between(payment.occurred_at, now)
     customer_id = payment.customer_id
@@ -143,12 +151,15 @@ async def evaluate(input: EvaluateInput) -> RefundDecision:
         if e.reference.payment_id == payment.id and e.source == "refund"
     )
 
-    if days_since <= policy.refund.no_questions_days:
-        # EC:D1
+    if ruling.full or days_since <= policy.refund.no_questions_days:
+        # EC:D1 (and EC:D16 technical_failure -> full, outside the window too)
         amount_minor = max(0, payment.amount.amount_minor - already_refunded_minor)
         credits_to_revoke = max(0, total_granted - already_revoked)
-        rule_id = "D1"
-        reason = f"D1: no-questions window ({days_since}/{policy.refund.no_questions_days}d) -> full {amount_minor} minor, revoke {credits_to_revoke} credits"
+        rule_id = "D1" if days_since <= policy.refund.no_questions_days else "D16"
+        if rule_id == "D1":
+            reason = f"D1: no-questions window ({days_since}/{policy.refund.no_questions_days}d) -> full {amount_minor} minor, revoke {credits_to_revoke} credits"
+        else:
+            reason = f"D16: technical_failure -> full {amount_minor} minor, revoke {credits_to_revoke} credits"
     else:
         # EC:D2 D3 D4 B8
         method = policy.refund.method
@@ -207,8 +218,8 @@ async def evaluate(input: EvaluateInput) -> RefundDecision:
                 amount_minor, credits_to_revoke = b_amount, b_credits
                 reason = f"D2: min_of_both -> time_prorated {b_amount} minor < unused_credits {a_amount} minor"
 
-    # EC:D5 -- annual plan refund window
-    if sub is not None:
+    # EC:D5 -- annual plan refund window (a technical failure on our side is refunded regardless)
+    if sub is not None and not ruling.full:
         plan = await repo.plans.get(sub.plan_id)
         if (
             plan is not None
@@ -255,7 +266,8 @@ async def evaluate(input: EvaluateInput) -> RefundDecision:
     # EC:B13 -- revoke shortfall
     available = max(0, (await ledger.balance(customer_id, "paid", now=clock.now())).available)
     if available < credits_to_revoke:
-        behavior = policy.refund.revoke_shortfall
+        # EC:D16 -- a full refund for our technical failure is not reduced by what was already used.
+        behavior = "clamp_to_zero" if ruling.full else policy.refund.revoke_shortfall
         if behavior == "clamp_and_reduce_refund":
             ratio = (
                 (available / credits_to_revoke) if credits_to_revoke > 0 else 1
@@ -276,6 +288,9 @@ async def evaluate(input: EvaluateInput) -> RefundDecision:
         amount_minor > policy.cs.auto_approve.max_amount_minor
         or credits_to_revoke > policy.cs.auto_approve.max_credits
     )
+    if ruling.human:
+        needs_human = True
+        reason += f"; {ruling.human}"
     if velocity_triggered:
         needs_human = True
         rule_id = "D10"

@@ -4,10 +4,10 @@ import type { Payment, PaymentProvider, Refund } from 'boilpayment-core';
 import { topup, grantForPeriod } from '../../../credits/ts/src/index.js';
 import { requestRefund, recoverMissingGrant, resolveTopupCredits, startCheckout, registerCompletedCheckout, finishRefundCases } from '../src/index.js';
 
-async function setup(mode: 'auto' | 'manual_approve' | 'off' = 'auto') {
+async function setup(mode: 'auto' | 'manual_approve' | 'off' = 'auto', reasons?: { userError?: 'rules' | 'deny'; dissatisfied?: 'rules' | 'evidence_required' | 'needs_human' }) {
   const clock = new FixedClock(new Date('2026-01-01T00:00:00Z')); const ids = new SequentialIdGen('support_');
   const repo = new InMemoryRepo(); const ledger = new InMemoryLedger(ids);
-  const policy = resolvePolicy({ cs: { regrant: { mode } } });
+  const policy = resolvePolicy({ cs: { regrant: { mode } }, ...(reasons ? { refund: { reasons } } : {}) });
   const payment: Payment = { id: 'payment', customerId: 'customer', provider: 'stripe', providerRef: 'pi_1',
     subscriptionId: null, amount: { amountMinor: 1000, currency: 'USD' }, status: 'succeeded', kind: 'topup',
     period: null, occurredAt: clock.now(), failure: null, cashReceipt: null };
@@ -115,4 +115,15 @@ it('concurrent and repeated recovery creates one case, grant and billable report
   expect(cases).toHaveLength(1); expect(cases[0]?.id).toBe(replay.id);
   expect(await input.ledger.entries('customer', { kind: 'grant' })).toHaveLength(1);
   expect(reports).toBe(1);
+});
+
+// EC:D16 — the reason reaches refund.evaluate through requestRefund
+it('refund reason rules apply through requestRefund: user_error denied, dissatisfied without evidence to a person', async () => {
+  const denied = await setup('auto', { userError: 'deny', dissatisfied: 'evidence_required' }); await recoverMissingGrant(denied);
+  const r1 = await requestRefund({ ...denied, requestId: 'r-user', reason: { category: 'user_error' } });
+  expect(r1.status).toBe('rejected'); expect(denied.calls()).toBe(0);
+  const r2 = await requestRefund({ ...denied, requestId: 'r-dis', reason: { category: 'dissatisfied' } });
+  expect(r2.status).toBe('needs_human'); expect(denied.calls()).toBe(0);
+  const r3 = await requestRefund({ ...denied, requestId: 'r-dis-ev', reason: { category: 'dissatisfied', evidenceRef: 'job_1' } });
+  expect(r3.status).toBe('resolved_auto'); expect(denied.calls()).toBe(1);
 });

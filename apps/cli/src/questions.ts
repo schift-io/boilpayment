@@ -606,6 +606,49 @@ export const QUESTIONS: Question[] = [
     message: '고객당 연간 환불 허용 횟수 (Max refunds per year, 어뷰징 방지)',
     default: def('refund.maxPerCustomerPerYear'),
   },
+  {
+    id: 'refund_reason_technical_failure',
+    policyPath: 'refund.reasons.technicalFailure',
+    ec: ['D16'],
+    type: 'select',
+    group: 'refund',
+    when: (c) => !!c.refundAdvanced,
+    message: '환불 사유가 기술 실패(우리 쪽 오류)일 때 (Refund reason: technical failure)',
+    options: [
+      { value: 'rules', label: '위 금액 규칙대로', hint: '사유를 보지 않습니다' },
+      { value: 'full', label: '남은 결제 전액 환불', hint: '환불 창·방식·연간 제한과 무관, 남은 크레딧만 회수' },
+    ],
+    default: def('refund.reasons.technicalFailure'),
+  },
+  {
+    id: 'refund_reason_dissatisfied',
+    policyPath: 'refund.reasons.dissatisfied',
+    ec: ['D16'],
+    type: 'select',
+    group: 'refund',
+    when: (c) => !!c.refundAdvanced,
+    message: '환불 사유가 결과 불만족일 때 (Refund reason: dissatisfied)',
+    options: [
+      { value: 'rules', label: '위 금액 규칙대로' },
+      { value: 'evidence_required', label: '증빙(작업 id 등)이 있으면 규칙대로, 없으면 담당자 확인' },
+      { value: 'needs_human', label: '항상 담당자 확인' },
+    ],
+    default: def('refund.reasons.dissatisfied'),
+  },
+  {
+    id: 'refund_reason_user_error',
+    policyPath: 'refund.reasons.userError',
+    ec: ['D16'],
+    type: 'select',
+    group: 'refund',
+    when: (c) => !!c.refundAdvanced,
+    message: '환불 사유가 사용자 과실일 때 (Refund reason: user error)',
+    options: [
+      { value: 'rules', label: '위 금액 규칙대로' },
+      { value: 'deny', label: '거절' },
+    ],
+    default: def('refund.reasons.userError'),
+  },
 
   // 12. 이용량: C1 C2 C5 (usage 선택 시)
   {

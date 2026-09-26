@@ -116,6 +116,19 @@ const ENUM: Record<string, EnumTable> = {
     clamp_to_zero: { ko: '환불 대상 크레딧을 이미 다 써버렸어도 잔액은 0까지만 회수하고, 환불액은 그대로 지급됩니다.', en: 'Even if credits were already spent, only the balance down to zero is revoked; the refund amount is unaffected.' },
     allow_negative: { ko: '환불 대상 크레딧을 이미 다 써버렸다면 잔액이 음수가 될 수 있습니다.', en: 'If credits were already spent, the balance may go negative to cover the revocation.' },
   },
+  'refund.reasons.technicalFailure': {
+    rules: { ko: '기술 실패 사유여도 위 환불 금액 규칙을 그대로 적용합니다.', en: 'A technical-failure refund follows the amount rules above.' },
+    full: { ko: '기술 실패 사유면 환불 창, 방식, 연간 제한과 무관하게 남은 결제 금액 전부를 환불합니다. 크레딧은 남은 만큼만 회수합니다. 앱은 support.requestRefund 에 reason 을 넘겨야 합니다.', en: 'A technical-failure refund returns the whole remaining payment regardless of window, method or annual limit; only the credits left are revoked. The app passes reason to support.requestRefund.' },
+  },
+  'refund.reasons.dissatisfied': {
+    rules: { ko: '결과 불만족 사유여도 위 환불 금액 규칙을 그대로 적용합니다.', en: 'A dissatisfied refund follows the amount rules above.' },
+    evidence_required: { ko: '결과 불만족 사유는 증빙(evidenceRef, 예: 작업 id)이 있으면 금액 규칙대로 처리하고, 없으면 담당자 확인으로 넘깁니다.', en: 'A dissatisfied refund with an evidenceRef (e.g. a job id) follows the amount rules; without one it goes to a person.' },
+    needs_human: { ko: '결과 불만족 사유는 항상 담당자 확인으로 넘깁니다.', en: 'A dissatisfied refund always goes to a person.' },
+  },
+  'refund.reasons.userError': {
+    rules: { ko: '사용자 과실 사유여도 위 환불 금액 규칙을 그대로 적용합니다.', en: 'A user-error refund follows the amount rules above.' },
+    deny: { ko: '사용자 과실 사유의 환불 요청은 거절합니다.', en: 'Refund requests for user error are refused.' },
+  },
   'refund.feeBearer': {
     merchant: { ko: 'PG 환불 수수료는 우리(가맹점)가 부담하며, 고객은 결제액 전액을 환불받습니다.', en: 'The merchant absorbs the payment-processor refund fee; the customer receives a full refund.' },
     customer: { ko: 'PG 환불 수수료는 고객이 부담하며, 환불액에서 수수료가 차감됩니다.', en: 'The payment-processor refund fee is deducted from the customer’s refund amount.' },

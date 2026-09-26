@@ -58,6 +58,7 @@ class RefundEvaluateFn(Protocol):
         clock: Clock,
         requested_amount: dict | None = None,
         provider_fee_minor: int | None = None,
+        reason: Any | None = None,
     ) -> Awaitable[RefundDecision]: ...
 
 
@@ -105,6 +106,9 @@ class RefundAssistInput:
     refund_execute: RefundExecuteFn
     requested_amount: dict | None = None
     provider_fee_minor: int | None = None
+    # EC:D16 -- refund reason (category + evidence_ref); policy.refund.reasons decides the effect.
+    # Any object with .category / .evidence_ref (boilpayment_refund.RefundReasonInput); cs does not import refund.
+    reason: Any | None = None
     notifier: Notifier | None = None
     churn_reason: ChurnReason | None = None
     churn_text: str | None = None
@@ -191,12 +195,19 @@ async def refund_assist(input: RefundAssistInput) -> CsCase:
             "requested_amount": input.requested_amount,
             "provider_fee_minor": input.provider_fee_minor,
             "churn_reason": input.churn_reason,
+            "reason": _reason_payload(input.reason),
         },
         serialize=serialize_cs_case,
         deserialize=deserialize_cs_case,
         fn=lambda: _do_refund_assist(input),
     )
     return result.result
+
+
+def _reason_payload(reason: Any | None) -> dict | None:
+    if reason is None:
+        return None
+    return {"category": reason.category, "evidence_ref": getattr(reason, "evidence_ref", None)}
 
 
 async def _do_refund_assist(input: RefundAssistInput) -> CsCase:
@@ -221,6 +232,8 @@ async def _do_refund_assist(input: RefundAssistInput) -> CsCase:
         clock=input.clock,
         requested_amount=input.requested_amount,
         provider_fee_minor=input.provider_fee_minor,
+        # EC:D16 -- only when given, so evaluate adapters written before reasons existed keep working.
+        **({"reason": input.reason} if input.reason is not None else {}),
     )
     if not decision.eligible:
         return await reject(

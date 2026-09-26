@@ -227,6 +227,9 @@ export function generateIntegrationMd(config: PaykitConfig): string {
     l.push('');
   }
   l.push('고객·결제 ID를 넘기면 저장된 결제 근거와 판매자 규칙으로 환불 여부와 금액을 계산하고 실행합니다.');
+  if (Object.values(config.policy.refund.reasons ?? {}).some((v) => v !== 'rules')) {
+    l.push('환불 사유 규칙(EC:D16)을 켰으므로 `reason: { category, evidenceRef }`를 같이 넘깁니다. category는 `technical_failure` · `dissatisfied` · `user_error` · `other`이고, 사유를 넘기지 않으면 금액 규칙만 적용됩니다.');
+  }
   l.push('고객 ID는 로그인 세션에서 가져오세요. 요청 본문의 고객 ID나 임의 환불 판정을 신뢰하지 마세요.');
   if (py(config)) l.push('Python은 `kit["support"]["request_refund"](customer_id=..., payment_id=..., request_id=..., requested_amount=Money(...))`를 사용합니다.');
   l.push('');

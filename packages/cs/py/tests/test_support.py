@@ -96,11 +96,11 @@ class Provider:
         )
 
 
-async def setup(mode="auto"):
+async def setup(mode="auto", reasons=None):
     clock = FixedClock(datetime(2026, 1, 1, tzinfo=UTC))
     ids = SequentialIdGen("support_")
     repo, ledger = InMemoryRepo(), InMemoryLedger(ids)
-    policy = resolve_policy({"cs": {"regrant": {"mode": mode}}})
+    policy = resolve_policy({"cs": {"regrant": {"mode": mode}}, **({"refund": {"reasons": reasons}} if reasons else {})})
     payment = Payment(
         id="payment",
         customer_id="customer",
@@ -342,6 +342,32 @@ def test_refund_replay_reads_latest_case_after_confirmed_settlement():
         )
         assert completed[0].id == pending.id
         assert (await request_refund(input)).status == "resolved_auto"
+        assert provider.refund_calls == 1
+
+    anyio.run(go)
+
+
+# EC:D16 -- the reason reaches refund.evaluate through request_refund (mirrors support.test.ts)
+def test_refund_reason_rules_apply_through_request_refund():
+    from boilpayment_refund import RefundReasonInput
+
+    async def go():
+        deps, provider, payment = await setup("auto", {"userError": "deny", "dissatisfied": "evidence_required"})
+        await recover_missing_grant(
+            RecoverMissingGrantInput(**deps, customer_id="customer", payment_id=payment.id, grants=Grants())
+        )
+
+        def req(rid, reason):
+            return RequestRefundInput(
+                **deps, customer_id="customer", payment_id=payment.id, request_id=rid, reason=reason
+            )
+
+        assert (await request_refund(req("r-user", RefundReasonInput(category="user_error")))).status == "rejected"
+        assert provider.refund_calls == 0
+        assert (await request_refund(req("r-dis", RefundReasonInput(category="dissatisfied")))).status == "needs_human"
+        assert provider.refund_calls == 0
+        ok = await request_refund(req("r-dis-ev", RefundReasonInput(category="dissatisfied", evidence_ref="job_1")))
+        assert ok.status == "resolved_auto"
         assert provider.refund_calls == 1
 
     anyio.run(go)

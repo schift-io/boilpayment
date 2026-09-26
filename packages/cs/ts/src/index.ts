@@ -11,7 +11,7 @@ export { regrant } from './regrant.js';
 export type { RegrantInput, RegrantPlan } from './regrant.js';
 
 export { refundAssist } from './refundAssist.js';
-export type { RefundAssistInput, RefundEvaluateFn, RefundExecuteFn } from './refundAssist.js';
+export type { RefundAssistInput, RefundEvaluateFn, RefundExecuteFn, RefundReasonInput } from './refundAssist.js';
 
 export { dispute } from './dispute.js';
 export type { DisputeInput } from './dispute.js';

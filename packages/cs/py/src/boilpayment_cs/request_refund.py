@@ -12,7 +12,13 @@ from boilpayment_core import (
     run_idempotent,
     serialize_cs_case,
 )
-from boilpayment_refund import EvaluateInput, ExecuteInput, evaluate, execute
+from boilpayment_refund import (
+    EvaluateInput,
+    ExecuteInput,
+    RefundReasonInput,
+    evaluate,
+    execute,
+)
 
 from .cases import EscalateInput, escalate
 from .refund_assist import RefundAssistInput, refund_assist
@@ -28,6 +34,8 @@ from .support import (
 class RequestRefundInput(SupportPaymentInput):
     request_id: str | None = None
     requested_amount: Money | None = None
+    # EC:D16 -- why the customer asks (technical_failure / dissatisfied / user_error / other).
+    reason: RefundReasonInput | None = None
 
 
 async def request_refund(input: RequestRefundInput) -> CsCase:
@@ -92,6 +100,7 @@ async def request_refund(input: RequestRefundInput) -> CsCase:
                 }
                 if amount
                 else None,
+                reason=input.reason,
                 notifier=input.notifier,
                 on_case_event=input.on_case_event,
                 reporter=input.reporter,
@@ -108,6 +117,9 @@ async def request_refund(input: RequestRefundInput) -> CsCase:
             "customer_id": input.customer_id,
             "payment_id": input.payment_id,
             "amount": input.requested_amount,
+            "reason": {"category": input.reason.category, "evidence_ref": input.reason.evidence_ref}
+            if input.reason
+            else None,
         },
         serialize=serialize_cs_case,
         deserialize=deserialize_cs_case,

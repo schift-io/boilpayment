@@ -2,7 +2,7 @@
 // (no real PG in examples). Run: node_modules/.bin/tsx packages/refund/ts/examples/smoke.ts
 import {
   DEFAULT_POLICY, FixedClock, InMemoryLedger, InMemoryRepo, Payment, PaymentKitError, PaymentProvider, Policy,
-  Refund, SequentialIdGen,
+  Refund, SequentialIdGen, resolvePolicy,
 } from 'boilpayment-core';
 import { evaluate, execute } from '../src/index.js';
 
@@ -96,6 +96,14 @@ async function main() {
   clock.advance(20 * 24 * 60 * 60 * 1000); // now 20 days after payment2.occurredAt
   const decision2 = await evaluate({ payment: payment2, policy, ledger, repo, clock });
   console.log('\n[evaluate #2 @ day20, method=unused_credits]', JSON.stringify(decision2, null, 2));
+
+  // EC:D16 — same payment, reason rules on
+  const strict = resolvePolicy({ refund: { reasons: { technicalFailure: 'full', dissatisfied: 'evidence_required', userError: 'deny' } } });
+  const tf = await evaluate({ payment: payment2, policy: strict, ledger, repo, clock, reason: { category: 'technical_failure' } });
+  const ue = await evaluate({ payment: payment2, policy: strict, ledger, repo, clock, reason: { category: 'user_error' } });
+  const ds = await evaluate({ payment: payment2, policy: strict, ledger, repo, clock, reason: { category: 'dissatisfied' } });
+  console.log('[evaluate D16] technical_failure:', tf.eligible, tf.ruleId, tf.amount.amountMinor, tf.creditsToRevoke,
+    '| user_error:', ue.eligible, ue.ruleId, '| dissatisfied no evidence: needsHuman', ds.needsHuman, ds.amount.amountMinor);
 
   // ── Scenario 3: EC:D13 — Toss virtual-account refund missing refundReceiveAccount ──
   const payment3: Payment = {
