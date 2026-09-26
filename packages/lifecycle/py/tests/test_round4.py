@@ -201,4 +201,9 @@ async def _test_a39_unverifiable_legacy_charge_blocks_and_reports() -> None:
     t.provider.lookup_throws = True
     r = await t.tick("2024-02-02T03:00:00Z")
     assert [e.code for e in r.errors] == ["legacy_dunning_unverified"]
+    r2 = await t.tick("2024-02-20T03:00:00Z")
+    assert [e.code for e in r2.errors] == ["legacy_dunning_unverified"]
     assert t.provider.order_ids == []
+    t.provider.lookup_throws = False
+    await t.tick("2024-02-21T03:00:00Z")
+    assert len(t.provider.order_ids) == 1

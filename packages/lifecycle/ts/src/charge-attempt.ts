@@ -275,6 +275,15 @@ export async function settleAttemptByLookup(input: {
   return leased.held ? leased.value : null;
 }
 
+/**
+ * EC:A39 — a row standing for a charge an earlier release made (orderId = the key itself). It is
+ * settled only by lookup, never re-driven: a provider replays an idempotency key for a limited time
+ * (Toss: 15 days), so re-sending it later could charge again.
+ */
+export function isLegacyAttempt(row: Payment): boolean {
+  return typeof (row.raw as { boilpaymentLegacyOrderId?: unknown } | undefined)?.boilpaymentLegacyOrderId === 'string';
+}
+
 /** The orderId an attempt row was sent with (rows of earlier releases used the attempt key itself). */
 export function orderIdOf(row: Payment): string {
   const key = attemptKeyOf(row);

@@ -288,6 +288,13 @@ async def mark_unresolved(
     return updated
 
 
+def is_legacy_attempt(row: Payment) -> bool:
+    """EC:A39 -- a row for a charge an earlier release made: settled by lookup only, never re-driven
+    (a provider replays an idempotency key for a limited time; re-sending later could charge again)."""
+    raw = row.raw if isinstance(row.raw, dict) else {}
+    return isinstance(raw.get("boilpaymentLegacyOrderId"), str)
+
+
 def order_id_of(row: Payment) -> str:
     """The orderId an attempt row was sent with (rows of earlier releases used the key itself)."""
     raw = row.raw if isinstance(row.raw, dict) else {}

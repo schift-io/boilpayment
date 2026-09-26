@@ -35,6 +35,7 @@ from .charge_attempt import (
     attempts_for,
     charge_attempt,
     dunning_attempt_key,
+    is_legacy_attempt,
     iso_z,
 )
 from .internal import price_for_subscription, renewal_plan_id, replace_sub
@@ -433,6 +434,11 @@ async def run_retry(input: RunRetryInput) -> RunRetryResult:
         )
         attempts = await attempts_for(repo, sub, charged_period)
         earlier = next((p for p in attempts if p.status == "succeeded"), None)
+        if earlier is None and any(p.status == "pending" and is_legacy_attempt(p) for p in attempts):
+            # EC:A39 -- a legacy row is never re-driven: wait for its lookup.
+            item.next_attempt_at = clock.now() + timedelta(hours=1)
+            await repo.outbox.put(item)
+            return RunRetryResult(outcome="unresolved", sub=sub, grants=[])
         open_row = next((p for p in attempts if p.status not in ("failed", "succeeded")), None)
         attempt_key = (attempt_key_of(open_row) if open_row else None) or dunning_attempt_key(sub, charged_period, attempt)
         charge = (

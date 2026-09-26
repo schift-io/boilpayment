@@ -127,6 +127,12 @@ describe('round-4 regressions', () => {
     t.provider.lookupThrows = true;
     const r = await t.tick('2024-02-02T03:00:00Z');
     expect(r.errors.map((e) => e.code)).toEqual(['legacy_dunning_unverified']);
+    // later ticks never re-send the legacy key (a provider replays it only for a limited time)
+    const r2 = await t.tick('2024-02-20T03:00:00Z');
+    expect(r2.errors.map((e) => e.code)).toEqual(['legacy_dunning_unverified']);
     expect(t.provider.orderIds).toHaveLength(0);
+    t.provider.lookupThrows = false; // the provider answers: no such order -> closed, a normal charge follows
+    await t.tick('2024-02-21T03:00:00Z');
+    expect(t.provider.orderIds).toHaveLength(1);
   });
 });

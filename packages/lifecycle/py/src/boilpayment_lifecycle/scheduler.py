@@ -24,6 +24,7 @@ from .charge_attempt import (
     attempt_key_of,
     attempts_for,
     charge_attempt,
+    is_legacy_attempt,
     iso_z,
     mark_unresolved,
     renewal_attempt_key,
@@ -177,8 +178,9 @@ async def tick(input: SchedulerTickInput) -> SchedulerTickResult:
                     sub=sub, payment=paid, policy=policy, ledger=ledger, repo=repo, clock=clock,
                 ))
                 return ("charged", resumed.sub)
-            open_row = next((p for p in attempts if p.status != "failed"), None)
-            if open_row is None and sub.status != "active":
+            legacy_open = any(p.status != "failed" and is_legacy_attempt(p) for p in attempts)
+            open_row = next((p for p in attempts if p.status != "failed" and not is_legacy_attempt(p)), None)
+            if open_row is None and not legacy_open and sub.status != "active":
                 return None  # every attempt answered: dunning owns the next charge
             if open_row is None:
                 # EC:A39 -- a dunning charge of an earlier release (no row) may already have paid this period.

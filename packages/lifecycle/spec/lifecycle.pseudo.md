@@ -669,6 +669,9 @@ checkLegacyDunning(sub, period) before a NEW charge:      # EC:A39
       key = 'dunning-retry:<sub>:<n>' (the orderId a pre-A34 release used); ensure a pending row for it
       settle by lookup: succeeded -> pay `period` with it (no new charge); no answer -> refuse to charge
       ('legacy_dunning_unverified' each tick)
+   a legacy row is NEVER re-driven by chargeAttempt (scheduler skips it as `open`; runRetry reschedules):
+   a provider replays an idempotency key only for a limited time (Toss 15 days), so re-sending it later
+   could charge again. Only a lookup settles it (not found -> failed -> a normal charge may follow).
 
 runRetry: sub past_due and cancelAtPeriodEnd -> sub canceled, item sent, no charge   # EC:A40
 tick: past_due + cancelAtPeriodEnd + period over -> canceled                         # EC:A40

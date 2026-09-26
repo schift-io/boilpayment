@@ -16,7 +16,7 @@ import {
 import { grantForPeriod, GrantResult } from 'boilpayment-credits';
 import { retryOnVersionConflict } from './retry.js';
 import { priceForSubscription, renewalPlanId } from './internal.js';
-import { attemptKeyOf, attemptsFor, chargeAttempt, dunningAttemptKey } from './charge-attempt.js';
+import { attemptKeyOf, attemptsFor, chargeAttempt, dunningAttemptKey, isLegacyAttempt } from './charge-attempt.js';
 import { nextPeriod } from './period.js';
 import { onRenewalPaid } from './renewal.js';
 
@@ -319,6 +319,12 @@ export async function runRetry(input: RunRetryInput): Promise<RunRetryResult> {
     const chargedPeriod = nextPeriod(sub.currentPeriod, plan.interval ?? 'month', sub.anchorDay, policy.period.timezone, policy.period.monthEndAnchor);
     const attempts = await attemptsFor(repo, sub, chargedPeriod);
     const earlier = attempts.find((p) => p.status === 'succeeded');
+    // EC:A39 — a legacy row (a charge an earlier release made) is never re-driven: wait for its lookup.
+    if (!earlier && attempts.some((p) => p.status === 'pending' && isLegacyAttempt(p))) {
+      item.nextAttemptAt = new Date(clock.now().getTime() + HOUR_MS);
+      await repo.outbox.put(item);
+      return { outcome: 'unresolved' as const, sub, grants: [] };
+    }
     const open = attempts.find((p) => p.status !== 'failed' && p.status !== 'succeeded');
     const attemptKey = (open && attemptKeyOf(open)) || dunningAttemptKey(sub, chargedPeriod, payload.attempt);
     const charge = earlier
