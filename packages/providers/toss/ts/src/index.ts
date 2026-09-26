@@ -610,7 +610,7 @@ export class TossProvider implements PaymentProvider {
     throw new PaymentKitError('toss has no meters API', 'unsupported'); // capabilities().meters === false
   }
 
-  async verifyWebhook(input: { headers: Record<string, string>; rawBody: string }): Promise<NormalizedEvent> {
+  async verifyWebhook(input: { headers: Record<string, string>; rawBody: string; receivedAt?: Date }): Promise<NormalizedEvent> {
     const body = JSON.parse(input.rawBody);
     if (this.allowedWebhookIps && this.allowedWebhookIps.length > 0) {
       // EC:E4 variant — Toss payment webhooks carry no signature; IP allowlist is the defense.

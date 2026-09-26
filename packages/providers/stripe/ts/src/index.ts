@@ -590,12 +590,14 @@ export class StripeProvider implements PaymentProvider {
   }
 
   // EC:E4
-  async verifyWebhook(input: { headers: Record<string, string>; rawBody: string }): Promise<NormalizedEvent> {
+  async verifyWebhook(input: { headers: Record<string, string>; rawBody: string; receivedAt?: Date }): Promise<NormalizedEvent> {
     const sig = input.headers['stripe-signature'] ?? input.headers['Stripe-Signature'];
     if (!sig) throw new WebhookSignatureError('missing stripe-signature header');
     let event: Stripe.Event;
     try {
-      event = this.client.webhooks.constructEvent(input.rawBody, sig, this.webhookSecret);
+      // EC:E17 — tolerance (300 s, the SDK default) is measured at receipt when re-verifying.
+      const receivedAt = input.receivedAt?.getTime(); // stripe-node takes milliseconds here
+      event = this.client.webhooks.constructEvent(input.rawBody, sig, this.webhookSecret, 300, undefined, receivedAt);
     } catch (err) {
       throw new WebhookSignatureError((err as Error).message);
     }

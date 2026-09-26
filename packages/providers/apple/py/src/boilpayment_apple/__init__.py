@@ -176,9 +176,11 @@ class AppleProvider:
     def _now(self) -> datetime:
         return self._c.now() if self._c.now else datetime.now(tz=UTC)
 
-    def _verify(self, jws: str) -> dict[str, Any]:
+    def _verify(self, jws: str, at: datetime | None = None) -> dict[str, Any]:
         return verify_apple_jws(
-            jws, root_certificates=self._c.root_certificates, now=self._now()
+            jws,
+            root_certificates=self._c.root_certificates,
+            now=at if at is not None else self._now(),
         )
 
     def _transaction(self, jws: str) -> dict[str, Any]:
@@ -325,7 +327,11 @@ class AppleProvider:
         )
 
     async def verify_webhook(
-        self, *, headers: dict[str, str], raw_body: str
+        self,
+        *,
+        headers: dict[str, str],
+        raw_body: str,
+        received_at: datetime | None = None,
     ) -> NormalizedEvent:
         """EC:N1 N5 N6 N13 -- App Store Server Notifications V2. The whole payload is a signed JWS."""
         try:
@@ -335,7 +341,8 @@ class AppleProvider:
         if not isinstance(signed, str):
             raise WebhookSignatureError("apple notification has no signedPayload")
         try:
-            note = self._verify(signed)
+            # EC:E17 -- certificate validity is judged at receipt on a later re-verify.
+            note = self._verify(signed, received_at)
         except PaymentKitError as err:
             raise WebhookSignatureError(str(err)) from err
         data = note.get("data") or {}

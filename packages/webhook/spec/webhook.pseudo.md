@@ -417,3 +417,18 @@ Missing lookup support or absent authoritative cancellation produces a failed we
 and a reconciliation notification; it never releases the hold based on an unsigned notification.
 Stripe and Polar singular refund events use verified signatures and status-specific normalization;
 aggregate refund notifications lacking a singular refund reference are not settlement evidence.
+
+## [EC:E17] Re-verify at process() time, judge freshness at receipt
+
+```pseudo
+receive():  event = provider.verifyWebhook({ headers, rawBody })            # signature + freshness at now
+process():  event = provider.verifyWebhook({ headers, rawBody, receivedAt: record.receivedAt })
+            # signature is checked again (a stored body altered after receipt fails),
+            # timestamp tolerance / token exp / cert validity are judged at receivedAt.
+```
+
+Every retry path (unknown_provider_ref waiting for a local row, E16 races, K1 version conflicts,
+transient DB errors) retries through processPending, often minutes or hours later; judging
+freshness at `now` would turn each of them into a permanent failure. Python passes `received_at`
+only to adapters whose `verify_webhook` accepts it, so adapters written before this keep working
+(they check against now, as before).

@@ -784,7 +784,11 @@ class TossProvider:
         )  # capabilities().meters is False
 
     async def verify_webhook(
-        self, *, headers: dict[str, str], raw_body: str
+        self,
+        *,
+        headers: dict[str, str],
+        raw_body: str,
+        received_at: datetime | None = None,
     ) -> NormalizedEvent:
         body = json.loads(raw_body)
         if self._allowed_webhook_ips:

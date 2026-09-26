@@ -97,7 +97,7 @@ export class AppleProvider implements PaymentProvider, StorePurchaseProvider {
   }
 
   private now(): Date { return this.config.now?.() ?? new Date(); }
-  private verify<T>(jws: string): T { return verifyAppleJws<T>(jws, { rootCertificates: this.config.rootCertificates, now: this.now() }); }
+  private verify<T>(jws: string, at?: Date): T { return verifyAppleJws<T>(jws, { rootCertificates: this.config.rootCertificates, now: at ?? this.now() }); }
 
   /** EC:N3 — a proof for another app is refused before anything is recorded. */
   private transaction(jws: string): AppleTransaction {
@@ -166,13 +166,14 @@ export class AppleProvider implements PaymentProvider, StorePurchaseProvider {
   }
 
   /** EC:N1 N5 N6 N13 — App Store Server Notifications V2. The whole payload is a signed JWS. */
-  async verifyWebhook(input: { headers: Record<string, string>; rawBody: string }): Promise<NormalizedEvent> {
+  async verifyWebhook(input: { headers: Record<string, string>; rawBody: string; receivedAt?: Date }): Promise<NormalizedEvent> {
     let signedPayload: unknown;
     try { signedPayload = (JSON.parse(input.rawBody) as { signedPayload?: unknown }).signedPayload; } catch { signedPayload = undefined; }
     if (typeof signedPayload !== 'string') throw new WebhookSignatureError('apple notification has no signedPayload');
     type Note = { notificationType: string; subtype?: string; notificationUUID: string; signedDate?: number; data?: { bundleId?: string; appAppleId?: number; environment?: string; signedTransactionInfo?: string } };
     let note: Note;
-    try { note = this.verify<Note>(signedPayload); } catch (err) { throw new WebhookSignatureError(err instanceof Error ? err.message : 'invalid apple signature'); }
+    // EC:E17 — certificate validity is judged at receipt when process() re-verifies later.
+    try { note = this.verify<Note>(signedPayload, input.receivedAt); } catch (err) { throw new WebhookSignatureError(err instanceof Error ? err.message : 'invalid apple signature'); }
     const data = note.data ?? {};
     if (data.bundleId !== undefined && data.bundleId !== this.config.bundleId) throw new WebhookSignatureError('apple notification for another app');
     if (data.environment === 'Production' && (this.config.appAppleId == null || data.appAppleId !== this.config.appAppleId)) {

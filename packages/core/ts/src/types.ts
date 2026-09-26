@@ -499,7 +499,12 @@ export interface PaymentProvider {
   chargeBillingKey(input: { billingKey: string; amount: Money; orderId: string; customerRef: string; idempotencyKey: string }): Promise<Payment>;
   refund(input: { paymentRef: string; amount: Money; reason: string; idempotencyKey: string; extra?: Record<string, unknown> }): Promise<Refund>;
   reportUsage(input: { meter: string; customerRef: string; quantity: number; occurredAt: Date; idempotencyKey: string }): Promise<void>;
-  verifyWebhook(input: { headers: Record<string, string>; rawBody: string }): Promise<NormalizedEvent>;
+  /**
+   * EC:E4 E17 — verify signature and freshness. `receivedAt` (set by webhook.process when it
+   * re-verifies a stored body) means "judge the timestamp tolerance at this instant": the body was
+   * fresh when received, so a later retry must not fail on age. The signature is always checked.
+   */
+  verifyWebhook(input: { headers: Record<string, string>; rawBody: string; receivedAt?: Date }): Promise<NormalizedEvent>;
 }
 
 export interface ConsumeInput {

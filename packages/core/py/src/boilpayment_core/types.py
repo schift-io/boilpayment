@@ -803,8 +803,15 @@ class PaymentProvider(Protocol):
         idempotency_key: str,
     ) -> None: ...
     async def verify_webhook(
-        self, *, headers: dict[str, str], raw_body: str
-    ) -> NormalizedEvent: ...
+        self,
+        *,
+        headers: dict[str, str],
+        raw_body: str,
+        received_at: datetime | None = None,
+    ) -> NormalizedEvent:
+        """EC:E4 E17 -- verify signature and freshness. received_at (set by webhook.process
+        when re-verifying a stored body) means: judge timestamp tolerance at that instant."""
+        ...
 
 
 @dataclass(kw_only=True, slots=True)

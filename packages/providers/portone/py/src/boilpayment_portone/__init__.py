@@ -782,7 +782,11 @@ class PortoneProvider:
         )  # capabilities().meters is False
 
     async def verify_webhook(
-        self, *, headers: dict[str, str], raw_body: str
+        self,
+        *,
+        headers: dict[str, str],
+        raw_body: str,
+        received_at: datetime | None = None,
     ) -> NormalizedEvent:
         id_ = headers.get("webhook-id") or headers.get("svix-id")
         timestamp = headers.get("webhook-timestamp") or headers.get("svix-timestamp")
@@ -795,7 +799,9 @@ class PortoneProvider:
             ts_sec = float(timestamp)
         except ValueError:
             raise WebhookSignatureError("invalid webhook timestamp")
-        if abs(time.time() - ts_sec) > 300:
+        # EC:E17 -- measured at receipt when process() re-verifies a stored body.
+        ref = received_at.timestamp() if received_at is not None else time.time()
+        if abs(ref - ts_sec) > 300:
             raise WebhookSignatureError("webhook timestamp outside 5-minute tolerance")
         secret_b64 = self._webhook_secret.removeprefix("whsec_")
         key = base64.b64decode(secret_b64)

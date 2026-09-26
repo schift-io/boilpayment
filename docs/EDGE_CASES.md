@@ -126,6 +126,7 @@
 | E14 | 재지급 후 원래 webhook 이 뒤늦게 도착 | (B12) | 같은 멱등키 → no-op | cs | P0 |
 | E15 | 동일 고객 여러 provider 에서 결제 (Stripe + Toss) | (구현 규칙) | `customers.provider_refs[]`. 풀은 하나, grant 마다 `provider` 태그 | core | P1 |
 | E16 | 네이티브 구독(Stripe/Polar) 갱신 인보이스가 webhook 으로 먼저 도착 (로컬 결제 행 없음) | (구현 규칙) | 로컬 구독이 있으면 provider 에서 결제를 재조회(E3) → 그 구독의 결제일 때만 결제 행 기록 → 갱신 지급. 다른 구독 결제·모르는 구독은 `unknown_provider_ref`. 같은 인보이스 재전송은 행 1개 (`payments (provider, provider_ref)` unique) | webhook | P0 |
+| E17 | 받은 뒤 5분 넘게 지나 재처리하는 webhook (processPending 재시도) | (구현 규칙) | `process()` 는 저장된 원문의 서명을 매번 다시 검증하지만, 타임스탬프 허용 범위(Stripe 300초, Standard Webhooks 5분, Google push 토큰 exp, Apple 인증서 유효기간)는 받은 시각(`receivedAt`)에서 판단한다. 저장 뒤 원문이 바뀐 행은 서명 불일치로 실패 | webhook + providers | P0 |
 
 ## F. Provider 별 특이점
 

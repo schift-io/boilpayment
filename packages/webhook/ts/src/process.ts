@@ -54,7 +54,10 @@ export async function process(input: ProcessInput): Promise<void> {
       ? (rawProvider as PaymentProvider & { withCorrelationId(id: string): PaymentProvider }).withCorrelationId(correlationId)
       : rawProvider;
     // EC:E3 — re-verify/re-parse from the stored raw body, never trust cached payloads.
-    const event = await provider.verifyWebhook({ headers: record.headers, rawBody: record.rawBody });
+    // EC:E17 — the signature is checked again (a tampered stored row fails), but timestamp
+    // tolerance is judged at receipt: receive() already enforced freshness, and a retry minutes
+    // or hours later must not fail on age.
+    const event = await provider.verifyWebhook({ headers: record.headers, rawBody: record.rawBody, receivedAt: record.receivedAt });
     // EC:I9 — re-resolve identity even on a re-process: a local row that didn't exist at receive()
     // time (e.g. checkout hadn't landed yet) may exist by now.
     const identity = await resolveWebhookIdentity(repo, provider, event);

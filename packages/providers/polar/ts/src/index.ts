@@ -218,7 +218,7 @@ export function toNormalizedEvent(parsed: { type: string; data: Record<string, a
 }
 
 // EC:webhookSignature — Standard Webhooks HMAC verification, implemented manually (see spec).
-export function verifyStandardWebhookSignature(input: { headers: Record<string, string>; rawBody: string; secret: string }): void {
+export function verifyStandardWebhookSignature(input: { headers: Record<string, string>; rawBody: string; secret: string; receivedAt?: Date }): void {
   const h = (name: string): string | undefined => input.headers[name] ?? input.headers[name.toLowerCase()] ?? input.headers[name.toUpperCase()];
   const id = h('webhook-id');
   const timestamp = h('webhook-timestamp');
@@ -227,7 +227,9 @@ export function verifyStandardWebhookSignature(input: { headers: Record<string, 
 
   // mirrors PortoneProvider.verifyWebhook — Standard Webhooks 5-minute replay tolerance
   const tsSec = Number(timestamp);
-  if (!Number.isFinite(tsSec) || Math.abs(Date.now() / 1000 - tsSec) > 300) {
+  // EC:E17 — measured at receipt when process() re-verifies a stored body.
+  const refSec = (input.receivedAt?.getTime() ?? Date.now()) / 1000;
+  if (!Number.isFinite(tsSec) || Math.abs(refSec - tsSec) > 300) {
     throw new WebhookSignatureError('webhook timestamp outside 5-minute tolerance');
   }
 
@@ -438,8 +440,8 @@ export class PolarProvider implements PaymentProvider {
   }
 
   // EC:E4 — manual Standard Webhooks verification (see spec "SDK 버전 불일치")
-  async verifyWebhook(input: { headers: Record<string, string>; rawBody: string }): Promise<NormalizedEvent> {
-    verifyStandardWebhookSignature({ headers: input.headers, rawBody: input.rawBody, secret: this.webhookSecret });
+  async verifyWebhook(input: { headers: Record<string, string>; rawBody: string; receivedAt?: Date }): Promise<NormalizedEvent> {
+    verifyStandardWebhookSignature({ headers: input.headers, rawBody: input.rawBody, secret: this.webhookSecret, receivedAt: input.receivedAt });
     let parsed: { type: string; data: Record<string, any>; id?: string; timestamp?: string };
     try {
       parsed = JSON.parse(input.rawBody);

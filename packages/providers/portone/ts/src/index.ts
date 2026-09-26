@@ -590,7 +590,7 @@ export class PortoneProvider implements PaymentProvider {
     throw new PaymentKitError('portone has no meters API', 'unsupported'); // capabilities().meters === false
   }
 
-  async verifyWebhook(input: { headers: Record<string, string>; rawBody: string }): Promise<NormalizedEvent> {
+  async verifyWebhook(input: { headers: Record<string, string>; rawBody: string; receivedAt?: Date }): Promise<NormalizedEvent> {
     const id = input.headers['webhook-id'] ?? input.headers['svix-id'];
     const timestamp = input.headers['webhook-timestamp'] ?? input.headers['svix-timestamp'];
     const sigHeader = input.headers['webhook-signature'] ?? input.headers['svix-signature'];
@@ -598,7 +598,9 @@ export class PortoneProvider implements PaymentProvider {
       throw new WebhookSignatureError('missing Standard Webhooks headers (webhook-id/webhook-timestamp/webhook-signature)');
     }
     const tsSec = Number(timestamp);
-    if (!Number.isFinite(tsSec) || Math.abs(Date.now() / 1000 - tsSec) > 300) {
+    // EC:E17 — measured at receipt when process() re-verifies a stored body.
+    const refSec = (input.receivedAt?.getTime() ?? Date.now()) / 1000;
+    if (!Number.isFinite(tsSec) || Math.abs(refSec - tsSec) > 300) {
       throw new WebhookSignatureError('webhook timestamp outside 5-minute tolerance');
     }
     const secretB64 = this.webhookSecret.startsWith('whsec_') ? this.webhookSecret.slice(6) : this.webhookSecret;

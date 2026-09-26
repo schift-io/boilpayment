@@ -929,13 +929,24 @@ class StripeProvider:
 
     # EC:E4
     async def verify_webhook(
-        self, *, headers: dict[str, str], raw_body: str
+        self,
+        *,
+        headers: dict[str, str],
+        raw_body: str,
+        received_at: datetime | None = None,
     ) -> NormalizedEvent:
         sig = headers.get("stripe-signature") or headers.get("Stripe-Signature")
         if not sig:
             raise WebhookSignatureError("missing stripe-signature header")
         try:
-            event = stripe.Webhook.construct_event(raw_body, sig, self._webhook_secret)
+            # EC:E17 -- the Python SDK has no receivedAt: widen the 300 s tolerance by the time
+            # elapsed since receipt, which is the same check measured at receipt.
+            tolerance = 300
+            if received_at is not None:
+                tolerance += max(0, int(time.time() - received_at.timestamp()))
+            event = stripe.Webhook.construct_event(
+                raw_body, sig, self._webhook_secret, tolerance=tolerance
+            )
         except Exception as err:  # stripe.SignatureVerificationError et al.
             raise WebhookSignatureError(str(err)) from err
         return to_normalized_event(event)

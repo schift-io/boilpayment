@@ -458,12 +458,19 @@ class GooglePlayProvider:
         return await self.get_subscription(provider_ref)
 
     async def verify_webhook(
-        self, *, headers: dict[str, str], raw_body: str
+        self,
+        *,
+        headers: dict[str, str],
+        raw_body: str,
+        received_at: datetime | None = None,
     ) -> NormalizedEvent:
         """EC:N1 N6 N13 -- Pub/Sub push: verify the OIDC token, check the package, map the notification."""
         auth = headers.get("authorization") or headers.get("Authorization")
         try:
-            await verify_push_token(auth, self._c.pubsub, self._now())
+            # EC:E17 -- the push token's exp is judged at receipt on a later re-verify.
+            await verify_push_token(
+                auth, self._c.pubsub, received_at if received_at is not None else self._now()
+            )
         except PushAuthError as err:
             raise WebhookSignatureError(str(err)) from err
         try:

@@ -225,9 +225,10 @@ export class GooglePlayProvider implements PaymentProvider, StorePurchaseProvide
   }
 
   /** EC:N1 N6 N13 — Pub/Sub push: verify the OIDC token, check the package, map the notification. */
-  async verifyWebhook(input: { headers: Record<string, string>; rawBody: string }): Promise<NormalizedEvent> {
+  async verifyWebhook(input: { headers: Record<string, string>; rawBody: string; receivedAt?: Date }): Promise<NormalizedEvent> {
     const auth = input.headers.authorization ?? input.headers.Authorization;
-    try { await verifyPushToken(auth, this.config.pubsub, this.now()); } catch (err) {
+    // EC:E17 — the push token's exp is judged at receipt when process() re-verifies later.
+    try { await verifyPushToken(auth, this.config.pubsub, input.receivedAt ?? this.now()); } catch (err) {
       throw new WebhookSignatureError(err instanceof PushAuthError ? err.message : 'push token verification failed');
     }
     type Push = { message?: { data?: string; messageId?: string; message_id?: string; publishTime?: string } };

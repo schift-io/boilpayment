@@ -252,7 +252,11 @@ def to_normalized_event(
 
 # EC:webhookSignature — Standard Webhooks HMAC verification, implemented manually (see spec).
 def verify_standard_webhook_signature(
-    *, headers: dict[str, str], raw_body: str, secret: str
+    *,
+    headers: dict[str, str],
+    raw_body: str,
+    secret: str,
+    received_at: datetime | None = None,
 ) -> None:
     lower = {k.lower(): v for k, v in headers.items()}
     id_ = lower.get("webhook-id")
@@ -268,7 +272,9 @@ def verify_standard_webhook_signature(
         ts_sec = float(timestamp)
     except ValueError:
         raise WebhookSignatureError("invalid webhook timestamp")
-    if abs(time.time() - ts_sec) > 300:
+    # EC:E17 -- measured at receipt when process() re-verifies a stored body.
+    ref = received_at.timestamp() if received_at is not None else time.time()
+    if abs(ref - ts_sec) > 300:
         raise WebhookSignatureError("webhook timestamp outside 5-minute tolerance")
 
     secret_raw = secret.removeprefix("whsec_")
@@ -599,10 +605,17 @@ class PolarProvider:
 
     # EC:E4 — manual Standard Webhooks verification (see spec "SDK 버전 불일치")
     async def verify_webhook(
-        self, *, headers: dict[str, str], raw_body: str
+        self,
+        *,
+        headers: dict[str, str],
+        raw_body: str,
+        received_at: datetime | None = None,
     ) -> NormalizedEvent:
         verify_standard_webhook_signature(
-            headers=headers, raw_body=raw_body, secret=self._webhook_secret
+            headers=headers,
+            raw_body=raw_body,
+            secret=self._webhook_secret,
+            received_at=received_at,
         )
         try:
             parsed = json.loads(raw_body)
