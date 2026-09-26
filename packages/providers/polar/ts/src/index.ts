@@ -228,9 +228,9 @@ export function verifyStandardWebhookSignature(input: { headers: Record<string, 
 
   // mirrors PortoneProvider.verifyWebhook — Standard Webhooks 5-minute replay tolerance
   const tsSec = Number(timestamp);
-  // EC:E17 — measured at receipt when process() re-verifies a stored body.
-  const refSec = (input.receivedAt?.getTime() ?? Date.now()) / 1000;
-  if (!Number.isFinite(tsSec) || Math.abs(refSec - tsSec) > 300) {
+  // EC:E17 — freshness is enforced at receipt (wall clock); a re-verify of a stored row
+  // (receivedAt set) checks the signature only.
+  if (!Number.isFinite(tsSec) || (!input.receivedAt && Math.abs(Date.now() / 1000 - tsSec) > 300)) {
     throw new WebhookSignatureError('webhook timestamp outside 5-minute tolerance');
   }
 

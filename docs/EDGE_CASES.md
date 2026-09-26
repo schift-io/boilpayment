@@ -131,7 +131,7 @@
 | E14 | 재지급 후 원래 webhook 이 뒤늦게 도착 | (B12) | 같은 멱등키 → no-op | cs | P0 |
 | E15 | 동일 고객 여러 provider 에서 결제 (Stripe + Toss) | (구현 규칙) | `customers.provider_refs[]`. 풀은 하나, grant 마다 `provider` 태그 | core | P1 |
 | E16 | 네이티브 구독(Stripe/Polar) 갱신 인보이스가 webhook 으로 먼저 도착 (로컬 결제 행 없음) | (구현 규칙) | 로컬 구독이 있으면 provider 에서 결제를 재조회(E3) → 그 구독의 결제일 때만 결제 행 기록 → 갱신 지급. 다른 구독 결제·모르는 구독은 `unknown_provider_ref`. 같은 인보이스 재전송은 행 1개 (`payments (provider, provider_ref)` unique) | webhook | P0 |
-| E17 | 받은 뒤 5분 넘게 지나 재처리하는 webhook (processPending 재시도) | (구현 규칙) | `process()` 는 저장된 원문의 서명을 매번 다시 검증하지만, 타임스탬프 허용 범위(Stripe 300초, Standard Webhooks 5분, Google push 토큰 exp, Apple 인증서 유효기간)는 받은 시각(`receivedAt`)에서 판단한다. 저장 뒤 원문이 바뀐 행은 서명 불일치로 실패 | webhook + providers | P0 |
+| E17 | 받은 뒤 5분 넘게 지나 재처리하는 webhook (processPending 재시도) | (구현 규칙) | `receive()` 가 서명과 타임스탬프 허용 범위(Stripe 300초, Standard Webhooks 5분)를 벽시계로 검사한다. `process()` 는 저장된 원문의 서명만 다시 검증하고 나이는 보지 않는다(`receivedAt` 전달). Google push 토큰 exp·Apple 인증서 유효기간은 `receivedAt` 기준. 저장 뒤 원문이 바뀐 행은 서명 불일치로 실패 | webhook + providers | P0 |
 | E18 | 서명 없는 Toss webhook 의 출처 위조 (요청 헤더로 IP 허용목록 통과, 가상계좌 입금 콜백 위조) | (구현 규칙) | IP 허용목록은 앱이 소켓에서 읽어 넘기는 연결 주소(`remoteAddress`)만 쓰고 요청 헤더(`x-paykit-remote-ip`, `x-forwarded-for`)는 쓰지 않는다. `DEPOSIT_CALLBACK` 은 `orderId` 로 결제를 다시 조회해 그 결제의 `secret` 과 상수 시간 비교가 맞을 때만 받는다(Toss 문서 webhook-events). 두 검사는 수신 시점에 하고, `process()` 의 재검증은 이미 통과한 저장 행이라 다시 하지 않는다. Toss 를 고른 생성 프로젝트의 `handleWebhook` 은 `remoteAddress` 를 받는다 | providers(toss) + webhook | P0 |
 
 ## F. Provider 별 특이점

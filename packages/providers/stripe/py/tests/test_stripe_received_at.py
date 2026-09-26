@@ -48,4 +48,4 @@ def test_ec_e17_stale_at_receipt_refused() -> None:
     old = T - 3600
     raw = _body(old)
     with pytest.raises(WebhookSignatureError):
-        asyncio.run(P.verify_webhook(headers={"stripe-signature": sign_stripe_payload(raw, SECRET, old)}, raw_body=raw, received_at=AT))
+        asyncio.run(P.verify_webhook(headers={"stripe-signature": sign_stripe_payload(raw, SECRET, old)}, raw_body=raw))

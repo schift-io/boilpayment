@@ -596,9 +596,10 @@ export class StripeProvider implements PaymentProvider {
     if (!sig) throw new WebhookSignatureError('missing stripe-signature header');
     let event: Stripe.Event;
     try {
-      // EC:E17 — tolerance (300 s, the SDK default) is measured at receipt when re-verifying.
-      const receivedAt = input.receivedAt?.getTime(); // stripe-node takes milliseconds here
-      event = this.client.webhooks.constructEvent(input.rawBody, sig, this.webhookSecret, 300, undefined, receivedAt);
+      // EC:E17 — freshness (300 s) is enforced at receipt against the wall clock; a re-verify of a
+      // stored row (receivedAt set) checks the signature only. stripe-node treats 0 as "default"
+      // (`tolerance || 300`) and skips the age check only for tolerance <= 0 after that, hence -1.
+      event = this.client.webhooks.constructEvent(input.rawBody, sig, this.webhookSecret, input.receivedAt ? -1 : 300);
     } catch (err) {
       throw new WebhookSignatureError((err as Error).message);
     }

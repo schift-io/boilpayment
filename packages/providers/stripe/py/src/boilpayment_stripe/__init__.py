@@ -940,13 +940,10 @@ class StripeProvider:
         if not sig:
             raise WebhookSignatureError("missing stripe-signature header")
         try:
-            # EC:E17 -- the Python SDK has no receivedAt: widen the 300 s tolerance by the time
-            # elapsed since receipt, which is the same check measured at receipt.
-            tolerance = 300
-            if received_at is not None:
-                tolerance += max(0, int(time.time() - received_at.timestamp()))
+            # EC:E17 -- freshness (300 s) is enforced at receipt against the wall clock; a
+            # re-verify of a stored row (received_at set) checks the signature only.
             event = stripe.Webhook.construct_event(
-                raw_body, sig, self._webhook_secret, tolerance=tolerance
+                raw_body, sig, self._webhook_secret, tolerance=None if received_at else 300
             )
         except Exception as err:  # stripe.SignatureVerificationError et al.
             raise WebhookSignatureError(str(err)) from err

@@ -17,7 +17,7 @@ describe('[EC:E17] PortoneProvider.verifyWebhook receivedAt', () => {
   const t = Math.floor(Date.now() / 1000) - 600;
   const id = 'msg_e17';
   const headers = { 'webhook-id': id, 'webhook-timestamp': String(t), 'webhook-signature': sign(id, String(t), BODY) };
-  it('[EC:E17] a signature fresh at receipt still verifies 10 minutes later', async () => {
+  it('[EC:E17] a re-verify 10 minutes later checks the signature only and passes', async () => {
     const e = await provider().verifyWebhook({ headers, rawBody: BODY, receivedAt: new Date(t * 1000) });
     expect(e.id).toBeTruthy();
   });
@@ -27,9 +27,9 @@ describe('[EC:E17] PortoneProvider.verifyWebhook receivedAt', () => {
   it('[EC:E17] a tampered stored body is refused even with receivedAt', async () => {
     await expect(provider().verifyWebhook({ headers, rawBody: BODY.replace('5000', '1').replace('pay_e17', 'pay_x'), receivedAt: new Date(t * 1000) })).rejects.toBeInstanceOf(WebhookSignatureError);
   });
-  it('[EC:E17] a timestamp already stale at receipt stays refused', async () => {
+  it('[EC:E17] a stale timestamp is refused at receipt', async () => {
     const old = String(t - 3600);
     const h = { 'webhook-id': id, 'webhook-timestamp': old, 'webhook-signature': sign(id, old, BODY) };
-    await expect(provider().verifyWebhook({ headers: h, rawBody: BODY, receivedAt: new Date(t * 1000) })).rejects.toBeInstanceOf(WebhookSignatureError);
+    await expect(provider().verifyWebhook({ headers: h, rawBody: BODY })).rejects.toBeInstanceOf(WebhookSignatureError); // judged at receipt (wall clock)
   });
 });

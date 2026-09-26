@@ -52,4 +52,4 @@ def test_ec_e17_stale_at_receipt_refused() -> None:
     old = str(T - 3600)
     h = {"webhook-id": "msg_e17", "webhook-timestamp": old, "webhook-signature": _sign("msg_e17", old, BODY)}
     with pytest.raises(WebhookSignatureError):
-        asyncio.run(_p().verify_webhook(headers=h, raw_body=BODY, received_at=AT))
+        asyncio.run(_p().verify_webhook(headers=h, raw_body=BODY))

@@ -421,10 +421,13 @@ aggregate refund notifications lacking a singular refund reference are not settl
 ## [EC:E17] Re-verify at process() time, judge freshness at receipt
 
 ```pseudo
-receive():  event = provider.verifyWebhook({ headers, rawBody })            # signature + freshness at now
+receive():  event = provider.verifyWebhook({ headers, rawBody })            # signature + freshness (wall clock)
 process():  event = provider.verifyWebhook({ headers, rawBody, receivedAt: record.receivedAt })
-            # signature is checked again (a stored body altered after receipt fails),
-            # timestamp tolerance / token exp / cert validity are judged at receivedAt.
+            # signature is checked again (a stored body altered after receipt fails); the timestamp
+            # age check is skipped (Stripe tolerance 0 / None, Standard Webhooks age check off).
+            # Google push-token exp and Apple certificate validity are judged at receivedAt.
+            # record.receivedAt comes from the injected Clock, which need not be wall time, so it is
+            # never compared with a provider's wall-clock signature timestamp.
 ```
 
 Every retry path (unknown_provider_ref waiting for a local row, E16 races, K1 version conflicts,

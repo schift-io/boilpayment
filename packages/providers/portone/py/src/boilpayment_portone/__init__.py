@@ -799,9 +799,9 @@ class PortoneProvider:
             ts_sec = float(timestamp)
         except ValueError:
             raise WebhookSignatureError("invalid webhook timestamp")
-        # EC:E17 -- measured at receipt when process() re-verifies a stored body.
-        ref = received_at.timestamp() if received_at is not None else time.time()
-        if abs(ref - ts_sec) > 300:
+        # EC:E17 -- freshness is enforced at receipt (wall clock); a re-verify of a stored row
+        # (received_at set) checks the signature only.
+        if received_at is None and abs(time.time() - ts_sec) > 300:
             raise WebhookSignatureError("webhook timestamp outside 5-minute tolerance")
         secret_b64 = self._webhook_secret.removeprefix("whsec_")
         key = base64.b64decode(secret_b64)
