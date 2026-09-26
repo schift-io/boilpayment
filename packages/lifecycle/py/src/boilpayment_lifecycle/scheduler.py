@@ -13,8 +13,10 @@ from boilpayment_core import (
     Money,
     NoopNotifier,
     Notifier,
+    Payment,
     PaymentKitError,
     PaymentProvider,
+    Period,
     Policy,
     Repo,
     Subscription,
@@ -147,8 +149,11 @@ async def tick(input: SchedulerTickInput) -> SchedulerTickResult:
                         policy.period.timezone,
                         policy.period.month_end_anchor,
                     )
+                    stored = await _record_renewal_payment(
+                        repo=repo, ids=input.ids, sub=sub, payment=payment, period=charged_period
+                    )
                     result = await on_renewal_paid(OnRenewalPaidInput(
-                        sub=sub, payment=dataclasses.replace(payment, period=charged_period),
+                        sub=sub, payment=stored,
                         policy=policy, ledger=ledger, repo=repo, clock=clock,
                     ))
                     return ("charged", result.sub)
@@ -176,3 +181,22 @@ async def tick(input: SchedulerTickInput) -> SchedulerTickResult:
             failed.append(result_sub)
 
     return SchedulerTickResult(charged=charged, failed=failed)
+
+
+async def _record_renewal_payment(
+    *, repo: Repo, ids: IdGen, sub: Subscription, payment: Payment, period: Period
+) -> Payment:
+    """EC:A26 -- a self-scheduled renewal has no webhook to create its payment row (Toss sends none
+    for billing payments), so store it here. A retried charge returns the same provider payment,
+    so an existing (provider, provider_ref) row is reused rather than duplicated."""
+    existing = await repo.payments.list(provider=payment.provider, provider_ref=payment.provider_ref)
+    row = dataclasses.replace(
+        payment,
+        id=existing[0].id if existing else ids.new_id(),
+        customer_id=sub.customer_id,
+        subscription_id=sub.id,
+        kind="subscription",
+        period=period,
+    )
+    await repo.payments.put(row)
+    return row

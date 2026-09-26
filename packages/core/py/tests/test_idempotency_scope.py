@@ -4,7 +4,13 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
-from boilpayment_core import ConsumeInput, InMemoryLedger, LedgerReference, NewLedgerEntry, SequentialIdGen
+from boilpayment_core import (
+    ConsumeInput,
+    InMemoryLedger,
+    LedgerReference,
+    NewLedgerEntry,
+    SequentialIdGen,
+)
 
 NOW = datetime(2026, 9, 27, tzinfo=UTC)
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from _webhook_sig import sign_stripe_payload
@@ -25,7 +25,7 @@ def _body(t: int) -> str:
 T = int(time.time()) - 600
 RAW = _body(T)
 HEADERS = {"stripe-signature": sign_stripe_payload(RAW, SECRET, T)}
-AT = datetime.fromtimestamp(T, tz=timezone.utc)
+AT = datetime.fromtimestamp(T, tz=UTC)
 P = StripeProvider(secret_key="sk_test_dummy", webhook_secret=SECRET)
 
 

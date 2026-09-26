@@ -8,7 +8,12 @@ import dataclasses
 import json
 from datetime import UTC, datetime
 
-from boilpayment_core import FixedClock, InMemoryRepo, NormalizedEvent, WebhookSignatureError
+from boilpayment_core import (
+    FixedClock,
+    InMemoryRepo,
+    NormalizedEvent,
+    WebhookSignatureError,
+)
 from boilpayment_webhook import process, process_pending, receive
 
 
@@ -18,7 +23,7 @@ class TolerantProvider:
     def __init__(self, clock: FixedClock) -> None:
         self._clock = clock
 
-    def capabilities(self):  # noqa: ANN201 -- only the name matters here
+    def capabilities(self):
         return None
 
     async def verify_webhook(self, *, headers, raw_body, received_at=None) -> NormalizedEvent:

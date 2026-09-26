@@ -524,3 +524,19 @@ for row in rows:
 `parseBackfillFile` / `parse_backfill_file`: CSV with a header row or JSON array, columns
 `customer_id,email,provider,customer_ref,subscription_ref,plan_id,billing_key,period_start,period_end,credits,credits_expire_at`.
 Dates are ISO 8601; a date without a zone is UTC.
+
+## [EC:A26] Self-scheduled renewals store their payment row
+
+```pseudo
+tick(): payment = provider.chargeBillingKey(...)          # same idempotency key on retries
+        if payment.status == 'succeeded':
+            existing = repo.payments.list({ provider, providerRef: payment.providerRef })[0]
+            row = { ...payment, id: existing?.id ?? ids.newId(), customerId: sub.customerId,
+                    subscriptionId: sub.id, kind: 'subscription', period: chargedPeriod }
+            repo.payments.put(row)
+            onRenewalPaid({ sub, payment: row, ... })        # grants reference row.id
+```
+
+Toss sends no webhook for billing payments, so without this row the renewal could not be refunded
+through support.requestRefund and was missing from settlementReport, timeline and
+recoverMissingGrants.

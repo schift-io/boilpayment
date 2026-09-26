@@ -5,7 +5,13 @@ import asyncio
 import uuid
 from datetime import UTC, datetime
 
-from boilpayment_core import ConsumeInput, Customer, LedgerReference, NewLedgerEntry, UsageEvent
+from boilpayment_core import (
+    ConsumeInput,
+    Customer,
+    LedgerReference,
+    NewLedgerEntry,
+    UsageEvent,
+)
 from boilpayment_schema_postgres import PostgresLedgerStore, PostgresRepo
 from db_helper import create_test_db, drop_test_db
 

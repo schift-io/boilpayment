@@ -1,5 +1,6 @@
 // spec: packages/lifecycle/spec/lifecycle.pseudo.md — EC:F (Toss/Portone self-scheduling)
 import { Clock, IdGen, NoopNotifier, Notifier, PaymentKitError, PaymentProvider, Policy, Repo, LedgerStore, Subscription } from 'boilpayment-core';
+import type { Payment, Period } from 'boilpayment-core';
 import { onRenewalPaid } from './renewal.js';
 import { onPaymentFailed } from './dunning.js';
 import { nextPeriod } from './period.js';
@@ -97,7 +98,8 @@ export async function tick(input: SchedulerTickInput): Promise<SchedulerTickResu
         case 'succeeded': {
           const interval = plan.interval ?? 'month';
           const chargedPeriod = nextPeriod(sub.currentPeriod, interval, sub.anchorDay, policy.period.timezone, policy.period.monthEndAnchor);
-          const result = await onRenewalPaid({ sub, payment: { ...payment, period: chargedPeriod }, policy, ledger, repo, clock });
+          const stored = await recordRenewalPayment({ repo, ids: input.ids, sub, payment, period: chargedPeriod });
+          const result = await onRenewalPaid({ sub, payment: stored, policy, ledger, repo, clock });
           return { kind: 'charged' as const, sub: result.sub };
         }
         case 'failed': {
@@ -124,4 +126,25 @@ export async function tick(input: SchedulerTickInput): Promise<SchedulerTickResu
   }
 
   return { charged, failed };
+}
+
+/**
+ * EC:A26 — a self-scheduled renewal has no webhook to create its payment row (Toss sends none for
+ * billing payments), so store it here: refunds, settlement, timeline and missing-grant recovery all
+ * start from local payments. A retried charge returns the same provider payment (same idempotency
+ * key), so an existing (provider, providerRef) row is reused rather than duplicated.
+ */
+async function recordRenewalPayment(input: { repo: Repo; ids: IdGen; sub: Subscription; payment: Payment; period: Period }): Promise<Payment> {
+  const { repo, ids, sub, payment, period } = input;
+  const [existing] = await repo.payments.list({ provider: payment.provider, providerRef: payment.providerRef } as Partial<Payment>);
+  const row: Payment = {
+    ...payment,
+    id: existing?.id ?? ids.newId(),
+    customerId: sub.customerId,
+    subscriptionId: sub.id,
+    kind: 'subscription',
+    period,
+  };
+  await repo.payments.put(row);
+  return row;
 }

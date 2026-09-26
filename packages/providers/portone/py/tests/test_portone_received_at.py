@@ -8,11 +8,11 @@ import hashlib
 import hmac
 import json
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
+import httpx
 import pytest
 from boilpayment_core import WebhookSignatureError
-import httpx
 from boilpayment_portone import PortoneProvider, PortoneProviderConfig
 
 SECRET = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"
@@ -25,7 +25,7 @@ def _sign(id_: str, ts: str, body: str) -> str:
 
 
 T = int(time.time()) - 600
-AT = datetime.fromtimestamp(T, tz=timezone.utc)
+AT = datetime.fromtimestamp(T, tz=UTC)
 HEADERS = {"webhook-id": "msg_e17", "webhook-timestamp": str(T), "webhook-signature": _sign("msg_e17", str(T), BODY)}
 
 
