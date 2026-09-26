@@ -24,6 +24,8 @@ import { PaymentKitError, WebhookSignatureError, NoopLogger } from 'boilpayment-
 export interface StripeProviderConfig {
   secretKey: string;
   webhookSecret: string;
+  /** EC:E20 — secrets being rotated out; a stored webhook signed with one still re-verifies. */
+  previousWebhookSecrets?: string[];
   apiVersion?: Stripe.LatestApiVersion;
   /** Override the API host, e.g. stripe-mock: { host: '127.0.0.1', port: 12111, protocol: 'http' }. */
   apiBase?: { host: string; port?: number; protocol?: 'http' | 'https' };
@@ -403,6 +405,7 @@ export class StripeProvider implements PaymentProvider {
   readonly name = 'stripe' as const;
   private readonly client: Stripe;
   private readonly webhookSecret: string;
+  private readonly previousWebhookSecrets: string[];
   private readonly secretKey: string;
   private readonly logger: Logger;
   private readonly config: StripeProviderConfig;
@@ -417,6 +420,7 @@ export class StripeProvider implements PaymentProvider {
       ...(config.apiBase ? { host: config.apiBase.host, port: config.apiBase.port, protocol: config.apiBase.protocol } : {}),
     });
     this.webhookSecret = config.webhookSecret;
+    this.previousWebhookSecrets = config.previousWebhookSecrets ?? [];
     this.secretKey = config.secretKey;
     this.logger = config.logger ?? new NoopLogger();
     this.correlationIdOverride = config.correlationId ?? null;
@@ -594,16 +598,19 @@ export class StripeProvider implements PaymentProvider {
   async verifyWebhook(input: { headers: Record<string, string>; rawBody: string; receivedAt?: Date }): Promise<NormalizedEvent> {
     const sig = input.headers['stripe-signature'] ?? input.headers['Stripe-Signature'];
     if (!sig) throw new WebhookSignatureError('missing stripe-signature header');
-    let event: Stripe.Event;
-    try {
-      // EC:E17 — freshness (300 s) is enforced at receipt against the wall clock; a re-verify of a
-      // stored row (receivedAt set) checks the signature only. stripe-node treats 0 as "default"
-      // (`tolerance || 300`) and skips the age check only for tolerance <= 0 after that, hence -1.
-      event = this.client.webhooks.constructEvent(input.rawBody, sig, this.webhookSecret, input.receivedAt ? -1 : 300);
-    } catch (err) {
-      throw new WebhookSignatureError((err as Error).message);
+    // EC:E17 — freshness (300 s) is enforced at receipt against the wall clock; a re-verify of a
+    // stored row (receivedAt set) checks the signature only. stripe-node treats 0 as "default"
+    // (`tolerance || 300`) and skips the age check only for tolerance <= 0 after that, hence -1.
+    // EC:E20 — the current secret first, then secrets being rotated out.
+    let lastError: unknown;
+    for (const secret of [this.webhookSecret, ...this.previousWebhookSecrets]) {
+      try {
+        return toNormalizedEvent(this.client.webhooks.constructEvent(input.rawBody, sig, secret, input.receivedAt ? -1 : 300));
+      } catch (err) {
+        lastError = err;
+      }
     }
-    return toNormalizedEvent(event);
+    throw new WebhookSignatureError((lastError as Error).message);
   }
 
   /**

@@ -33,3 +33,16 @@ describe('[EC:E17] PolarProvider.verifyWebhook receivedAt', () => {
     await expect(provider().verifyWebhook({ headers: h, rawBody: BODY })).rejects.toBeInstanceOf(WebhookSignatureError); // judged at receipt (wall clock)
   });
 });
+
+describe('[EC:E20] PolarProvider webhook secret rotation', () => {
+  const t = Math.floor(Date.now() / 1000) - 600;
+  const id = 'msg_e20';
+  const headers = { 'webhook-id': id, 'webhook-timestamp': String(t), 'webhook-signature': sign(id, String(t), BODY) };
+  const rotated = (previous?: string[]) => new PolarProvider({ accessToken: 'polar_at_dummy', webhookSecret: 'whsec_bmV3c2VjcmV0a2V5Zm9ydGVzdA==', previousWebhookSecrets: previous, server: 'sandbox' });
+  it('[EC:E20] a stored webhook signed with the old secret re-verifies when it is listed as previous', async () => {
+    expect((await rotated([SECRET]).verifyWebhook({ headers, rawBody: BODY, receivedAt: new Date(t * 1000) })).id).toBeTruthy();
+  });
+  it('[EC:E20] without the previous secret it is refused', async () => {
+    await expect(rotated().verifyWebhook({ headers, rawBody: BODY, receivedAt: new Date(t * 1000) })).rejects.toBeInstanceOf(WebhookSignatureError);
+  });
+});

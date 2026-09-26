@@ -266,6 +266,8 @@ class PortoneProviderConfig:
     api_secret: str
     store_id: str
     webhook_secret: str  # "whsec_..." per Standard Webhooks
+    # EC:E20 -- secrets being rotated out; a stored webhook signed with one still re-verifies.
+    previous_webhook_secrets: list[str] | None = None
     channel_key: str | None = None
     scheduling: Literal["provider", "self"] = "provider"
     # Override the API host, e.g. the local mock: "http://127.0.0.1:12212". Only used when
@@ -287,6 +289,7 @@ class PortoneProvider:
         self._api_secret = config.api_secret
         self._store_id = config.store_id
         self._webhook_secret = config.webhook_secret
+        self._previous_webhook_secrets = list(config.previous_webhook_secrets or [])
         self.channel_key = config.channel_key
         self._scheduling = config.scheduling
         self._logger: Logger = config.logger or NoopLogger()
@@ -803,22 +806,22 @@ class PortoneProvider:
         # (received_at set) checks the signature only.
         if received_at is None and abs(time.time() - ts_sec) > 300:
             raise WebhookSignatureError("webhook timestamp outside 5-minute tolerance")
-        secret_b64 = self._webhook_secret.removeprefix("whsec_")
-        key = base64.b64decode(secret_b64)
         signed_content = f"{id_}.{timestamp}.{raw_body}".encode()
-        expected = base64.b64encode(
-            hmac.new(key, signed_content, hashlib.sha256).digest()
-        )
         candidates = []
         for part in sig_header.split(" "):
             candidates.append(part.split(",", 1)[1] if "," in part else part)
-        ok = False
+        sig_bytes_list = []
         for sig in candidates:
             try:
-                sig_bytes = base64.b64decode(sig)
+                sig_bytes_list.append(base64.b64decode(sig))
             except (ValueError, binascii.Error):
                 continue
-            if hmac.compare_digest(sig_bytes, base64.b64decode(expected)):
+        # EC:E20 -- the current secret first, then secrets being rotated out.
+        ok = False
+        for secret in [self._webhook_secret, *self._previous_webhook_secrets]:
+            key = base64.b64decode(secret.removeprefix("whsec_"))
+            expected = hmac.new(key, signed_content, hashlib.sha256).digest()
+            if any(hmac.compare_digest(sig_bytes, expected) for sig_bytes in sig_bytes_list):
                 ok = True
                 break
         if not ok:

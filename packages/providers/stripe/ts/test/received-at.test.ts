@@ -30,3 +30,16 @@ describe('[EC:E17] StripeProvider.verifyWebhook receivedAt', () => {
     await expect(provider().verifyWebhook({ headers: { 'stripe-signature': signStripePayload(old, secret, t) }, rawBody: old })).rejects.toBeInstanceOf(WebhookSignatureError); // judged at receipt (wall clock)
   });
 });
+
+describe('[EC:E20] StripeProvider webhook secret rotation', () => {
+  const t = Math.floor(Date.now() / 1000) - 600;
+  const raw = body(t);
+  const headers = { 'stripe-signature': signStripePayload(raw, secret, t) };
+  const rotated = (previous?: string[]) => new StripeProvider({ secretKey: 'sk_test_dummy', webhookSecret: 'whsec_rotated_new', previousWebhookSecrets: previous });
+  it('[EC:E20] a stored webhook signed with the old secret re-verifies when the old secret is listed as previous', async () => {
+    expect((await rotated([secret]).verifyWebhook({ headers, rawBody: raw, receivedAt: new Date(t * 1000) })).paymentRef).toBe('in_e17');
+  });
+  it('[EC:E20] without the previous secret it is refused (what the rotation list is for)', async () => {
+    await expect(rotated().verifyWebhook({ headers, rawBody: raw, receivedAt: new Date(t * 1000) })).rejects.toBeInstanceOf(WebhookSignatureError);
+  });
+});

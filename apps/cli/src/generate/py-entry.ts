@@ -27,11 +27,11 @@ function providerImportsPy(config: PaykitConfig): string[] {
 // keyword; PolarProvider() takes `logger=` directly (no config dataclass — see its __init__).
 function providerConstructionPy(config: PaykitConfig): string[] {
   const lines: string[] = [];
-  if (config.providers.includes('stripe')) lines.push(`    providers["stripe"] = StripeProvider(secret_key=_env(env, "STRIPE_SECRET_KEY"), webhook_secret=_env(env, "STRIPE_WEBHOOK_SECRET"), logger=logger)`);
-  if (config.providers.includes('polar')) lines.push(`    providers["polar"] = PolarProvider(access_token=_env(env, "POLAR_ACCESS_TOKEN"), webhook_secret=_env(env, "POLAR_WEBHOOK_SECRET"), logger=logger)`);
+  if (config.providers.includes('stripe')) lines.push(`    providers["stripe"] = StripeProvider(secret_key=_env(env, "STRIPE_SECRET_KEY"), webhook_secret=_env(env, "STRIPE_WEBHOOK_SECRET"), previous_webhook_secrets=[v.strip() for v in (env.get("STRIPE_WEBHOOK_PREVIOUS_SECRETS") or "").split(",") if v.strip()], logger=logger)`);
+  if (config.providers.includes('polar')) lines.push(`    providers["polar"] = PolarProvider(access_token=_env(env, "POLAR_ACCESS_TOKEN"), webhook_secret=_env(env, "POLAR_WEBHOOK_SECRET"), previous_webhook_secrets=[v.strip() for v in (env.get("POLAR_WEBHOOK_PREVIOUS_SECRETS") or "").split(",") if v.strip()], logger=logger)`);
   // EC:E19 — no allowlist means every Toss webhook is refused at receipt (fail closed).
   if (config.providers.includes('toss')) lines.push(`    providers["toss"] = TossProvider(TossProviderConfig(secret_key=_env(env, "TOSS_SECRET_KEY"), client_key=_env(env, "TOSS_CLIENT_KEY"), allowed_webhook_ips=[ip.strip() for ip in (env.get("TOSS_WEBHOOK_ALLOWED_IPS") or "").split(",") if ip.strip()], logger=logger))`);
-  if (config.providers.includes('portone')) lines.push(`    providers["portone"] = PortoneProvider(PortoneProviderConfig(api_secret=_env(env, "PORTONE_API_SECRET"), store_id=_env(env, "PORTONE_STORE_ID"), webhook_secret=_env(env, "PORTONE_WEBHOOK_SECRET"), logger=logger))`);
+  if (config.providers.includes('portone')) lines.push(`    providers["portone"] = PortoneProvider(PortoneProviderConfig(api_secret=_env(env, "PORTONE_API_SECRET"), store_id=_env(env, "PORTONE_STORE_ID"), webhook_secret=_env(env, "PORTONE_WEBHOOK_SECRET"), previous_webhook_secrets=[v.strip() for v in (env.get("PORTONE_WEBHOOK_PREVIOUS_SECRETS") or "").split(",") if v.strip()], logger=logger))`);
   return lines;
 }
 

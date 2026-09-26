@@ -665,6 +665,7 @@ class StripeProvider:
         *,
         secret_key: str,
         webhook_secret: str,
+        previous_webhook_secrets: list[str] | None = None,
         api_version: str | None = None,
         api_base: str | None = None,
         logger: Logger | None = None,
@@ -679,6 +680,7 @@ class StripeProvider:
         self._init_kwargs: dict[str, Any] = {
             "secret_key": secret_key,
             "webhook_secret": webhook_secret,
+            "previous_webhook_secrets": previous_webhook_secrets,
             "api_version": api_version,
             "api_base": api_base,
             "logger": logger,
@@ -694,6 +696,8 @@ class StripeProvider:
         )
         self._client = stripe.StripeClient(**kwargs)
         self._webhook_secret = webhook_secret
+        # EC:E20 -- secrets being rotated out; a stored webhook signed with one still re-verifies.
+        self._previous_webhook_secrets = list(previous_webhook_secrets or [])
 
     # EC:L5 -- a scoped clone carrying a fixed correlation_id for every `provider.request` log line
     # it emits. Not part of the PaymentProvider Protocol (duck-typed -- webhook.process checks for
@@ -939,12 +943,17 @@ class StripeProvider:
         sig = headers.get("stripe-signature") or headers.get("Stripe-Signature")
         if not sig:
             raise WebhookSignatureError("missing stripe-signature header")
-        try:
-            # EC:E17 -- freshness (300 s) is enforced at receipt against the wall clock; a
-            # re-verify of a stored row (received_at set) checks the signature only.
-            event = stripe.Webhook.construct_event(
-                raw_body, sig, self._webhook_secret, tolerance=None if received_at else 300
-            )
-        except Exception as err:  # stripe.SignatureVerificationError et al.
-            raise WebhookSignatureError(str(err)) from err
-        return to_normalized_event(event)
+        # EC:E17 -- freshness (300 s) is enforced at receipt against the wall clock; a re-verify of a
+        # stored row (received_at set) checks the signature only.
+        # EC:E20 -- the current secret first, then secrets being rotated out.
+        last_error: Exception | None = None
+        for secret in [self._webhook_secret, *self._previous_webhook_secrets]:
+            try:
+                event = stripe.Webhook.construct_event(
+                    raw_body, sig, secret, tolerance=None if received_at else 300
+                )
+            except Exception as err:  # stripe.SignatureVerificationError et al.  # noqa: BLE001
+                last_error = err
+                continue
+            return to_normalized_event(event)
+        raise WebhookSignatureError(str(last_error)) from last_error

@@ -466,3 +466,16 @@ handlers['payment.succeeded'] (subscriptionRef 없음, 일회성 충전):
 Toss (서명 없음): 수신 시점에 허용목록이 비어 있으면 거부(fail closed), `DEPOSIT_CALLBACK` 은 `secret`
 이 없으면 거부, 있으면 결제의 secret 과 상수 시간 비교(E18). 생성 코드는 `TOSS_WEBHOOK_ALLOWED_IPS` 를
 `allowedWebhookIps` 로 넘기고 `handleWebhook` 에 소켓 주소(`remoteAddress`)를 넘긴다.
+
+
+## [EC:E20] 서명 비밀값 교체 중 재검증
+
+```pseudo
+verifyWebhook({ headers, rawBody, receivedAt }):
+   for secret in [webhookSecret, ...previousWebhookSecrets]:   # 현재 값 먼저
+      if signature(rawBody, secret) matches: return event      # receivedAt 이 있으면 나이 검사 없음(E17)
+   raise WebhookSignatureError
+```
+
+교체 절차: 새 값을 `*_WEBHOOK_SECRET`, 옛 값을 `*_WEBHOOK_PREVIOUS_SECRETS` 에 두고, 옛 값으로 서명된 저장
+행이 다 처리된 뒤 옛 값을 지운다.

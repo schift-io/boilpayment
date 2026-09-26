@@ -302,6 +302,7 @@ class PolarProvider:
         *,
         access_token: str,
         webhook_secret: str,
+        previous_webhook_secrets: list[str] | None = None,
         server: Literal["production", "sandbox"] = "production",
         api_base: str | None = None,
         logger: Logger | None = None,
@@ -316,6 +317,8 @@ class PolarProvider:
         directly."""
         self._access_token = access_token
         self._webhook_secret = webhook_secret
+        # EC:E20 -- secrets being rotated out; a stored webhook signed with one still re-verifies.
+        self._previous_webhook_secrets = list(previous_webhook_secrets or [])
         self._base_url = api_base or SERVER_URLS[server]
         self._logger: Logger = logger or NoopLogger()
         self._correlation_id_override = correlation_id
@@ -612,12 +615,19 @@ class PolarProvider:
         raw_body: str,
         received_at: datetime | None = None,
     ) -> NormalizedEvent:
-        verify_standard_webhook_signature(
-            headers=headers,
-            raw_body=raw_body,
-            secret=self._webhook_secret,
-            received_at=received_at,
-        )
+        # EC:E20 -- the current secret first, then secrets being rotated out.
+        last_error: WebhookSignatureError | None = None
+        for secret in [self._webhook_secret, *self._previous_webhook_secrets]:
+            try:
+                verify_standard_webhook_signature(
+                    headers=headers, raw_body=raw_body, secret=secret, received_at=received_at
+                )
+                last_error = None
+                break
+            except WebhookSignatureError as err:
+                last_error = err
+        if last_error is not None:
+            raise last_error
         try:
             parsed = json.loads(raw_body)
         except json.JSONDecodeError as err:

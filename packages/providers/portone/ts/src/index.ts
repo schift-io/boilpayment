@@ -208,6 +208,8 @@ export interface PortoneProviderConfig {
   apiSecret: string;
   storeId: string;
   webhookSecret: string; // "whsec_..." per Standard Webhooks
+  /** EC:E20 — secrets being rotated out; a stored webhook signed with one still re-verifies. */
+  previousWebhookSecrets?: string[];
   channelKey?: string;
   /** 'provider' = PortOne schedule API drives renewals; 'self' = our scheduler calls chargeBillingKey. Default 'provider'. */
   scheduling?: 'provider' | 'self';
@@ -242,6 +244,7 @@ export class PortoneProvider implements PaymentProvider {
   private readonly apiSecret: string;
   private readonly storeId: string;
   private readonly webhookSecret: string;
+  private readonly previousWebhookSecrets: string[];
   readonly channelKey?: string;
   private readonly scheduling: 'provider' | 'self';
   private readonly fetchImpl: FetchLike;
@@ -255,6 +258,7 @@ export class PortoneProvider implements PaymentProvider {
     this.apiSecret = config.apiSecret;
     this.storeId = config.storeId;
     this.webhookSecret = config.webhookSecret;
+    this.previousWebhookSecrets = config.previousWebhookSecrets ?? [];
     this.channelKey = config.channelKey;
     this.scheduling = config.scheduling ?? 'provider';
     this.fetchImpl = fetchImpl;
@@ -603,10 +607,7 @@ export class PortoneProvider implements PaymentProvider {
     if (!Number.isFinite(tsSec) || (!input.receivedAt && Math.abs(Date.now() / 1000 - tsSec) > 300)) {
       throw new WebhookSignatureError('webhook timestamp outside 5-minute tolerance');
     }
-    const secretB64 = this.webhookSecret.startsWith('whsec_') ? this.webhookSecret.slice(6) : this.webhookSecret;
-    const key = Buffer.from(secretB64, 'base64');
     const signedContent = `${id}.${timestamp}.${input.rawBody}`;
-    const expected = createHmac('sha256', key).update(signedContent).digest('base64');
     const candidates = sigHeader
       .split(' ')
       .map((part) => {
@@ -614,14 +615,18 @@ export class PortoneProvider implements PaymentProvider {
         return idx >= 0 ? part.slice(idx + 1) : part;
       })
       .filter(Boolean);
-    const expectedBuf = Buffer.from(expected, 'base64');
-    const ok = candidates.some((sig) => {
-      try {
-        const sigBuf = Buffer.from(sig, 'base64');
-        return sigBuf.length === expectedBuf.length && timingSafeEqual(sigBuf, expectedBuf);
-      } catch {
-        return false;
-      }
+    // EC:E20 — the current secret first, then secrets being rotated out.
+    const ok = [this.webhookSecret, ...this.previousWebhookSecrets].some((secret) => {
+      const key = Buffer.from(secret.startsWith('whsec_') ? secret.slice(6) : secret, 'base64');
+      const expectedBuf = Buffer.from(createHmac('sha256', key).update(signedContent).digest('base64'), 'base64');
+      return candidates.some((sig) => {
+        try {
+          const sigBuf = Buffer.from(sig, 'base64');
+          return sigBuf.length === expectedBuf.length && timingSafeEqual(sigBuf, expectedBuf);
+        } catch {
+          return false;
+        }
+      });
     });
     if (!ok) throw new WebhookSignatureError('portone webhook signature mismatch');
     const body = JSON.parse(input.rawBody);

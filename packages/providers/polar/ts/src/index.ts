@@ -33,6 +33,8 @@ import { PaymentKitError, ProviderError, WebhookSignatureError, NoopLogger } fro
 export interface PolarProviderConfig {
   accessToken: string;
   webhookSecret: string;
+  /** EC:E20 — secrets being rotated out; a stored webhook signed with one still re-verifies. */
+  previousWebhookSecrets?: string[];
   server?: 'production' | 'sandbox';
   /** Overrides the API host entirely, e.g. the local mock: "http://127.0.0.1:12213". Takes precedence over `server`. */
   apiBase?: string;
@@ -256,6 +258,7 @@ export class PolarProvider implements PaymentProvider {
   readonly name = 'polar' as const;
   private readonly accessToken: string;
   private readonly webhookSecret: string;
+  private readonly previousWebhookSecrets: string[];
   private readonly baseUrl: string;
   private readonly logger: Logger;
   // EC:L5 — set only via config.correlationId / withCorrelationId(); overrides the per-call
@@ -265,6 +268,7 @@ export class PolarProvider implements PaymentProvider {
   constructor(config: PolarProviderConfig) {
     this.accessToken = config.accessToken;
     this.webhookSecret = config.webhookSecret;
+    this.previousWebhookSecrets = config.previousWebhookSecrets ?? [];
     this.baseUrl = config.apiBase ?? SERVER_URLS[config.server ?? 'production'];
     this.logger = config.logger ?? new NoopLogger();
     this.correlationIdOverride = config.correlationId ?? null;
@@ -442,7 +446,12 @@ export class PolarProvider implements PaymentProvider {
 
   // EC:E4 — manual Standard Webhooks verification (see spec "SDK 버전 불일치")
   async verifyWebhook(input: { headers: Record<string, string>; rawBody: string; receivedAt?: Date }): Promise<NormalizedEvent> {
-    verifyStandardWebhookSignature({ headers: input.headers, rawBody: input.rawBody, secret: this.webhookSecret, receivedAt: input.receivedAt });
+    // EC:E20 — the current secret first, then secrets being rotated out.
+    let verified = false; let lastError: unknown;
+    for (const secret of [this.webhookSecret, ...this.previousWebhookSecrets]) {
+      try { verifyStandardWebhookSignature({ headers: input.headers, rawBody: input.rawBody, secret, receivedAt: input.receivedAt }); verified = true; break; } catch (err) { lastError = err; }
+    }
+    if (!verified) throw lastError;
     let parsed: { type: string; data: Record<string, any>; id?: string; timestamp?: string };
     try {
       parsed = JSON.parse(input.rawBody);

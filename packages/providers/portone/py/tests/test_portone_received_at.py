@@ -53,3 +53,16 @@ def test_ec_e17_stale_at_receipt_refused() -> None:
     h = {"webhook-id": "msg_e17", "webhook-timestamp": old, "webhook-signature": _sign("msg_e17", old, BODY)}
     with pytest.raises(WebhookSignatureError):
         asyncio.run(_p().verify_webhook(headers=h, raw_body=BODY))
+
+
+def test_ec_e20_rotation_previous_secret_reverifies() -> None:
+    def _no_http(request):
+        raise AssertionError("no http")
+
+    def make(previous):
+        return PortoneProvider(PortoneProviderConfig(api_secret="test_sk_dummy", store_id="store_dummy", webhook_secret="whsec_bmV3c2VjcmV0a2V5Zm9ydGVzdA==",
+                                                     previous_webhook_secrets=previous),
+                               client=httpx.AsyncClient(transport=httpx.MockTransport(_no_http)))
+    assert asyncio.run(make([SECRET]).verify_webhook(headers=HEADERS, raw_body=BODY, received_at=AT)).id
+    with pytest.raises(WebhookSignatureError):
+        asyncio.run(make(None).verify_webhook(headers=HEADERS, raw_body=BODY, received_at=AT))
