@@ -1,0 +1,31 @@
+[project]
+name = "boilpayment-apple"
+version = "0.1.0"
+description = "boilpayment — Apple App Store (in-app purchases)"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "boilpayment contributors" }]
+requires-python = ">=3.11"
+dependencies = ["boilpayment-core", "httpx>=0.27", "cryptography>=43"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: Office/Business :: Financial",
+]
+
+[project.urls]
+Homepage = "https://github.com/schift-io/boilpayment#readme"
+Repository = "https://github.com/schift-io/boilpayment.git"
+Issues = "https://github.com/schift-io/boilpayment/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/boilpayment_apple"]

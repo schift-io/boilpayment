@@ -6,3 +6,4 @@ export * from './money.js';
 export * from './memory.js';
 export * from './idempotent.js';
 export * from './logger.js';
+export * from './store.js';

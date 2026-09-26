@@ -13,7 +13,7 @@ from typing import Any, Literal, Protocol, TypeVar, runtime_checkable
 
 # ── Value objects ────────────────────────────────────────────────────────────
 
-ProviderName = Literal["stripe", "polar", "toss", "portone"]
+ProviderName = Literal["stripe", "polar", "toss", "portone", "apple", "google_play"]
 
 
 @dataclass(kw_only=True, slots=True)
@@ -706,6 +706,9 @@ class ProviderCapabilities:
     meters: bool
     scheduling: Literal["provider", "self"]
     webhook_signature: bool
+    # EC:N1 -- "on_device" for in-app purchase stores (Apple, Google Play): the purchase happens in
+    # the app and the server verifies the store's proof (see store.py). Default "hosted".
+    checkout: Literal["hosted", "on_device"] = "hosted"
 
 
 @dataclass(kw_only=True, slots=True)

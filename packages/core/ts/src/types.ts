@@ -6,7 +6,7 @@
 
 // ── Value objects ────────────────────────────────────────────────────────────
 
-export type ProviderName = 'stripe' | 'polar' | 'toss' | 'portone';
+export type ProviderName = 'stripe' | 'polar' | 'toss' | 'portone' | 'apple' | 'google_play';
 
 export interface Money {
   amountMinor: number;
@@ -452,6 +452,9 @@ export interface ProviderCapabilities {
   meters: boolean;
   scheduling: 'provider' | 'self';
   webhookSignature: boolean;
+  /** EC:N1 — 'on_device' for in-app purchase stores (Apple, Google Play): the purchase happens in
+   * the app and the server verifies the store's proof (see store.ts). Absent means 'hosted'. */
+  checkout?: 'hosted' | 'on_device';
 }
 
 export interface CreateCheckoutInput {

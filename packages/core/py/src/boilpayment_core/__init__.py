@@ -49,4 +49,5 @@ from .policy import policy_from_dict as policy_from_dict
 from .policy import policy_to_dict as policy_to_dict
 from .policy import resolve_policy as resolve_policy
 from .policy import validate_policy as validate_policy
+from .store import *
 from .types import *

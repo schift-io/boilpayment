@@ -16,6 +16,8 @@ dependencies = [
   "boilpayment-polar",
   "boilpayment-toss",
   "boilpayment-portone",
+  "boilpayment-apple",
+  "boilpayment-google-play",
   "boilpayment",
 ]
 
@@ -47,6 +49,8 @@ boilpayment-stripe = { workspace = true }
 boilpayment-polar = { workspace = true }
 boilpayment-toss = { workspace = true }
 boilpayment-portone = { workspace = true }
+boilpayment-apple = { workspace = true }
+boilpayment-google-play = { workspace = true }
 boilpayment = { workspace = true }
 
 [dependency-groups]
