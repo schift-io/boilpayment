@@ -1,7 +1,7 @@
 // Minimal plan collection. Not part of questions.ts (plans are example data, not an
 // EDGE_CASES.md policy key) — see docs/ARCHITECTURE.md.
 import * as p from '@clack/prompts';
-import type { ProviderName } from '@schift/payment-kit-core';
+import type { ProviderName } from 'boilpayment-core';
 import type { PlanConfig } from './config.js';
 import type { WizardConfig } from './wizard-state.js';
 import type { WizardOptions } from './wizard.js';

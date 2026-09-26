@@ -1,4 +1,4 @@
-// Schift Payment Kit — Polar provider.
+// boilpayment — Polar provider.
 // spec: ../../spec/polar.pseudo.md
 //
 // NOTE: implemented directly over Polar's REST API (fetch) rather than through `@polar-sh/sdk`.
@@ -27,8 +27,8 @@ import type {
   Subscription,
   SubscriptionStatus,
   Logger,
-} from '@schift/payment-kit-core';
-import { PaymentKitError, ProviderError, WebhookSignatureError, NoopLogger } from '@schift/payment-kit-core';
+} from 'boilpayment-core';
+import { PaymentKitError, ProviderError, WebhookSignatureError, NoopLogger } from 'boilpayment-core';
 
 export interface PolarProviderConfig {
   accessToken: string;

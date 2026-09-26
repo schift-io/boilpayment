@@ -1,20 +1,20 @@
-# schift-payment-kit-credits
+# boilpayment-credits
 
-Credit-pool ledger operations on top of `schift-payment-kit-core`'s append-only `Ledger`:
+Credit-pool ledger operations on top of `boilpayment-core`'s append-only `Ledger`:
 grant on period start, consume against a policy-defined pool order, rollover on renewal,
 clawback, expiry, and top-ups. Every function is pure DI — pass in your `Ledger`/`Clock`/`Policy`.
 
 ## Install
 
 ```
-pip install schift-payment-kit-credits
+pip install boilpayment-credits
 ```
 
 ## Usage
 
 ```python
-from schift_payment_kit_credits import consume, ConsumeCreditsInput, grant_for_period, GrantForPeriodInput
-from schift_payment_kit_core import InMemoryLedger, SystemClock, resolve_policy
+from boilpayment_credits import consume, ConsumeCreditsInput, grant_for_period, GrantForPeriodInput
+from boilpayment_core import InMemoryLedger, SystemClock, resolve_policy
 
 ledger = InMemoryLedger()
 clock = SystemClock()
@@ -32,4 +32,4 @@ result = await consume(ConsumeCreditsInput(
 ))
 ```
 
-Full module contract: [docs/ARCHITECTURE.md §3.5](https://github.com/schift-io/payment-kit/blob/main/docs/ARCHITECTURE.md).
+Full module contract: [docs/ARCHITECTURE.md §3.5](https://github.com/schift-io/boilpayment/blob/main/docs/ARCHITECTURE.md).

@@ -16,8 +16,8 @@ import time
 
 import httpx
 import pytest
-from schift_payment_kit_core import WebhookSignatureError
-from schift_payment_kit_portone import PortoneProvider, PortoneProviderConfig
+from boilpayment_core import WebhookSignatureError
+from boilpayment_portone import PortoneProvider, PortoneProviderConfig
 
 WEBHOOK_SECRET = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"
 

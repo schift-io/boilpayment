@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { FixedClock, hashPayload, runIdempotent, type Operation } from '@schift/payment-kit-core';
+import { FixedClock, hashPayload, runIdempotent, type Operation } from 'boilpayment-core';
 import { PostgresRepo } from '../dist/index.js';
 import { createTestDb, dropTestDb, type TestDb } from './db-helper.js';
 

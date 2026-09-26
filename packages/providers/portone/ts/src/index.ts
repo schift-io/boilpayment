@@ -1,4 +1,4 @@
-// Schift Payment Kit — PortOne V2 provider.
+// boilpayment — PortOne V2 provider.
 // See spec/portone.pseudo.md for the full contract. Endpoints/request-response shapes
 // verified 2026-09-09 against the real V2 OpenAPI spec (portone-io/server-sdk repo,
 // codegen/openapi.json — the developers.portone.io site itself is JS-rendered and did
@@ -22,8 +22,8 @@ import type {
   NormalizedEvent,
   NormalizedEventType,
   Logger,
-} from '@schift/payment-kit-core';
-import { PaymentKitError, WebhookSignatureError, ProviderError, NoopLogger } from '@schift/payment-kit-core';
+} from 'boilpayment-core';
+import { PaymentKitError, WebhookSignatureError, ProviderError, NoopLogger } from 'boilpayment-core';
 
 const BASE_URL = 'https://api.portone.io';
 

@@ -1,8 +1,8 @@
 // Local helpers. EC:G2 proration_ratio itself lives in `core` (shared, canonical) — re-exported
 // here so evaluate.ts has one import surface; not duplicated.
-import type { LedgerEntry, RefundRounding } from '@schift/payment-kit-core';
+import type { LedgerEntry, RefundRounding } from 'boilpayment-core';
 
-export { prorationRatio } from '@schift/payment-kit-core';
+export { prorationRatio } from 'boilpayment-core';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
-from schift_payment_kit_core import (
+from boilpayment_core import (
     DEFAULT_POLICY,
     CollectingNotifier,
     Customer,
@@ -25,7 +25,7 @@ from schift_payment_kit_core import (
     SequentialIdGen,
     resolve_policy,
 )
-from schift_payment_kit_cs import (
+from boilpayment_cs import (
     ChecklistInput,
     CollectInput,
     DueInput,
@@ -33,7 +33,7 @@ from schift_payment_kit_cs import (
     SubmitInput,
     open_case,
 )
-from schift_payment_kit_cs.evidence import checklist, collect, due, submit
+from boilpayment_cs.evidence import checklist, collect, due, submit
 
 
 def run(coro):
@@ -392,7 +392,7 @@ def test_b18_due_does_not_escalate_a_case_with_complete_evidence():
         )
         for item in items:
             item.available = True
-        from schift_payment_kit_cs.evidence import EvidenceRecord, evidence_due_at
+        from boilpayment_cs.evidence import EvidenceRecord, evidence_due_at
 
         case.decision = {
             "evidence": EvidenceRecord(

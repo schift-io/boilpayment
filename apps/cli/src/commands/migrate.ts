@@ -1,4 +1,4 @@
-// `paykit migrate` — apply the SDK's own migrations to the configured database.
+// `boilpayment migrate` — apply the SDK's own migrations to the configured database.
 //
 // Why a command and not "run these .sql files with psql": applying them by hand does not record
 // anything in `paykit_migrations`, so the next release cannot tell what is already there. It also
@@ -21,7 +21,7 @@ export interface MigrateOptions {
 export async function runMigrate(dir: string, opts: MigrateOptions = {}): Promise<void> {
   const config = await readConfig(dir);
   if (!config) {
-    console.error(pc.red('paykit.config.json 을 찾을 수 없습니다. 먼저 `paykit init` 을 실행하세요.'));
+    console.error(pc.red('paykit.config.json 을 찾을 수 없습니다. 먼저 `boilpayment init` 을 실행하세요.'));
     process.exitCode = 1;
     return;
   }
@@ -40,7 +40,7 @@ export async function runMigrate(dir: string, opts: MigrateOptions = {}): Promis
 
   const sp = await loadSchemaPostgres(dir);
   if (!sp) {
-    console.error(pc.red('@schift/payment-kit-sdk 가 설치되어 있지 않습니다. 먼저 설치하세요.'));
+    console.error(pc.red('boilpayment-sdk 가 설치되어 있지 않습니다. 먼저 설치하세요.'));
     process.exitCode = 1;
     return;
   }

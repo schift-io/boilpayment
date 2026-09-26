@@ -11,7 +11,7 @@ import json
 from collections.abc import Callable
 from datetime import datetime
 
-from schift_payment_kit_core import (
+from boilpayment_core import (
     NormalizedEvent,
     Payment,
     ProviderCapabilities,

@@ -1,4 +1,4 @@
-"""cs.refundAssist's resolve() (packages/cs/py/src/schift_payment_kit_cs/refund_assist.py) stores
+"""cs.refundAssist's resolve() (packages/cs/py/src/boilpayment_cs/refund_assist.py) stores
 `CsCase.decision = {"decision": RefundDecision(...), "refund": Refund(...)}` -- nested dataclass
 instances, and `Refund` carries `created_at: datetime`. On Postgres, `CsCasesTable.put` wraps
 `cs.decision` with the `jsonb()` helper (psycopg `Jsonb`), which serializes via plain `json.dumps`
@@ -14,8 +14,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
-from db_helper import create_test_db, drop_test_db
-from schift_payment_kit_core import (
+from boilpayment_core import (
     DEFAULT_POLICY,
     CsCase,
     Customer,
@@ -24,7 +23,8 @@ from schift_payment_kit_core import (
     Refund,
     RefundDecision,
 )
-from schift_payment_kit_schema_postgres import PostgresRepo
+from boilpayment_schema_postgres import PostgresRepo
+from db_helper import create_test_db, drop_test_db
 
 
 def _mk_decision(payment_id: str = "pay_1", customer_id: str = "cust_1") -> dict:

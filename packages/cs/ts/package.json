@@ -1,7 +1,7 @@
 {
-  "name": "@schift/payment-kit-cs",
+  "name": "boilpayment-cs",
   "version": "0.1.0",
-  "description": "Schift Payment Kit — cs",
+  "description": "boilpayment — cs",
   "license": "MIT",
   "keywords": [
     "schift",
@@ -38,20 +38,20 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@schift/payment-kit-core": "workspace:*",
-    "@schift/payment-kit-refund": "workspace:*"
+    "boilpayment-core": "workspace:*",
+    "boilpayment-refund": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.6.0",
     "@types/node": "^22.0.0",
     "vitest": "^2.1.0"
   },
-  "homepage": "https://github.com/schift-io/payment-kit#readme",
+  "homepage": "https://github.com/schift-io/boilpayment#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/schift-io/payment-kit.git"
+    "url": "git+https://github.com/schift-io/boilpayment.git"
   },
   "bugs": {
-    "url": "https://github.com/schift-io/payment-kit/issues"
+    "url": "https://github.com/schift-io/boilpayment/issues"
   }
 }

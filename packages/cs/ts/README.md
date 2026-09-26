@@ -1,4 +1,4 @@
-# @schift/payment-kit-cs
+# boilpayment-cs
 
 Customer-support tooling for a subscription/credits business: case lifecycle (open/escalate/
 resolve/reject), auto-reconciliation against provider state, balance checks, manual re-grants,
@@ -8,13 +8,13 @@ chargeback disputes, and license/usage metering for the CS add-on itself.
 ## Install
 
 ```
-npm install @schift/payment-kit-cs @schift/payment-kit-core @schift/payment-kit-refund
+npm install boilpayment-cs boilpayment-core boilpayment-refund
 ```
 
 ## Usage
 
 ```ts
-import { openCase, reconcile, regrant } from '@schift/payment-kit-cs';
+import { openCase, reconcile, regrant } from 'boilpayment-cs';
 
 const case_ = await openCase({
   customerId: 'cust_1', kind: 'billing_dispute', referenceId: 'pay_123',
@@ -30,4 +30,4 @@ await regrant({
 });
 ```
 
-Full module contract: [docs/ARCHITECTURE.md §3.5](https://github.com/schift-io/payment-kit/blob/main/docs/ARCHITECTURE.md).
+Full module contract: [docs/ARCHITECTURE.md §3.5](https://github.com/schift-io/boilpayment/blob/main/docs/ARCHITECTURE.md).

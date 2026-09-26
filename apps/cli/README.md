@@ -1,33 +1,33 @@
-# @schift/payment-kit
+# boilpayment
 
-CLI wizard for [Schift Payment Kit](https://github.com/schift-io/payment-kit): answer a few
+CLI wizard for [boilpayment](https://github.com/schift-io/boilpayment): answer a few
 questions about your provider (Stripe/Toss/PortOne/Polar) and billing policy, and it generates
-composed `@schift/payment-kit-sdk` modules, a Postgres migration set, a webhook handler, a
+composed `boilpayment-sdk` modules, a Postgres migration set, a webhook handler, a
 `POLICY.md` describing the decisions you made, and a `.env.example` — in TS or Python.
 
 ## Install
 
 ```
-npx @schift/payment-kit init
+npx boilpayment init
 ```
 
-or install it globally as `paykit` / `schift-payment-kit`:
+or install it globally:
 
 ```
-npm install -g @schift/payment-kit
-paykit init
+npm install -g boilpayment
+boilpayment init
 ```
 
 ## Usage
 
 ```
-paykit init [--yes] [--out <dir>] [--config [file]] \
+boilpayment init [--yes] [--out <dir>] [--config [file]] \
             [--providers stripe,toss,portone,polar] \
             [--models subscription,topup,usage] \
             [--languages ts,py] [--goods credits,usage_quota] [--cs]
-paykit check [--out <dir>]     # validate config + (optional) DB connectivity, read-only
-paykit live [--out <dir>] [--config <file>] [--env <file>] [--dry-run]
-paykit --help
+boilpayment check [--out <dir>]     # validate config + (optional) DB connectivity, read-only
+boilpayment live [--out <dir>] [--config <file>] [--env <file>] [--dry-run]
+boilpayment --help
 ```
 
 `init` writes `paykit.config.json` plus generated code into `--out` (default: the current
@@ -43,7 +43,7 @@ A hosted AI support service and customer chat widget are not generated.
 Programmatic use (scripting the wizard instead of the binary):
 
 ```ts
-import { runWizard, generateAll } from '@schift/payment-kit';
+import { runWizard, generateAll } from 'boilpayment';
 
 const config = await runWizard({
   yes: true, existingRaw: null,
@@ -52,4 +52,4 @@ const config = await runWizard({
 await generateAll(config, './my-app');
 ```
 
-Full wizard contract: [docs/ARCHITECTURE.md §6](https://github.com/schift-io/payment-kit/blob/main/docs/ARCHITECTURE.md).
+Full wizard contract: [docs/ARCHITECTURE.md §6](https://github.com/schift-io/boilpayment/blob/main/docs/ARCHITECTURE.md).

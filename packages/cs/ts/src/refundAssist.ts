@@ -1,10 +1,10 @@
 // spec/cs.pseudo.md — EC:D* I1 I2 I4 J1-J5
-// Deliberately does NOT import `@schift/payment-kit-refund` — refundEvaluate/refundExecute are injected
+// Deliberately does NOT import `boilpayment-refund` — refundEvaluate/refundExecute are injected
 // (same shapes as refund.evaluate/refund.execute) so `cs` stays decoupled from `refund`'s package tree.
 import {
   Clock, CsCase, IdGen, LedgerStore, Notifier, Payment, PaymentProvider, Policy, Refund, RefundDecision,
   Repo, Subscription, deserializeCsCase, runIdempotent, serializeCsCase,
-} from '@schift/payment-kit-core';
+} from 'boilpayment-core';
 import { escalate, OnCaseEvent, openCase, reject, resolve } from './cases.js';
 import { ChurnReason, record as recordChurn } from './churn.js';
 import { LicenseReporter } from './metrics.js';

@@ -1,5 +1,5 @@
 // Fan-out to multiple notifiers. See spec/notify.pseudo.md.
-import type { Notification, Notifier } from '@schift/payment-kit-core';
+import type { Notification, Notifier } from 'boilpayment-core';
 
 export function composite(notifiers: Notifier[]): Notifier {
   return {

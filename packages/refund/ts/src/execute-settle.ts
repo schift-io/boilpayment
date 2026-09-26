@@ -1,4 +1,4 @@
-import type { Payment, Refund } from '@schift/payment-kit-core';
+import type { Payment, Refund } from 'boilpayment-core';
 import type { ExecuteInput } from './execute.js';
 
 export async function settleRefund(input: ExecuteInput, providerResult: Refund, payment: Payment): Promise<Refund> {

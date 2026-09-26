@@ -5,10 +5,10 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   DEFAULT_POLICY, FixedClock, InMemoryRepo, InMemoryLedger, SequentialIdGen, CollectingNotifier,
   resolvePolicy,
-} from '@schift/payment-kit-core';
+} from 'boilpayment-core';
 import type {
   Customer, CsCase, NormalizedEvent, Payment, PaymentProvider, ProviderCapabilities, Policy, Refund,
-} from '@schift/payment-kit-core';
+} from 'boilpayment-core';
 import {
   openCase, escalate, resolve, reject, regrant, reconcile, dispute, churn, widget,
   Metrics, CaseMeter, HttpLicenseReporter,

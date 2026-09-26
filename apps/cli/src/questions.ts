@@ -1,7 +1,7 @@
 // Declarative wizard question list.
 // Order follows docs/EDGE_CASES.md "위저드 질문 순서". Each P0 policy key in EDGE_CASES.md
 // has exactly one question here (or is covered by a shared/derived question, noted in `ec`).
-import { DEFAULT_POLICY } from '@schift/payment-kit-core';
+import { DEFAULT_POLICY } from 'boilpayment-core';
 import { getPath } from './util/path.js';
 import type { WizardConfig } from './wizard-state.js';
 

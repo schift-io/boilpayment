@@ -8,8 +8,8 @@
 //     item to the real notifier, moving collecting.sent from 1 -> 2, and the outbox has 0
 //     pending afterward)
 import { describe, expect, it } from 'vitest';
-import { CollectingNotifier, FixedClock, InMemoryRepo } from '@schift/payment-kit-core';
-import type { Notification, Notifier } from '@schift/payment-kit-core';
+import { CollectingNotifier, FixedClock, InMemoryRepo } from 'boilpayment-core';
+import type { Notification, Notifier } from 'boilpayment-core';
 import { flushNotifyOutbox, withOutbox } from '../src/index.js';
 
 const notification: Notification = { type: 'usage.soft_cap', customerId: 'cust_1', payload: { meter: 'api_call', overage: 2, included: 5 } };

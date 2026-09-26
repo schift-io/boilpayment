@@ -14,7 +14,7 @@ import json
 from datetime import UTC, datetime
 
 from _helpers import FakeProvider, json_verify
-from schift_payment_kit_core import (
+from boilpayment_core import (
     DEFAULT_POLICY,
     CollectingLogger,
     FixedClock,
@@ -28,7 +28,7 @@ from schift_payment_kit_core import (
     SequentialIdGen,
     Subscription,
 )
-from schift_payment_kit_webhook import (
+from boilpayment_webhook import (
     default_handlers,
     mint_correlation_id,
     process,

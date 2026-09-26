@@ -1,5 +1,5 @@
-import { PaymentKitError } from '@schift/payment-kit-core';
-import type { Period, Repo, Subscription } from '@schift/payment-kit-core';
+import { PaymentKitError } from 'boilpayment-core';
+import type { Period, Repo, Subscription } from 'boilpayment-core';
 
 /** Require one subscription and an original billing-period snapshot before settling money. */
 export async function settlementPeriod(repo: Repo, sub: Subscription, period: Period): Promise<string | undefined> {

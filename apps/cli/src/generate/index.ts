@@ -3,7 +3,7 @@
 //   paykit/index.ts, paykit/index.py, paykit/webhook.ts, paykit/webhook.py, paykit/migrations/*.sql
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { resolvePolicy } from '@schift/payment-kit-core';
+import { resolvePolicy } from 'boilpayment-core';
 import type { PaykitConfig } from '../config.js';
 import { toPaykitConfig } from '../wizard-state.js';
 import { writeConfig } from '../config.js';

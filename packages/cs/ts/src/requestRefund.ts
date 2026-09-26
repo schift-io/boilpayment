@@ -1,6 +1,6 @@
-import { deserializeCsCase, runIdempotent, serializeCsCase } from '@schift/payment-kit-core';
-import type { CsCase, Money } from '@schift/payment-kit-core';
-import { evaluate, execute } from '@schift/payment-kit-refund';
+import { deserializeCsCase, runIdempotent, serializeCsCase } from 'boilpayment-core';
+import type { CsCase, Money } from 'boilpayment-core';
+import { evaluate, execute } from 'boilpayment-refund';
 import { escalate } from './cases.js';
 import { refundAssist } from './refundAssist.js';
 import { verifySupportPayment } from './support.js';

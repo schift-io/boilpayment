@@ -1,21 +1,21 @@
 # Release procedure
 
-This is the exact, ordered set of commands to publish every `@schift/payment-kit-*` (npm) and
-`schift-payment-kit-*` (PyPI) package, plus `@schift/payment-kit` (the CLI) and
-`@schift/payment-kit-sdk` / `schift-payment-kit` (the single-install facade — see
-`packages/sdk/ts/README.md` / `packages/sdk/py/README.md`; `paykit init` points every generated
+This is the exact, ordered set of commands to publish every `boilpayment-*` (npm) and
+`boilpayment-*` (PyPI) package, plus `boilpayment` (the CLI) and
+`boilpayment-sdk` / `boilpayment` (the single-install facade — see
+`packages/sdk/ts/README.md` / `packages/sdk/py/README.md`; `boilpayment init` points every generated
 project at this facade, not at the 13 packages it wraps). It is written for a maintainer to run
 by hand — nothing here is automated.
 
 **End-user install stays one line per language regardless of how many internal packages exist:**
-`npm install @schift/payment-kit-sdk` / `pip install schift-payment-kit`. The facade's own
+`npm install boilpayment-sdk` / `pip install boilpayment`. The facade's own
 dependencies pin all 13 internal packages to the exact version published alongside it (npm:
 `workspace:*` rewritten to an exact version by `pnpm publish`/`pnpm pack`; PyPI: `==<version>`
 literal in `packages/sdk/py/pyproject.toml`, bump it in lockstep with step 1 below), so version
 skew between the facade and what it wraps can't happen.
 
 **Repository:** every `package.json` (`homepage`/`repository`/`bugs`) and `pyproject.toml`
-(`[project.urls]`) points at `https://github.com/schift-io/payment-kit`. See "저장소 URL" below.
+(`[project.urls]`) points at `https://github.com/schift-io/boilpayment`. See "저장소 URL" below.
 
 ## 0. Pre-flight checklist
 
@@ -82,14 +82,14 @@ checklist. Individually-versioned packages (skip the ones that didn't change) is
 
 ## 2. Python workspace deps → real PyPI version constraints
 
-Every `schift-payment-kit-*` package that depends on another one in this repo (e.g. `credits` on
+Every `boilpayment-*` package that depends on another one in this repo (e.g. `credits` on
 `core`) declares that dependency **unpinned** in `pyproject.toml`
-(`dependencies = ["schift-payment-kit-core"]`) — locally this is fine because
+(`dependencies = ["boilpayment-core"]`) — locally this is fine because
 `[tool.uv.sources]` in the root `pyproject.toml` overrides it to the workspace member
 (`{ workspace = true }`), which is *not* published metadata; it only affects local `uv sync`.
 
-If you publish with the dependency left unpinned, `pip install schift-payment-kit-credits` would
-accept **any** version of `schift-payment-kit-core` off PyPI, including a future breaking one.
+If you publish with the dependency left unpinned, `pip install boilpayment-credits` would
+accept **any** version of `boilpayment-core` off PyPI, including a future breaking one.
 Pin it right before building, then put the unpinned form back afterward so local dev keeps
 working. This does **not** touch `[tool.uv.sources]` (that stays; it's what makes `uv sync` use
 the local workspace copy even when the version below is pinned) — only the bare dependency name
@@ -106,11 +106,11 @@ version = sys.argv[1]
 major_minor = ".".join(version.split(".")[:2])
 next_minor = f"{major_minor.rsplit('.', 1)[0]}.{int(major_minor.rsplit('.', 1)[1]) + 1}"
 INTERNAL = {
-    "schift-payment-kit-core", "schift-payment-kit-credits", "schift-payment-kit-usage",
-    "schift-payment-kit-lifecycle", "schift-payment-kit-refund", "schift-payment-kit-webhook",
-    "schift-payment-kit-notify", "schift-payment-kit-cs", "schift-payment-kit-schema-postgres",
-    "schift-payment-kit-stripe", "schift-payment-kit-polar", "schift-payment-kit-toss",
-    "schift-payment-kit-portone",
+    "boilpayment-core", "boilpayment-credits", "boilpayment-usage",
+    "boilpayment-lifecycle", "boilpayment-refund", "boilpayment-webhook",
+    "boilpayment-notify", "boilpayment-cs", "boilpayment-schema-postgres",
+    "boilpayment-stripe", "boilpayment-polar", "boilpayment-toss",
+    "boilpayment-portone",
 }
 for path in pathlib.Path(".").glob("packages/**/py/pyproject.toml"):
     text = path.read_text()
@@ -148,13 +148,13 @@ done
 ```
 
 Check specifically:
-- `@schift/payment-kit-schema-postgres` — `dist/sql/*.sql` (6 files) must be present (the build
+- `boilpayment-schema-postgres` — `dist/sql/*.sql` (6 files) must be present (the build
   script copies them from `../sql/`; if you see them missing, the package wasn't rebuilt after a
   clean).
-- `@schift/payment-kit` (CLI) — `templates/sql/*.sql` (6 files, synced by `prebuild`) and
+- `boilpayment` (CLI) — `templates/sql/*.sql` (6 files, synced by `prebuild`) and
   `dist/bin.js` must be present, and `dist/bin.js` must start with `#!/usr/bin/env node`
   (`head -1 apps/cli/dist/bin.js`).
-- `@schift/payment-kit-sdk` (the facade) — `dist/` must contain a `.js`+`.d.ts` pair for every
+- `boilpayment-sdk` (the facade) — `dist/` must contain a `.js`+`.d.ts` pair for every
   subpath in its `package.json` `exports` map (`core`, `credits`, `lifecycle`, `refund`, `usage`,
   `webhook`, `notify`, `cs`, `postgres`, `stripe`, `toss`, `portone`, `polar` — 13 pairs plus
   `index.*`). `npm pack --dry-run` only shows what plain `npm` sees — it does **not** rewrite the
@@ -162,10 +162,10 @@ Check specifically:
   `pnpm pack` (or `pnpm publish`, which does the same rewrite) instead, from `packages/sdk/ts`, and
   inspect the produced tarball's `package.json`:
   ```bash
-  cd packages/sdk/ts && pnpm pack && tar -xzO -f schift-payment-kit-sdk-*.tgz package/package.json \
+  cd packages/sdk/ts && pnpm pack && tar -xzO -f boilpayment-sdk-*.tgz package/package.json \
     | python3 -c "import json,sys; print(json.load(sys.stdin)['dependencies'])"
   # every value must be a literal version like "0.1.0" — NOT "workspace:*"
-  trash schift-payment-kit-sdk-*.tgz
+  trash boilpayment-sdk-*.tgz
   ```
 - Every package — `LICENSE` and `README.md` should appear in the listing (npm includes them
   automatically from each package's own directory; they were copied there, see §"Files added").
@@ -185,17 +185,17 @@ done
 for f in /tmp/paykit-release-check/*.whl; do echo "== $f =="; unzip -l "$f"; done
 ```
 
-`schift-payment-kit` (the facade wheel) should list `schift_payment_kit/__init__.py` plus one
+`boilpayment` (the facade wheel) should list `boilpayment/__init__.py` plus one
 `.py` per submodule (`core.py`, `credits.py`, `lifecycle.py`, `refund.py`, `usage.py`,
 `webhook.py`, `notify.py`, `cs.py`, `postgres.py`, `stripe.py`, `toss.py`, `portone.py`,
 `polar.py` — 13 files) and its `METADATA`'s `Requires-Dist` lines should show `==<version>` on
 all 13 internal packages (see step 1's note on keeping those pins in lockstep with the version
 bump):
 ```bash
-unzip -p /tmp/paykit-release-check/schift_payment_kit-*.whl '*.dist-info/METADATA' | grep '^Requires-Dist'
+unzip -p /tmp/paykit-release-check/boilpayment-*.whl '*.dist-info/METADATA' | grep '^Requires-Dist'
 ```
 
-**Known defect — `schift-payment-kit-schema-postgres` fails `uv build` (sdist → wheel-from-sdist)
+**Known defect — `boilpayment-schema-postgres` fails `uv build` (sdist → wheel-from-sdist)
 today.** `pyproject.toml`'s `[tool.hatch.build.targets.wheel.force-include]` reads
 `../sql` (i.e. `packages/schema-postgres/sql/`, one level above `py/`, shared with the TS
 package). That works when the wheel is built directly from the source checkout, but a plain
@@ -209,7 +209,7 @@ undone):
 - **Wheel-only release** for this one package: `uv build packages/schema-postgres/py --wheel`,
   then `uv publish` just the `.whl` (no sdist). Simplest, no source changes.
 - **Or** physically copy `packages/schema-postgres/sql/*.sql` into
-  `packages/schema-postgres/py/src/schift_payment_kit_schema_postgres/sql/` as a checked-in
+  `packages/schema-postgres/py/src/boilpayment_schema_postgres/sql/` as a checked-in
   duplicate (same pattern already used for `apps/cli/templates/sql/`, synced by
   `apps/cli/scripts/sync-templates.mjs`) and drop the `force-include` entirely. Needs a source
   change under `py/src/`, out of this task's packaging-only scope.
@@ -222,9 +222,9 @@ wheel's `METADATA` had `License-Expression: MIT` and `License-File: LICENSE` and
 
 Use **`pnpm publish`**, not `npm publish`. Every internal dependency is declared as
 `"workspace:*"` in `package.json` — only `pnpm publish` (or `pnpm pack`) rewrites that to the
-real resolved version (`"@schift/payment-kit-core": "0.1.0"`) at pack time; a plain `npm publish`
+real resolved version (`"boilpayment-core": "0.1.0"`) at pack time; a plain `npm publish`
 would ship a broken `"workspace:*"` version range that no external installer can resolve.
-`publishConfig.access` is already `"public"` on every `@schift/*` package, but pass `--access
+`publishConfig.access` is already `"public"` on every `boilpayment*` package, but pass `--access
 public` explicitly the first time too (npm sometimes still asks for scoped packages' first
 publish):
 
@@ -250,7 +250,7 @@ done
 (cd packages/sdk/ts && pnpm publish --access public --no-git-checks)
 ```
 
-`packages/core/ts` **must** go first — everything depends on it. `@schift/payment-kit-sdk` **must**
+`packages/core/ts` **must** go first — everything depends on it. `boilpayment-sdk` **must**
 go last — it depends on every other TS package published above. Check after each command that
 the version you expect actually shows up: `npm view <name> version`.
 
@@ -284,11 +284,11 @@ uv publish /tmp/paykit-release-dist/*lifecycle* /tmp/paykit-release-dist/*_cs-*
 # Its pyproject.toml pins every one with `==<version>` already (see step 1) — no pin/unpin dance
 # needed for this one, unlike step 2's INTERNAL script for the other 13.
 uv build packages/sdk/py --out-dir /tmp/paykit-release-dist
-uv publish /tmp/paykit-release-dist/schift_payment_kit-*
+uv publish /tmp/paykit-release-dist/boilpayment-*
 ```
 
-Check after: `pip index versions schift-payment-kit-core` (or the project page on pypi.org). Also
-`pip index versions schift-payment-kit` for the facade.
+Check after: `pip index versions boilpayment-core` (or the project page on pypi.org). Also
+`pip index versions boilpayment` for the facade.
 
 ## 6. Tag
 
@@ -324,11 +324,11 @@ anyone who already installed it) and PyPI has no un-publish at all.
 ## 저장소 URL
 
 매니페스트의 `homepage`/`repository`/`bugs` (py: `[project.urls]`) 는 전부
-`https://github.com/schift-io/payment-kit` 을 가리킨다. 공개 패키지 15개 + pyproject 15개.
+`https://github.com/schift-io/boilpayment` 을 가리킨다. 공개 패키지 15개 + pyproject 15개.
 저장소 주소를 바꾸면 발행 전에 아래로 한 번에 교체하고 `npm pack --dry-run` 으로 packed manifest 를 확인한다.
 
 ```bash
 REAL_URL="https://github.com/<org>/<repo>"
 git ls-files '*/package.json' '*/pyproject.toml' README.md \
-  | xargs sed -i '' "s#https://github.com/schift-io/payment-kit#$REAL_URL#g"
+  | xargs sed -i '' "s#https://github.com/schift-io/boilpayment#$REAL_URL#g"
 ```

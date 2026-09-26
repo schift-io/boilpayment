@@ -1,7 +1,7 @@
 // Smoke test — real code path through TossProvider, with a tiny in-file fetch stub
 // standing in for api.tosspayments.com (no real PG calls, no live keys).
 // Run: node_modules/.bin/tsx packages/providers/toss/ts/examples/smoke.ts
-import { WebhookSignatureError } from '@schift/payment-kit-core';
+import { WebhookSignatureError } from 'boilpayment-core';
 import { TossProvider, normalizeTossPayment, normalizeTossFailure, mapTossWebhook } from '../src/index.js';
 
 // ── Fixture JSON, copied from docs.tosspayments.com example responses ────────

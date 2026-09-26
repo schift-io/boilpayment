@@ -4,7 +4,7 @@
 // unattributed 'expire' row for the portion over bankCap; the source grants just lapse on their
 // own expiresAt. Expected: newPeriodGrant(300) + min(carriedOver=270, bankCap=50) = 350.
 import { describe, expect, it } from 'vitest';
-import { FixedClock, InMemoryLedger, Plan, Payment, Subscription, SequentialIdGen, resolvePolicy } from '@schift/payment-kit-core';
+import { FixedClock, InMemoryLedger, Plan, Payment, Subscription, SequentialIdGen, resolvePolicy } from 'boilpayment-core';
 import { grantForPeriod, rolloverOnRenewal } from '../src/index.js';
 
 const period1 = { start: new Date('2024-01-01T00:00:00.000Z'), end: new Date('2024-02-01T00:00:00.000Z') };

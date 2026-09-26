@@ -12,7 +12,7 @@ import asyncio
 import dataclasses
 from datetime import UTC, datetime
 
-from schift_payment_kit_core import (
+from boilpayment_core import (
     ConsumeInput,
     FixedClock,
     InMemoryLedger,
@@ -27,7 +27,7 @@ from schift_payment_kit_core import (
     Subscription,
     resolve_policy,
 )
-from schift_payment_kit_credits import (
+from boilpayment_credits import (
     GrantForPeriodInput,
     RolloverInput,
     grant_for_period,

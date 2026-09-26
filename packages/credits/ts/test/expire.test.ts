@@ -1,6 +1,6 @@
 // spec: packages/credits/spec/credits.pseudo.md [EC:B14]
 import { describe, expect, it } from 'vitest';
-import { FixedClock, InMemoryLedger, SequentialIdGen } from '@schift/payment-kit-core';
+import { FixedClock, InMemoryLedger, SequentialIdGen } from 'boilpayment-core';
 import { expireDue } from '../src/index.js';
 
 describe('EC:B14 expireDue — bookkeeping only, neutral to balance', () => {

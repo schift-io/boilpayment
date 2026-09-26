@@ -1,6 +1,6 @@
 // EC:C4 — see spec/usage.pseudo.md
 import { describe, expect, it } from 'vitest';
-import { Customer, DEFAULT_POLICY, FixedClock, InMemoryRepo, SequentialIdGen } from '@schift/payment-kit-core';
+import { Customer, DEFAULT_POLICY, FixedClock, InMemoryRepo, SequentialIdGen } from 'boilpayment-core';
 import { flushOutbox } from '../src/flushOutbox.js';
 import { record } from '../src/record.js';
 import { FakeProvider, mkSub } from './fixtures.js';

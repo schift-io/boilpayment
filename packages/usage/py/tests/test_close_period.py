@@ -10,8 +10,7 @@ import asyncio
 import dataclasses
 from datetime import UTC, datetime
 
-from fixtures import mk_sub
-from schift_payment_kit_core import (
+from boilpayment_core import (
     DEFAULT_POLICY,
     FixedClock,
     InMemoryRepo,
@@ -19,7 +18,8 @@ from schift_payment_kit_core import (
     PlanPrice,
     SequentialIdGen,
 )
-from schift_payment_kit_usage import UsageEventInput, close_period, record
+from boilpayment_usage import UsageEventInput, close_period, record
+from fixtures import mk_sub
 
 
 def harness():

@@ -45,8 +45,8 @@ try {
   ];
   await generateAll(config, folder);
   await writeFile(join(folder, 'package.json'), JSON.stringify({ type: 'module' }));
-  await mkdir(join(folder, 'node_modules/@schift'), { recursive: true });
-  await symlink(join(root, 'packages/sdk/ts'), join(folder, 'node_modules/@schift/payment-kit-sdk'));
+  await mkdir(join(folder, 'node_modules'), { recursive: true });
+  await symlink(join(root, 'packages/sdk/ts'), join(folder, 'node_modules/boilpayment-sdk'));
   await copyFile(join(here, 'step1-runtime.mjs'), join(folder, 'runtime.mjs'));
   if (!process.argv.includes('--python-only')) await run(join(root, 'apps/cli/node_modules/.bin/tsx'), ['runtime.mjs']);
   if (process.argv.includes('--python') || process.argv.includes('--python-only')) {

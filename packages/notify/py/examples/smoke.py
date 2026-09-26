@@ -9,13 +9,13 @@ import asyncio
 import json
 from datetime import UTC, datetime
 
-from schift_payment_kit_core import (
+from boilpayment_core import (
     CollectingNotifier,
     FixedClock,
     InMemoryRepo,
     Notification,
 )
-from schift_payment_kit_notify import (
+from boilpayment_notify import (
     composite,
     flush_notify_outbox,
     render,

@@ -4,8 +4,8 @@
 import { randomUUID } from 'node:crypto';
 import { describe, it, expect, afterAll } from 'vitest';
 import { Pool } from 'pg';
-import type { Customer, Subscription } from '@schift/payment-kit-core';
-import { PaymentKitError } from '@schift/payment-kit-core';
+import type { Customer, Subscription } from 'boilpayment-core';
+import { PaymentKitError } from 'boilpayment-core';
 import { PostgresRepo } from '../dist/index.js';
 import { createTestDb, dropTestDb, type TestDb } from './db-helper.js';
 

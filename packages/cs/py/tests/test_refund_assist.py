@@ -1,6 +1,6 @@
 """spec/cs.pseudo.md -- EC:L5
 
-cs.refund_assist deliberately does NOT import `schift_payment_kit_refund` (refund_evaluate/
+cs.refund_assist deliberately does NOT import `boilpayment_refund` (refund_evaluate/
 refund_execute are injected -- see refund_assist.py). This proves the wiring: the correlation_id
 passed to refund_assist() reaches the injected refund_execute function unchanged.
 Mirrors packages/cs/ts/test/refundAssist.test.ts.
@@ -12,7 +12,7 @@ import asyncio
 from datetime import UTC, datetime
 
 import pytest
-from schift_payment_kit_core import (
+from boilpayment_core import (
     DEFAULT_POLICY,
     FixedClock,
     InMemoryLedger,
@@ -24,7 +24,7 @@ from schift_payment_kit_core import (
     SequentialIdGen,
     resolve_policy,
 )
-from schift_payment_kit_cs import (
+from boilpayment_cs import (
     OpenCaseInput,
     RefundAssistInput,
     open_case,

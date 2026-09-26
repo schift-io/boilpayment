@@ -1,5 +1,5 @@
-import { DEFAULT_POLICY, FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen } from '@schift/payment-kit-core';
-import type { Money, Payment } from '@schift/payment-kit-core';
+import { DEFAULT_POLICY, FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen } from 'boilpayment-core';
+import type { Money, Payment } from 'boilpayment-core';
 import { FakeProvider, mkSub } from './fixtures.js';
 
 export class BillingProvider extends FakeProvider {

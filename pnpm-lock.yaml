@@ -20,22 +20,22 @@ importers:
       '@clack/prompts':
         specifier: ^0.8.0
         version: 0.8.2
-      '@schift/payment-kit-core':
+      boilpayment-core:
         specifier: workspace:*
         version: link:../../packages/core/ts
-      '@schift/payment-kit-polar':
+      boilpayment-polar:
         specifier: workspace:*
         version: link:../../packages/providers/polar/ts
-      '@schift/payment-kit-portone':
+      boilpayment-portone:
         specifier: workspace:*
         version: link:../../packages/providers/portone/ts
-      '@schift/payment-kit-stripe':
+      boilpayment-stripe:
         specifier: workspace:*
         version: link:../../packages/providers/stripe/ts
-      '@schift/payment-kit-toss':
+      boilpayment-toss:
         specifier: workspace:*
         version: link:../../packages/providers/toss/ts
-      '@schift/payment-kit-webhook':
+      boilpayment-webhook:
         specifier: workspace:*
         version: link:../../packages/webhook/ts
       picocolors:
@@ -57,25 +57,25 @@ importers:
 
   examples/e2e:
     dependencies:
-      '@schift/payment-kit-core':
+      boilpayment-core:
         specifier: workspace:*
         version: link:../../packages/core/ts
-      '@schift/payment-kit-credits':
+      boilpayment-credits:
         specifier: workspace:*
         version: link:../../packages/credits/ts
-      '@schift/payment-kit-cs':
+      boilpayment-cs:
         specifier: workspace:*
         version: link:../../packages/cs/ts
-      '@schift/payment-kit-lifecycle':
+      boilpayment-lifecycle:
         specifier: workspace:*
         version: link:../../packages/lifecycle/ts
-      '@schift/payment-kit-refund':
+      boilpayment-refund:
         specifier: workspace:*
         version: link:../../packages/refund/ts
-      '@schift/payment-kit-usage':
+      boilpayment-usage:
         specifier: workspace:*
         version: link:../../packages/usage/ts
-      '@schift/payment-kit-webhook':
+      boilpayment-webhook:
         specifier: workspace:*
         version: link:../../packages/webhook/ts
 
@@ -93,7 +93,7 @@ importers:
 
   packages/credits/ts:
     dependencies:
-      '@schift/payment-kit-core':
+      boilpayment-core:
         specifier: workspace:*
         version: link:../../core/ts
     devDependencies:
@@ -109,10 +109,10 @@ importers:
 
   packages/cs/ts:
     dependencies:
-      '@schift/payment-kit-core':
+      boilpayment-core:
         specifier: workspace:*
         version: link:../../core/ts
-      '@schift/payment-kit-refund':
+      boilpayment-refund:
         specifier: workspace:*
         version: link:../../refund/ts
     devDependencies:
@@ -128,10 +128,10 @@ importers:
 
   packages/lifecycle/ts:
     dependencies:
-      '@schift/payment-kit-core':
+      boilpayment-core:
         specifier: workspace:*
         version: link:../../core/ts
-      '@schift/payment-kit-credits':
+      boilpayment-credits:
         specifier: workspace:*
         version: link:../../credits/ts
     devDependencies:
@@ -147,7 +147,7 @@ importers:
 
   packages/notify/ts:
     dependencies:
-      '@schift/payment-kit-core':
+      boilpayment-core:
         specifier: workspace:*
         version: link:../../core/ts
       nodemailer:
@@ -169,7 +169,7 @@ importers:
 
   packages/providers/polar/ts:
     dependencies:
-      '@schift/payment-kit-core':
+      boilpayment-core:
         specifier: workspace:*
         version: link:../../../core/ts
     devDependencies:
@@ -185,7 +185,7 @@ importers:
 
   packages/providers/portone/ts:
     dependencies:
-      '@schift/payment-kit-core':
+      boilpayment-core:
         specifier: workspace:*
         version: link:../../../core/ts
     devDependencies:
@@ -201,7 +201,7 @@ importers:
 
   packages/providers/stripe/ts:
     dependencies:
-      '@schift/payment-kit-core':
+      boilpayment-core:
         specifier: workspace:*
         version: link:../../../core/ts
       stripe:
@@ -220,7 +220,7 @@ importers:
 
   packages/providers/toss/ts:
     dependencies:
-      '@schift/payment-kit-core':
+      boilpayment-core:
         specifier: workspace:*
         version: link:../../../core/ts
     devDependencies:
@@ -236,7 +236,7 @@ importers:
 
   packages/refund/ts:
     dependencies:
-      '@schift/payment-kit-core':
+      boilpayment-core:
         specifier: workspace:*
         version: link:../../core/ts
     devDependencies:
@@ -252,7 +252,7 @@ importers:
 
   packages/schema-postgres/ts:
     dependencies:
-      '@schift/payment-kit-core':
+      boilpayment-core:
         specifier: workspace:*
         version: link:../../core/ts
       pg:
@@ -274,43 +274,43 @@ importers:
 
   packages/sdk/ts:
     dependencies:
-      '@schift/payment-kit-core':
+      boilpayment-core:
         specifier: workspace:*
         version: link:../../core/ts
-      '@schift/payment-kit-credits':
+      boilpayment-credits:
         specifier: workspace:*
         version: link:../../credits/ts
-      '@schift/payment-kit-cs':
+      boilpayment-cs:
         specifier: workspace:*
         version: link:../../cs/ts
-      '@schift/payment-kit-lifecycle':
+      boilpayment-lifecycle:
         specifier: workspace:*
         version: link:../../lifecycle/ts
-      '@schift/payment-kit-notify':
+      boilpayment-notify:
         specifier: workspace:*
         version: link:../../notify/ts
-      '@schift/payment-kit-polar':
+      boilpayment-polar:
         specifier: workspace:*
         version: link:../../providers/polar/ts
-      '@schift/payment-kit-portone':
+      boilpayment-portone:
         specifier: workspace:*
         version: link:../../providers/portone/ts
-      '@schift/payment-kit-refund':
+      boilpayment-refund:
         specifier: workspace:*
         version: link:../../refund/ts
-      '@schift/payment-kit-schema-postgres':
+      boilpayment-schema-postgres:
         specifier: workspace:*
         version: link:../../schema-postgres/ts
-      '@schift/payment-kit-stripe':
+      boilpayment-stripe:
         specifier: workspace:*
         version: link:../../providers/stripe/ts
-      '@schift/payment-kit-toss':
+      boilpayment-toss:
         specifier: workspace:*
         version: link:../../providers/toss/ts
-      '@schift/payment-kit-usage':
+      boilpayment-usage:
         specifier: workspace:*
         version: link:../../usage/ts
-      '@schift/payment-kit-webhook':
+      boilpayment-webhook:
         specifier: workspace:*
         version: link:../../webhook/ts
     devDependencies:
@@ -326,7 +326,7 @@ importers:
 
   packages/usage/ts:
     dependencies:
-      '@schift/payment-kit-core':
+      boilpayment-core:
         specifier: workspace:*
         version: link:../../core/ts
     devDependencies:
@@ -342,7 +342,7 @@ importers:
 
   packages/webhook/ts:
     dependencies:
-      '@schift/payment-kit-core':
+      boilpayment-core:
         specifier: workspace:*
         version: link:../../core/ts
     devDependencies:

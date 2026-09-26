@@ -1,6 +1,6 @@
 // spec: packages/credits/spec/credits.pseudo.md [EC:A15] [EC:B1] [EC:B7] [EC:B9] [EC:B10]
 import { describe, expect, it } from 'vitest';
-import { FixedClock, InMemoryLedger, InMemoryRepo, Plan, Payment, Subscription, SequentialIdGen, resolvePolicy } from '@schift/payment-kit-core';
+import { FixedClock, InMemoryLedger, InMemoryRepo, Plan, Payment, Subscription, SequentialIdGen, resolvePolicy } from 'boilpayment-core';
 import { grantForPeriod, topup, grantPromo, grantTrial, manualGrant, manualRevoke } from '../src/index.js';
 import { clawback } from '../src/clawback.js';
 import { consume } from '../src/consume.js';

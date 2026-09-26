@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 
-from schift_payment_kit_core import CollectingNotifier, Notification
-from schift_payment_kit_notify import composite
+from boilpayment_core import CollectingNotifier, Notification
+from boilpayment_notify import composite
 
 NOTIFICATION = Notification(
     type="usage.soft_cap",

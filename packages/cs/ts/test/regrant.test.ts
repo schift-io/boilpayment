@@ -4,7 +4,7 @@
 // cs.test.ts's "cs.regrant" describe block and reconcile.test.ts's E1/E14 pass — this file only
 // adds the one plan.idempotencyKey-override path that isn't exercised elsewhere.
 import { describe, expect, it } from 'vitest';
-import { FixedClock, InMemoryLedger, InMemoryRepo, resolvePolicy, SequentialIdGen } from '@schift/payment-kit-core';
+import { FixedClock, InMemoryLedger, InMemoryRepo, resolvePolicy, SequentialIdGen } from 'boilpayment-core';
 import { openCase, regrant } from '../src/index.js';
 
 const clock = new FixedClock(new Date('2026-03-01T00:00:00.000Z'));

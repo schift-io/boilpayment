@@ -1,4 +1,4 @@
-"""Phase 6 regression tests -- packages/webhook/py/src/schift_payment_kit_webhook/receive.py
+"""Phase 6 regression tests -- packages/webhook/py/src/boilpayment_webhook/receive.py
 Ground truth measured via `.venv/bin/python packages/webhook/py/examples/smoke.py` this session.
 pytest-asyncio is not installed -- wrap async bodies in asyncio.run()."""
 
@@ -9,8 +9,8 @@ import json
 from datetime import UTC, datetime
 
 from _helpers import FakeProvider, json_verify
-from schift_payment_kit_core import FixedClock, InMemoryRepo
-from schift_payment_kit_webhook import receive
+from boilpayment_core import FixedClock, InMemoryRepo
+from boilpayment_webhook import receive
 
 
 def _setup():
@@ -127,7 +127,7 @@ def test_ec_e5_b12_resend_of_identical_event_id_is_a_no_op():
 # query webhook_events directly.
 def test_ec_i9_resolves_customer_id_payment_id_from_local_payment_matched_by_provider_ref():
     async def run():
-        from schift_payment_kit_core import Money, Payment
+        from boilpayment_core import Money, Payment
 
         clock, repo, provider = _setup()
         await repo.payments.put(

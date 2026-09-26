@@ -4,7 +4,7 @@ import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
-from schift_payment_kit_refund import EvaluateInput, ExecuteInput, evaluate, execute
+from boilpayment_refund import EvaluateInput, ExecuteInput, evaluate, execute
 from test_refund import FakeProvider, do_grant, make_env, make_topup
 
 
@@ -110,7 +110,7 @@ def test_preserved_partial_refund_checkpoint_survives_outer_retention(status):
     async def run():
         from dataclasses import replace
 
-        from schift_payment_kit_core import InMemoryRepo, Money, Refund
+        from boilpayment_core import InMemoryRepo, Money, Refund
         input = await setup()
         input.decision = replace(input.decision, amount=Money(amount_minor=400, currency="USD"), credits_to_revoke=40)
         input.provider.refund.return_value = Refund(

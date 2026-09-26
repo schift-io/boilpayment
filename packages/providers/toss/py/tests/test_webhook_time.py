@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 
 import pytest
-from schift_payment_kit_toss import map_toss_webhook
+from boilpayment_toss import map_toss_webhook
 
 
 def test_offset_free_webhook_time_is_aware() -> None:

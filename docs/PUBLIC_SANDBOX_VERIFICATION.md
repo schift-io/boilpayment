@@ -84,6 +84,6 @@ CLI 로그에는 refund.updated도 있었으나 수신기에서 같은 환불 ID
 실제 Stripe 이벤트→공식 CLI 전달→로컬 Kit 서명·수신·처리 경로이며, Dashboard endpoint로
 직접 보내는 전달이나 생성 프로젝트 전체의 금전 처리까지 입증하는 것은 아니다.
 
-기존 `paykit live`의 listen/trigger가 전역 CLI 계정을 사용할 수 있던 경로도 수정했다.
+기존 `boilpayment live`의 listen/trigger가 전역 CLI 계정을 사용할 수 있던 경로도 수정했다.
 두 subprocess 모두 선택한 STRIPE_SECRET_KEY를 명시한다. 키 바인딩을 포함한 CLI live 테스트
 27개와 TypeScript typecheck가 통과했다.

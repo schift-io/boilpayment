@@ -1,7 +1,7 @@
 {
-  "name": "@schift/payment-kit-sdk",
+  "name": "boilpayment-sdk",
   "version": "0.1.0",
-  "description": "Schift Payment Kit — single-install facade re-exporting every @schift/payment-kit-* package via subpaths",
+  "description": "boilpayment — single-install facade re-exporting every boilpayment-* package via subpaths",
   "license": "MIT",
   "keywords": [
     "schift",
@@ -87,31 +87,31 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@schift/payment-kit-core": "workspace:*",
-    "@schift/payment-kit-credits": "workspace:*",
-    "@schift/payment-kit-lifecycle": "workspace:*",
-    "@schift/payment-kit-refund": "workspace:*",
-    "@schift/payment-kit-usage": "workspace:*",
-    "@schift/payment-kit-webhook": "workspace:*",
-    "@schift/payment-kit-notify": "workspace:*",
-    "@schift/payment-kit-cs": "workspace:*",
-    "@schift/payment-kit-schema-postgres": "workspace:*",
-    "@schift/payment-kit-stripe": "workspace:*",
-    "@schift/payment-kit-toss": "workspace:*",
-    "@schift/payment-kit-portone": "workspace:*",
-    "@schift/payment-kit-polar": "workspace:*"
+    "boilpayment-core": "workspace:*",
+    "boilpayment-credits": "workspace:*",
+    "boilpayment-lifecycle": "workspace:*",
+    "boilpayment-refund": "workspace:*",
+    "boilpayment-usage": "workspace:*",
+    "boilpayment-webhook": "workspace:*",
+    "boilpayment-notify": "workspace:*",
+    "boilpayment-cs": "workspace:*",
+    "boilpayment-schema-postgres": "workspace:*",
+    "boilpayment-stripe": "workspace:*",
+    "boilpayment-toss": "workspace:*",
+    "boilpayment-portone": "workspace:*",
+    "boilpayment-polar": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.6.0",
     "@types/node": "^22.0.0",
     "vitest": "^2.1.0"
   },
-  "homepage": "https://github.com/schift-io/payment-kit#readme",
+  "homepage": "https://github.com/schift-io/boilpayment#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/schift-io/payment-kit.git"
+    "url": "git+https://github.com/schift-io/boilpayment.git"
   },
   "bugs": {
-    "url": "https://github.com/schift-io/payment-kit/issues"
+    "url": "https://github.com/schift-io/boilpayment/issues"
   }
 }

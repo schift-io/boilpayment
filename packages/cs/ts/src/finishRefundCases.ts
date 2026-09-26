@@ -1,4 +1,4 @@
-import type { Clock, CsCase, Notifier, Repo } from '@schift/payment-kit-core';
+import type { Clock, CsCase, Notifier, Repo } from 'boilpayment-core';
 import { escalate, resolve } from './cases.js';
 import type { LicenseReporter } from './metrics.js';
 import type { OnCaseEvent } from './cases.js';

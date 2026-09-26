@@ -13,8 +13,8 @@ safe (read-and-write in the same call, no intervening await another writer could
 
 `period.ts` 는 core 가 이미 구현한 `nextPeriod`/`prorationRatio`/`periodContaining`/`elapsedRatio`
 (packages/core/{ts,py}/.../period.{ts,py}, [EC:G1] [EC:G2])를 그대로 재수출한다 — 로컬 재구현 없음.
-credit 이동(grant/rollover/clawback)은 이 패키지가 아니라 `@schift/payment-kit-credits`
-(`schift_payment_kit_credits`)를 워크스페이스 의존성으로 불러 위임한다.
+credit 이동(grant/rollover/clawback)은 이 패키지가 아니라 `boilpayment-credits`
+(`boilpayment_credits`)를 워크스페이스 의존성으로 불러 위임한다.
 
 ---
 

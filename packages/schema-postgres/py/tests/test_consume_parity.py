@@ -2,7 +2,7 @@
 InMemoryLedger (packages/core) and assert identical results.
 
 NOTE: while building this, two genuine InMemoryLedger divergences from PostgresLedgerStore /
-spec/schema-postgres.pseudo.md [EC:B5] were found by reading source (py/src/schift_payment_kit_core
+spec/schema-postgres.pseudo.md [EC:B5] were found by reading source (py/src/boilpayment_core
 memory.py mirrors the same logic as ts/src/memory.ts) -- see final report "bug list":
   Two historical divergences (allow_to_floor room after a partial bucket draw; expired-but-not-
   batched grant counted in Postgres available) were fixed on both sides and are pinned below as
@@ -15,15 +15,15 @@ import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from db_helper import create_test_db, drop_test_db
-from schift_payment_kit_core import (
+from boilpayment_core import (
     ConsumeInput,
     Customer,
     InMemoryLedger,
     LedgerReference,
     NewLedgerEntry,
 )
-from schift_payment_kit_schema_postgres import PostgresLedgerStore, PostgresRepo
+from boilpayment_schema_postgres import PostgresLedgerStore, PostgresRepo
+from db_helper import create_test_db, drop_test_db
 
 
 def _simplify(entries):

@@ -2,7 +2,7 @@
 // Usage: PAYKIT_SMOKE_DB=paykit_smoke_XXXXX node_modules/.bin/tsx packages/schema-postgres/ts/examples/smoke.ts
 import assert from 'node:assert/strict';
 import { Pool } from 'pg';
-import { DEFAULT_POLICY, type Customer, type CsCase, type Plan, type Subscription } from '@schift/payment-kit-core';
+import { DEFAULT_POLICY, type Customer, type CsCase, type Plan, type Subscription } from 'boilpayment-core';
 // Imports the built package (dist/) rather than src/ — this is what a real consumer imports, and
 // what's actually shipped, so the smoke test exercises the exact same path (tsx is not installed
 // in this workspace; run `npm run build` in ts/ first, then `node examples-dist/smoke.js`).

@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
-from schift_payment_kit_core import (
+from boilpayment_core import (
     BaseLogger,
     CollectingLogger,
     ConsoleLogger,

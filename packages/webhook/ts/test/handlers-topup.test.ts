@@ -4,8 +4,8 @@
 // webhook record fails with error 'topup_credits_unresolved' instead of a null-amount
 // ledger entry. See packages/webhook/ts/src/handlers.ts.
 import { describe, expect, it } from 'vitest';
-import { CollectingNotifier, DEFAULT_POLICY, FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen, runIdempotent } from '@schift/payment-kit-core';
-import type { CreditsDeps, Payment } from '@schift/payment-kit-core';
+import { CollectingNotifier, DEFAULT_POLICY, FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen, runIdempotent } from 'boilpayment-core';
+import type { CreditsDeps, Payment } from 'boilpayment-core';
 import { defaultHandlers, process as processWebhook, receive } from '../src/index.js';
 import { FakeProvider, jsonVerify } from './helpers.js';
 
@@ -86,7 +86,7 @@ describe('webhook.defaultHandlers — one-time top-up branch [FINDINGS #4]', () 
 
     const provider = new FakeProvider({ verify: jsonVerify(), getPaymentImpl: () => payment });
     let grantCount = 0;
-    // Mirrors how the real @schift/payment-kit-credits topup() uses runIdempotent, keyed the same
+    // Mirrors how the real boilpayment-credits topup() uses runIdempotent, keyed the same
     // way (topup:{payment.id}) -- this only proves anything if `input.repo` actually reaches this
     // call site, which is exactly the gap CreditsDeps.topup previously had (no `repo` in its input
     // shape, so a webhook-triggered top-up could only be deduped by the ledger's idempotency_key

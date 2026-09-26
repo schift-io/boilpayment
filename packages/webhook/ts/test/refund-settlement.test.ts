@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { CollectingNotifier, DEFAULT_POLICY, FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen } from '@schift/payment-kit-core';
-import type { PaymentProvider, ProviderName, Refund } from '@schift/payment-kit-core';
+import { CollectingNotifier, DEFAULT_POLICY, FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen } from 'boilpayment-core';
+import type { PaymentProvider, ProviderName, Refund } from 'boilpayment-core';
 import { StripeProvider } from '../../../providers/stripe/ts/src/index.js';
 import { PolarProvider } from '../../../providers/polar/ts/src/index.js';
 import { TossProvider } from '../../../providers/toss/ts/src/index.js';

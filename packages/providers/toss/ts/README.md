@@ -1,6 +1,6 @@
-# @schift/payment-kit-toss
+# boilpayment-toss
 
-Toss Payments implementation of `@schift/payment-kit-core`'s `PaymentProvider` interface. Toss
+Toss Payments implementation of `boilpayment-core`'s `PaymentProvider` interface. Toss
 has no native subscriptions or webhook signing — this provider bills via billing keys, restricts
 webhook delivery to an IP allowlist, and normalizes Toss's status/webhook shapes into the kit's
 `Payment`/`Refund` types.
@@ -8,13 +8,13 @@ webhook delivery to an IP allowlist, and normalizes Toss's status/webhook shapes
 ## Install
 
 ```
-npm install @schift/payment-kit-toss @schift/payment-kit-core
+npm install boilpayment-toss boilpayment-core
 ```
 
 ## Usage
 
 ```ts
-import { TossProvider } from '@schift/payment-kit-toss';
+import { TossProvider } from 'boilpayment-toss';
 
 const provider = new TossProvider({
   secretKey: process.env.TOSS_SECRET_KEY!,
@@ -28,6 +28,6 @@ const checkout = await provider.createCheckout({
 });
 ```
 
-`TossProvider` is passed as the `provider` dependency to `@schift/payment-kit-lifecycle`,
-`@schift/payment-kit-refund`, `@schift/payment-kit-usage`, and `@schift/payment-kit-webhook`.
+`TossProvider` is passed as the `provider` dependency to `boilpayment-lifecycle`,
+`boilpayment-refund`, `boilpayment-usage`, and `boilpayment-webhook`.
 Toss self-schedules renewals — pair with `lifecycle.scheduler.tick`.

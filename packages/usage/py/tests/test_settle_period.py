@@ -5,8 +5,7 @@ from datetime import UTC, datetime
 
 import anyio
 import pytest
-from fixtures import FakeProvider, mk_sub
-from schift_payment_kit_core import (
+from boilpayment_core import (
     DEFAULT_POLICY,
     Customer,
     FixedClock,
@@ -20,7 +19,8 @@ from schift_payment_kit_core import (
     SequentialIdGen,
     UsageEvent,
 )
-from schift_payment_kit_usage import settle_period
+from boilpayment_usage import settle_period
+from fixtures import FakeProvider, mk_sub
 
 
 class BillingProvider(FakeProvider):

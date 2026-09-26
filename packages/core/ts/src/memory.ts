@@ -1,7 +1,7 @@
 /**
  * In-memory reference implementations of LedgerStore / Repo / Notifier.
  * See spec/core.pseudo.md [EC:B5] [EC:B14] [EC:B3] [EC:B4] [EC:B12].
- * Mirrors packages/core/py/src/schift_payment_kit_core/memory.py exactly.
+ * Mirrors packages/core/py/src/boilpayment_core/memory.py exactly.
  */
 import {
   AppendResult,

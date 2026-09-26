@@ -1,6 +1,6 @@
 /**
  * Period / calendar arithmetic. See spec/core.pseudo.md [EC:G1] [EC:G2] [EC:G3].
- * Mirrors packages/core/py/src/schift_payment_kit_core/period.py exactly.
+ * Mirrors packages/core/py/src/boilpayment_core/period.py exactly.
  * All Date instants in/out are UTC (EC:G3); `tz` is used only for civil month/day arithmetic.
  */
 import { MonthEndAnchor, Period, ProrationDenominator } from './types.js';

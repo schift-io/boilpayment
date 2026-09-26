@@ -1,7 +1,7 @@
 """Phase 6 regression tests — HTTP-calling PaymentProvider methods, driven through a stubbed
 httpx transport so NO real network call is made anywhere in this file.
 
-Seam used: PolarProvider._request() (packages/providers/polar/py/src/schift_payment_kit_polar/
+Seam used: PolarProvider._request() (packages/providers/polar/py/src/boilpayment_polar/
 __init__.py) builds a fresh `httpx.AsyncClient(base_url=..., timeout=30.0)` per call and has no
 constructor-level client injection (unlike e.g. TossProvider, which does accept a client). Since
 no DI seam is exposed, this file monkeypatches `httpx.AsyncClient` itself (as explicitly permitted
@@ -21,14 +21,14 @@ from datetime import UTC, datetime
 
 import httpx
 import pytest
-from schift_payment_kit_core import (
+from boilpayment_core import (
     Money,
     PaymentKitError,
     Plan,
     PlanPrice,
     ProviderError,
 )
-from schift_payment_kit_polar import PolarProvider
+from boilpayment_polar import PolarProvider
 
 
 class _Recorder:
@@ -125,7 +125,7 @@ class TestCreateCheckout:
             trial_days=0,
             prices=[price],
         )
-        from schift_payment_kit_core import CreateCheckoutInput
+        from boilpayment_core import CreateCheckoutInput
 
         checkout_input = CreateCheckoutInput(
             customer_ref="cust_abc",
@@ -173,7 +173,7 @@ class TestCreateCheckout:
             trial_days=0,
             prices=[price],
         )
-        from schift_payment_kit_core import CreateCheckoutInput
+        from boilpayment_core import CreateCheckoutInput
 
         checkout_input = CreateCheckoutInput(
             customer_ref="cust_abc",

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
-from schift_payment_kit_core import (
+from boilpayment_core import (
     ConsumeInput,
     FixedClock,
     InMemoryLedger,
@@ -13,7 +13,7 @@ from schift_payment_kit_core import (
     NewLedgerEntry,
     SequentialIdGen,
 )
-from schift_payment_kit_credits import ExpireDueInput, expire_due
+from boilpayment_credits import ExpireDueInput, expire_due
 
 
 def run(coro):

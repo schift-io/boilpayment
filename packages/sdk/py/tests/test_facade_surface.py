@@ -23,7 +23,7 @@ def _public_surface(module, internal: str) -> list[str]:
     declared = getattr(module, "__all__", None)
     if declared:
         return sorted(declared)
-    prefix = f"schift_payment_kit_{internal}"
+    prefix = f"boilpayment_{internal}"
     out = []
     for n in dir(module):
         if n.startswith("_"):
@@ -40,14 +40,14 @@ def _public_surface(module, internal: str) -> list[str]:
 
 @pytest.mark.parametrize(("sub", "internal"), sorted(SUBMODULES.items()))
 def test_facade_surface_matches_the_internal_package(sub: str, internal: str):
-    facade = importlib.import_module(f"schift_payment_kit.{sub}")
-    real = importlib.import_module(f"schift_payment_kit_{internal}")
+    facade = importlib.import_module(f"boilpayment.{sub}")
+    real = importlib.import_module(f"boilpayment_{internal}")
     expected = set(_public_surface(real, internal))
-    assert expected, f"schift_payment_kit_{internal} exposes nothing to mirror"
+    assert expected, f"boilpayment_{internal} exposes nothing to mirror"
     actual = set(getattr(facade, "__all__", ()) or ())
     missing, extra = sorted(expected - actual), sorted(actual - expected)
     assert not missing and not extra, (
-        f"schift_payment_kit.{sub} is out of sync with schift_payment_kit_{internal} — "
+        f"boilpayment.{sub} is out of sync with boilpayment_{internal} — "
         f"missing={missing} extra={extra}. Regenerate the facade submodule surfaces."
     )
     for name in sorted(expected):

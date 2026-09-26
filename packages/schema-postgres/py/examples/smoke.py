@@ -11,7 +11,7 @@ import os
 from datetime import UTC, datetime, timedelta
 
 import psycopg
-from schift_payment_kit_core import (
+from boilpayment_core import (
     DEFAULT_POLICY,
     ConsumeInput,
     CsCase,
@@ -23,7 +23,7 @@ from schift_payment_kit_core import (
     PlanPrice,
     Subscription,
 )
-from schift_payment_kit_schema_postgres import (
+from boilpayment_schema_postgres import (
     PostgresLedgerStore,
     PostgresRepo,
     consistency_check,

@@ -11,16 +11,16 @@ import { runMigrate } from './commands/migrate.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const HELP = `${pc.bold('paykit')} — Schift Payment Kit CLI
+const HELP = `${pc.bold('paykit')} — boilpayment CLI
 
 ${pc.bold('Usage')}
-  paykit init [--yes] [--out <dir>] [--config [file]] [--providers a,b] [--models a,b] [--languages a,b] [--goods a,b] [--cs]
-  paykit check [--out <dir>]
-  paykit live [--out <dir>] [--config <file>] [--env <file>] [--dry-run]
+  boilpayment init [--yes] [--out <dir>] [--config [file]] [--providers a,b] [--models a,b] [--languages a,b] [--goods a,b] [--cs]
+  boilpayment check [--out <dir>]
+  boilpayment live [--out <dir>] [--config <file>] [--env <file>] [--dry-run]
 
-  paykit migrate            마이그레이션 적용 (--dry-run, --database-url)
-  paykit --help
-  paykit --version
+  boilpayment migrate            마이그레이션 적용 (--dry-run, --database-url)
+  boilpayment --help
+  boilpayment --version
 
 ${pc.bold('init')}
   결제 provider · 정책 질문에 답하면 paykit.config.json + paykit/ 코드 + migrations + POLICY.md + .env.example 를 생성합니다.

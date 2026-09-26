@@ -9,7 +9,7 @@ import dataclasses
 import json
 from datetime import UTC, datetime
 
-from schift_payment_kit_core import (
+from boilpayment_core import (
     DEFAULT_POLICY,
     Customer,
     FixedClock,
@@ -22,7 +22,7 @@ from schift_payment_kit_core import (
     SequentialIdGen,
     Subscription,
 )
-from schift_payment_kit_usage import (
+from boilpayment_usage import (
     UsageEventInput,
     check,
     close_period,

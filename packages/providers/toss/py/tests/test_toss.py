@@ -15,7 +15,7 @@ import json
 
 import httpx
 import pytest
-from schift_payment_kit_core import (
+from boilpayment_core import (
     CreateCheckoutInput,
     Money,
     Plan,
@@ -23,7 +23,7 @@ from schift_payment_kit_core import (
     ProviderError,
     WebhookSignatureError,
 )
-from schift_payment_kit_toss import (
+from boilpayment_toss import (
     TossProvider,
     TossProviderConfig,
     map_toss_webhook,

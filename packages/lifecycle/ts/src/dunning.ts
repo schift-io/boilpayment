@@ -12,8 +12,8 @@ import {
   Policy,
   Repo,
   Subscription,
-} from '@schift/payment-kit-core';
-import { grantForPeriod, GrantResult } from '@schift/payment-kit-credits';
+} from 'boilpayment-core';
+import { grantForPeriod, GrantResult } from 'boilpayment-credits';
 import { retryOnVersionConflict } from './retry.js';
 
 const DAY_MS = 86_400_000;

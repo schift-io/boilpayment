@@ -5,7 +5,7 @@
 // directly in ts/src/smtp.ts, so this file mocks the `nodemailer` module itself via vi.mock for
 // the duration of the smtp describe block.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Notification } from '@schift/payment-kit-core';
+import type { Notification } from 'boilpayment-core';
 import { resend, slack } from '../src/index.js';
 
 const notification: Notification = { type: 'usage.soft_cap', customerId: 'cust_1', payload: { meter: 'api_call', overage: 2, included: 5 } };

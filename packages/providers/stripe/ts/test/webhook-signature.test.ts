@@ -4,7 +4,7 @@
 // itself. No network calls: `verifyWebhook` is pure crypto + parsing (packages/providers/stripe/spec/
 // stripe.pseudo.md "엔드포인트 매핑" row for verifyWebhook).
 import { describe, it, expect } from 'vitest';
-import { WebhookSignatureError } from '@schift/payment-kit-core';
+import { WebhookSignatureError } from 'boilpayment-core';
 import { StripeProvider } from '../src/index.js';
 import { signStripePayload } from './helpers/webhookSig.js';
 

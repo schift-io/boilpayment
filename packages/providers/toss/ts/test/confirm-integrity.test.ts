@@ -10,7 +10,7 @@
 //   - refund(): Authorization header is asserted on the cancel POST call too, not just
 //     the confirm/billing calls already covered in toss.test.ts.
 import { describe, it, expect } from 'vitest';
-import { ProviderError } from '@schift/payment-kit-core';
+import { ProviderError } from 'boilpayment-core';
 import { TossProvider } from '../src/index.js';
 
 const PAYMENT_FIXTURE_VA = {

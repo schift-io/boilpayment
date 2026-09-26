@@ -1,5 +1,5 @@
-import { PaymentKitError } from '@schift/payment-kit-core';
-import type { Repo } from '@schift/payment-kit-core';
+import { PaymentKitError } from 'boilpayment-core';
+import type { Repo } from 'boilpayment-core';
 
 /** Resolve a selected currency or an unambiguous plan price; never invent money units. */
 export async function billingCurrency(repo: Repo, planId: string, selected?: string): Promise<string> {

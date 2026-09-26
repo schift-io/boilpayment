@@ -4,7 +4,7 @@ and spec/portone.pseudo.md. No network calls.
 
 from __future__ import annotations
 
-from schift_payment_kit_portone import (
+from boilpayment_portone import (
     map_portone_webhook,
     normalize_portone_cash_receipt,
     normalize_portone_failure,

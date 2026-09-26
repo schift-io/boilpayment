@@ -1,7 +1,7 @@
 // EC:C1 (overage modes) EC:C5 (includedQuantity) EC:A14/EC:C6 (dunning grace gating) EC:C8 (credit conversion)
 // spec: packages/usage/spec/usage.pseudo.md
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_POLICY, FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen } from '@schift/payment-kit-core';
+import { DEFAULT_POLICY, FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen } from 'boilpayment-core';
 import { check } from '../src/check.js';
 import { record } from '../src/record.js';
 import { basePolicy, mkSub } from './fixtures.js';

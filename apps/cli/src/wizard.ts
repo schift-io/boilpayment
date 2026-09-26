@@ -127,7 +127,7 @@ export async function runWizard(opts: WizardOptions): Promise<WizardConfig> {
     }
   }
 
-  if (!opts.yes) p.intro(pc.bold('paykit init — 결제 킷 위저드'));
+  if (!opts.yes) p.intro(pc.bold('boilpayment init — 결제 위저드'));
 
   let lastGroup = '';
   let notedD13 = false;

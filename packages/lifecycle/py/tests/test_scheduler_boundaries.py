@@ -5,8 +5,7 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import pytest
-from helpers import FakeSelfSchedulingProvider
-from schift_payment_kit_core import (
+from boilpayment_core import (
     FixedClock,
     InMemoryLedger,
     InMemoryRepo,
@@ -15,12 +14,13 @@ from schift_payment_kit_core import (
     SequentialIdGen,
     resolve_policy,
 )
-from schift_payment_kit_lifecycle.scheduler import (
+from boilpayment_lifecycle.scheduler import (
     DueSubscriptionsInput,
     SchedulerTickInput,
     due_subscriptions,
     tick,
 )
+from helpers import FakeSelfSchedulingProvider
 from test_scheduler import PLAN, mk_sub, run
 
 

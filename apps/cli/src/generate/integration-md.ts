@@ -43,7 +43,7 @@ export function generateIntegrationMd(config: PaykitConfig): string {
 
   l.push('# 연동 가이드 — INTEGRATION.md');
   l.push('');
-  l.push('`paykit init` 이 이 프로젝트의 선택(provider · 모델 · 언어 · CS · 로깅)에 맞춰 생성한 문서입니다.');
+  l.push('`boilpayment init` 이 이 프로젝트의 선택(provider · 모델 · 언어 · CS · 로깅)에 맞춰 생성한 문서입니다.');
   l.push('여기 나오는 함수 이름은 `paykit/` 안에 실제로 생성된 것과 같습니다.');
   l.push('');
   l.push(`- Providers: \`${config.providers.join('`, `') || '(none)'}\``);
@@ -58,8 +58,8 @@ export function generateIntegrationMd(config: PaykitConfig): string {
   l.push('설치는 하나입니다. 내부 모듈은 이 패키지가 정확한 버전으로 물고 옵니다.');
   l.push('');
   l.push('```bash');
-  if (ts(config)) l.push('npm i @schift/payment-kit-sdk');
-  if (py(config)) l.push('pip install schift-payment-kit');
+  if (ts(config)) l.push('npm i boilpayment-sdk');
+  if (py(config)) l.push('pip install boilpayment');
   l.push('```');
   l.push('');
   l.push('**호스트 프로젝트는 ESM 이어야 합니다** — `package.json` 에 `"type": "module"`.');
@@ -72,15 +72,15 @@ export function generateIntegrationMd(config: PaykitConfig): string {
   l.push('');
   l.push('```bash');
   l.push('cp .env.example .env        # 실제 키를 채웁니다');
-  l.push('npx paykit migrate          # 마이그레이션 적용 (--dry-run 으로 먼저 볼 수 있습니다)');
-  l.push('npx paykit check            # 설정 검증 + DB 상태 (읽기 전용)');
+  l.push('npx boilpayment migrate          # 마이그레이션 적용 (--dry-run 으로 먼저 볼 수 있습니다)');
+  l.push('npx boilpayment check            # 설정 검증 + DB 상태 (읽기 전용)');
   l.push('```');
   l.push('');
-  l.push('`paykit migrate` 는 적용 이력을 `paykit_migrations` 에 남기므로 몇 번을 돌려도 안전합니다.');
+  l.push('`boilpayment migrate` 는 적용 이력을 `paykit_migrations` 에 남기므로 몇 번을 돌려도 안전합니다.');
   l.push('`paykit/migrations/*.sql` 을 `psql` 로 직접 때리지 마세요 — 이력이 남지 않아 다음 버전에서');
   l.push('무엇이 이미 적용됐는지 알 수 없게 됩니다.');
   l.push('');
-  l.push('`paykit check` 는 DB 가 이 빌드보다 뒤처졌거나 앞서 있으면 **종료 코드 1** 로 끝납니다.');
+  l.push('`boilpayment check` 는 DB 가 이 빌드보다 뒤처졌거나 앞서 있으면 **종료 코드 1** 로 끝납니다.');
   l.push('배포 파이프라인에서 앱을 띄우기 전 게이트로 그대로 쓸 수 있습니다.');
   l.push('');
   l.push('### 버전을 올릴 때');
@@ -88,9 +88,9 @@ export function generateIntegrationMd(config: PaykitConfig): string {
   l.push('패키지를 올리면 새 마이그레이션이 따라올 수 있습니다. 순서는 항상 같습니다.');
   l.push('');
   l.push('```bash');
-  l.push('npm i @schift/payment-kit-sdk@latest');
-  l.push('npx paykit migrate --dry-run   # 무엇이 적용될지 확인');
-  l.push('npx paykit migrate');
+  l.push('npm i boilpayment-sdk@latest');
+  l.push('npx boilpayment migrate --dry-run   # 무엇이 적용될지 확인');
+  l.push('npx boilpayment migrate');
   l.push('```');
   l.push('');
   l.push('**앱 부팅 시 `verifySchema()` 를 부르세요.** DB 가 코드보다 뒤처져 있으면 그 자리에서');
@@ -258,13 +258,13 @@ export function generateIntegrationMd(config: PaykitConfig): string {
   l.push('');
   if (ts(config)) {
     l.push('```ts');
-    l.push("import { timeline, explain } from '@schift/payment-kit-sdk/cs';");
+    l.push("import { timeline, explain } from 'boilpayment-sdk/cs';");
     l.push('const { events } = await timeline({ paymentId, repo, ledger, clock });');
     l.push('console.log(explain(events).join("\\n"));');
     l.push('```');
   } else {
     l.push('```python');
-    l.push('from schift_payment_kit.cs import timeline, explain');
+    l.push('from boilpayment.cs import timeline, explain');
     l.push('res = await timeline(payment_id=payment_id, repo=repo, ledger=ledger, clock=clock)');
     l.push('print("\\n".join(explain(res.events)))');
     l.push('```');
@@ -295,7 +295,7 @@ export function generateIntegrationMd(config: PaykitConfig): string {
   l.push('`.env` 를 채운 뒤 실제 provider API 에 왕복을 겁니다. mock 이 아닙니다.');
   l.push('');
   l.push('```bash');
-  l.push('npx paykit live            # --dry-run 으로 무엇이 돌지 먼저 볼 수 있습니다');
+  l.push('npx boilpayment live            # --dry-run 으로 무엇이 돌지 먼저 볼 수 있습니다');
   l.push('```');
   l.push('');
   if (config.providers.includes('toss')) {
@@ -334,7 +334,7 @@ export function generateIntegrationMd(config: PaykitConfig): string {
   l.push('---');
   l.push('');
   l.push('정책 선택의 의미는 `POLICY.md` 에 문장으로 정리돼 있습니다.');
-  l.push('`paykit.config.json` 을 고친 뒤에는 `paykit check` 를 다시 돌리세요.');
+  l.push('`paykit.config.json` 을 고친 뒤에는 `boilpayment check` 를 다시 돌리세요.');
   l.push('');
   return l.join('\n');
 }

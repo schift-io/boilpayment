@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 
-from schift_payment_kit_core import (
+from boilpayment_core import (
     DEFAULT_POLICY,
     CollectingNotifier,
     Customer,
@@ -27,7 +27,7 @@ from schift_payment_kit_core import (
     SequentialIdGen,
     resolve_policy,
 )
-from schift_payment_kit_cs import (
+from boilpayment_cs import (
     CaseMeter,
     CaseReportInput,
     DisputeInput,
@@ -48,10 +48,10 @@ from schift_payment_kit_cs import (
     resolve,
     widget,
 )
-from schift_payment_kit_cs import (
+from boilpayment_cs import (
     dispute as cs_dispute,
 )
-from schift_payment_kit_cs.metrics import Metrics
+from boilpayment_cs.metrics import Metrics
 
 
 def run(coro):
@@ -686,7 +686,7 @@ def test_e1_subscription_payment_grant_key_pattern():
             failure=None,
         )
         # supply a real Period via dataclasses to keep grant_key derivation exercised
-        from schift_payment_kit_core import Period
+        from boilpayment_core import Period
 
         sub_payment = Payment(
             id="pay_sub_1",
@@ -1142,7 +1142,7 @@ def test_i6_valid_sign_verify_round_trip():
 
 
 def test_i6_expired_token_is_rejected():
-    from schift_payment_kit_core import PaymentKitError
+    from boilpayment_core import PaymentKitError
 
     token = widget.sign_token(
         widget.SignTokenInput(customer_id=CUSTOMER_ID, ttl_seconds=-1), "test-secret"
@@ -1155,7 +1155,7 @@ def test_i6_expired_token_is_rejected():
 
 
 def test_i6_tampered_signature_is_rejected():
-    from schift_payment_kit_core import PaymentKitError
+    from boilpayment_core import PaymentKitError
 
     token = widget.sign_token(
         widget.SignTokenInput(customer_id=CUSTOMER_ID, ttl_seconds=60), "test-secret"
@@ -1170,7 +1170,7 @@ def test_i6_tampered_signature_is_rejected():
 
 
 def test_i6_wrong_secret_is_rejected():
-    from schift_payment_kit_core import PaymentKitError
+    from boilpayment_core import PaymentKitError
 
     token = widget.sign_token(
         widget.SignTokenInput(customer_id=CUSTOMER_ID, ttl_seconds=60), "test-secret"

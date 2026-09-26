@@ -6,7 +6,7 @@
 `LicenseReporter`/`NoopLicenseReporter`/`HttpLicenseReporter` · `timeline` · `explain`
 (docs/ARCHITECTURE.md §3.5, docs/CS_SERVER.md for the server contract `HttpLicenseReporter` talks to).
 
-`refundAssist` does **not** import `@schift/payment-kit-refund` directly — it takes `refundEvaluate` /
+`refundAssist` does **not** import `boilpayment-refund` directly — it takes `refundEvaluate` /
 `refundExecute` as injected function params (same shapes as `refund.evaluate` / `refund.execute`). This
 keeps `cs` decoupled from `refund`'s package tree; the app (or the smoke example) wires the two
 together by importing both and passing the functions in.

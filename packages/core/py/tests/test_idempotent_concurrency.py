@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
-from schift_payment_kit_core import (
+from boilpayment_core import (
     FixedClock,
     InMemoryRepo,
     PaymentKitError,
@@ -18,7 +18,7 @@ def env():
 
 
 def test_atomic_initial_and_failed_retry_claims():
-    from schift_payment_kit_core import Operation
+    from boilpayment_core import Operation
 
     async def scenario(retry):
         repo, clock = env()

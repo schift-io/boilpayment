@@ -1,11 +1,11 @@
-"""Phase 6 regression tests -- packages/webhook/py/src/schift_payment_kit_webhook/grants.py (EC:E13)"""
+"""Phase 6 regression tests -- packages/webhook/py/src/boilpayment_webhook/grants.py (EC:E13)"""
 
 from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
 
-from schift_payment_kit_core import (
+from boilpayment_core import (
     FixedClock,
     InMemoryLedger,
     InMemoryRepo,
@@ -15,7 +15,7 @@ from schift_payment_kit_core import (
     Payment,
     SequentialIdGen,
 )
-from schift_payment_kit_webhook import get_grants_for_checkout
+from boilpayment_webhook import get_grants_for_checkout
 
 
 def test_ec_e13_not_ready_when_no_payment_matches_checkout_or_payment_ref():

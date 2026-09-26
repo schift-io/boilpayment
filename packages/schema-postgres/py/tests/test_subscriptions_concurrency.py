@@ -1,6 +1,6 @@
 """[EC:K1] optimistic lock on `subscriptions` -- an upgrade racing a renewal webhook (or any two
 independent writers) must not silently lose one of the two writes. `PostgresRepo.subscriptions.put`
-enforces the same contract as `VersionedMemTable` (schift_payment_kit_core.memory).
+enforces the same contract as `VersionedMemTable` (boilpayment_core.memory).
 
 pytest-asyncio is not installed -> every test wraps its async body with asyncio.run().
 """
@@ -12,15 +12,15 @@ import dataclasses
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from db_helper import create_test_db, drop_test_db
-from schift_payment_kit_core import (
+from boilpayment_core import (
     Customer,
     PaymentKitError,
     Period,
     Plan,
     Subscription,
 )
-from schift_payment_kit_schema_postgres import PostgresRepo
+from boilpayment_schema_postgres import PostgresRepo
+from db_helper import create_test_db, drop_test_db
 
 
 async def _seed_plan(repo: PostgresRepo) -> None:

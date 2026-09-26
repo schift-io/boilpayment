@@ -3,11 +3,11 @@
 // sees it) and writes one row per `log()` call to `audit_log` (sql/0001_core.sql). Deliberately
 // NOT part of `Repo`/`PostgresRepo` — its own store, so the CS timeline module (packages/cs) can
 // query it independently of the domain repo. Mirrors
-// packages/schema-postgres/py/src/schift_payment_kit_schema_postgres/audit_log.py exactly.
+// packages/schema-postgres/py/src/boilpayment_schema_postgres/audit_log.py exactly.
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
-import { BaseLogger } from '@schift/payment-kit-core';
-import type { LogEntry } from '@schift/payment-kit-core';
+import { BaseLogger } from 'boilpayment-core';
+import type { LogEntry } from 'boilpayment-core';
 import { jsonb } from './mapping.js';
 import { runner } from './tx.js';
 

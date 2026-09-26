@@ -10,13 +10,13 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import psycopg
-from db_helper import create_test_db, drop_test_db
-from schift_payment_kit_core import Customer, LedgerReference, NewLedgerEntry
-from schift_payment_kit_schema_postgres import (
+from boilpayment_core import Customer, LedgerReference, NewLedgerEntry
+from boilpayment_schema_postgres import (
     PostgresLedgerStore,
     PostgresRepo,
     consistency_check,
 )
+from db_helper import create_test_db, drop_test_db
 
 
 async def _make_customer(repo: PostgresRepo) -> str:
@@ -120,7 +120,7 @@ def test_consume_duplicate_idempotency_key_returns_existing_rows():
             key = f"consume:{uuid.uuid4()}"
             now = datetime.now(UTC)
 
-            from schift_payment_kit_core import ConsumeInput
+            from boilpayment_core import ConsumeInput
 
             first = await ledger.consume(
                 ConsumeInput(
@@ -159,7 +159,7 @@ def test_consume_fifo_by_expiry_skips_already_expired_grants():
     async def run():
         db = await create_test_db("py_ledger_fifo")
         try:
-            from schift_payment_kit_core import ConsumeInput
+            from boilpayment_core import ConsumeInput
 
             ledger = PostgresLedgerStore(db.dsn)
             repo = PostgresRepo(db.dsn)
@@ -244,7 +244,7 @@ def test_negative_balance_block_rejects_atomically():
     async def run():
         db = await create_test_db("py_ledger_block")
         try:
-            from schift_payment_kit_core import ConsumeInput
+            from boilpayment_core import ConsumeInput
 
             ledger = PostgresLedgerStore(db.dsn)
             repo = PostgresRepo(db.dsn)
@@ -378,7 +378,7 @@ def test_credit_balances_fully_drained_expiring_lot_resets_to_empty():
     async def run():
         db = await create_test_db("py_ledger_drain")
         try:
-            from schift_payment_kit_core import ConsumeInput
+            from boilpayment_core import ConsumeInput
 
             ledger = PostgresLedgerStore(db.dsn)
             repo = PostgresRepo(db.dsn)
@@ -430,7 +430,7 @@ def test_consistency_check_zero_mismatches_after_activity():
     async def run():
         db = await create_test_db("py_ledger_consistency")
         try:
-            from schift_payment_kit_core import ConsumeInput
+            from boilpayment_core import ConsumeInput
 
             ledger = PostgresLedgerStore(db.dsn)
             repo = PostgresRepo(db.dsn)

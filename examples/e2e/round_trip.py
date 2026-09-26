@@ -1,4 +1,4 @@
-"""E2E round-trip across all Schift Payment Kit modules (Python side).
+"""E2E round-trip across all boilpayment modules (Python side).
 
 Uses ONLY public package exports + an in-file fake PaymentProvider.
 Mirrors examples/e2e/round-trip.ts line-for-line (except ISO tz suffix).
@@ -17,7 +17,7 @@ import asyncio
 import json
 from datetime import datetime, timezone
 
-from schift_payment_kit_core import (
+from boilpayment_core import (
     Customer,
     FixedClock,
     InMemoryLedger,
@@ -37,12 +37,12 @@ from schift_payment_kit_core import (
     WebhookSignatureError,
     resolve_policy,
 )
-import schift_payment_kit_credits as credits
-import schift_payment_kit_lifecycle as lifecycle
-import schift_payment_kit_refund as refund
-import schift_payment_kit_usage as usage
-import schift_payment_kit_webhook as webhook
-import schift_payment_kit_cs as cs
+import boilpayment_credits as credits
+import boilpayment_lifecycle as lifecycle
+import boilpayment_refund as refund
+import boilpayment_usage as usage
+import boilpayment_webhook as webhook
+import boilpayment_cs as cs
 
 
 # ── in-file fake provider ────────────────────────────────────────────────────

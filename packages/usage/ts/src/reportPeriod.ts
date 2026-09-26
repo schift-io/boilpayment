@@ -1,5 +1,5 @@
-import { PaymentKitError } from '@schift/payment-kit-core';
-import type { Clock, PaymentProvider, Repo, Subscription, UsageEvent } from '@schift/payment-kit-core';
+import { PaymentKitError } from 'boilpayment-core';
+import type { Clock, PaymentProvider, Repo, Subscription, UsageEvent } from 'boilpayment-core';
 import { flushOutbox } from './flushOutbox.js';
 
 export async function reportPeriod(input: { readonly sub: Subscription; readonly events: readonly UsageEvent[]; readonly repo: Repo; readonly provider: PaymentProvider; readonly clock: Clock }): Promise<'awaiting_provider_billing' | 'report_pending' | 'report_failed'> {

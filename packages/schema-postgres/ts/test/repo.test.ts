@@ -2,7 +2,7 @@
 // cs_cases-specific behavior: policy_snapshot dedup and EC:I7 partial-unique-index dedup.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
-import { DEFAULT_POLICY, type Customer, type CsCase, type Payment, type Plan, type Refund, type Subscription, type UsageEvent, type WebhookEventRecord, type OutboxItem } from '@schift/payment-kit-core';
+import { DEFAULT_POLICY, type Customer, type CsCase, type Payment, type Plan, type Refund, type Subscription, type UsageEvent, type WebhookEventRecord, type OutboxItem } from 'boilpayment-core';
 import { PostgresRepo, migrate } from '../dist/index.js';
 import { createTestDb, dropTestDb, uniqueDbName, PG_HOST } from './helpers.js';
 

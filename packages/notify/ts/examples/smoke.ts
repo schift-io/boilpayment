@@ -1,7 +1,7 @@
 // Smoke test — real code path (no mocks of our own modules), real network attempts against
 // unreachable/fake endpoints to prove send() never throws. Run (after `tsc` build):
 // node <outDir>/examples/smoke.js
-import { CollectingNotifier, FixedClock, InMemoryRepo, Notification } from '@schift/payment-kit-core';
+import { CollectingNotifier, FixedClock, InMemoryRepo, Notification } from 'boilpayment-core';
 import { composite, flushNotifyOutbox, render, resend, slack, smtp, withOutbox } from '../src/index.js';
 
 // withOutbox() stamps nextAttemptAt with the real wall clock (it takes no `clock` param per

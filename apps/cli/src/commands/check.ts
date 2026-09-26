@@ -1,4 +1,4 @@
-// `paykit check` — validate config + read-only DB/migration inspection. Never writes.
+// `boilpayment check` — validate config + read-only DB/migration inspection. Never writes.
 import path from 'node:path';
 import pc from 'picocolors';
 import { readConfig } from '../config.js';
@@ -109,11 +109,11 @@ export interface DatabaseReport {
 /**
  * Read-only database inspection.
  *
- * This goes through the same loader and the same `schemaStatus` call as `paykit migrate`, on
+ * This goes through the same loader and the same `schemaStatus` call as `boilpayment migrate`, on
  * purpose. An earlier version opened its own `pg` client and listed the rows of
  * `paykit_migrations`, which meant it could only ever report what HAD been applied — never what
- * was still missing. A database three migrations behind produced a clean, green `paykit check`
- * and exit code 0, while `paykit migrate --dry-run` on the very same project said "3 pending".
+ * was still missing. A database three migrations behind produced a clean, green `boilpayment check`
+ * and exit code 0, while `boilpayment migrate --dry-run` on the very same project said "3 pending".
  * The command whose whole job is "am I ready to run" must answer that question, not a weaker one.
  */
 export async function checkDatabase(dir: string, config: PaykitConfig): Promise<DatabaseReport> {
@@ -123,7 +123,7 @@ export async function checkDatabase(dir: string, config: PaykitConfig): Promise<
     return { lines, ok: true };
   }
 
-  // Same resolution order as `paykit migrate`: shell env wins, then the project's .env. Reading
+  // Same resolution order as `boilpayment migrate`: shell env wins, then the project's .env. Reading
   // only process.env made `check` say "DATABASE_URL 미설정" for projects where `migrate` connected.
   const { merged: env } = await loadEnvFile(path.join(dir, '.env'));
   const url = process.env.DATABASE_URL ?? env.DATABASE_URL;
@@ -135,7 +135,7 @@ export async function checkDatabase(dir: string, config: PaykitConfig): Promise<
   const sp = await loadSchemaPostgres(dir);
   if (!sp) {
     lines.push(
-      pc.yellow('@schift/payment-kit-sdk 가 설치되어 있지 않아 DB 조회를 건너뜁니다. `npm install @schift/payment-kit-sdk` 후 다시 실행하세요.'),
+      pc.yellow('boilpayment-sdk 가 설치되어 있지 않아 DB 조회를 건너뜁니다. `npm install boilpayment-sdk` 후 다시 실행하세요.'),
     );
     return { lines, ok: true };
   }
@@ -161,7 +161,7 @@ export async function checkDatabase(dir: string, config: PaykitConfig): Promise<
   if (status.pending.length > 0) {
     lines.push(pc.red(`미적용 ${status.pending.length}건:`));
     for (const name of status.pending) lines.push(`  ${name}`);
-    lines.push(pc.bold('  → `npx paykit migrate` 로 적용하세요.'));
+    lines.push(pc.bold('  → `npx boilpayment migrate` 로 적용하세요.'));
     lines.push('    적용 전에는 verifySchema() 가 부팅을 거부합니다 (INTEGRATION.md "버전을 올릴 때").');
   }
   if (status.ok) lines.push(pc.green('스키마가 이 빌드와 일치합니다.'));
@@ -202,6 +202,6 @@ export async function runCheck(dir: string): Promise<void> {
   const db = await checkDatabase(dir, config);
   for (const line of db.lines) console.log(`  ${line}`);
   // Warnings are advisory; a database that does not match this build is not. Exiting non-zero is
-  // what makes `paykit check` usable as a deploy gate.
+  // what makes `boilpayment check` usable as a deploy gate.
   if (!db.ok || checkoutErrors.length > 0) process.exitCode = 1;
 }

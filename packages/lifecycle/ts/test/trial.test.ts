@@ -1,6 +1,6 @@
 // spec: packages/lifecycle/spec/lifecycle.pseudo.md [EC:A9]
 import { describe, expect, it } from 'vitest';
-import { FixedClock, InMemoryLedger, InMemoryRepo, Plan, Payment, Subscription, SequentialIdGen, resolvePolicy } from '@schift/payment-kit-core';
+import { FixedClock, InMemoryLedger, InMemoryRepo, Plan, Payment, Subscription, SequentialIdGen, resolvePolicy } from 'boilpayment-core';
 import { convertTrial } from '../src/index.js';
 
 const plan: Plan = { id: 'plan_paid', name: 'Paid', interval: 'month', creditsPerPeriod: 100, usageIncluded: 0, trialDays: 0, prices: [{ currency: 'USD', amountMinor: 1000 }] };

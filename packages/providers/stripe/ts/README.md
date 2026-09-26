@@ -1,19 +1,19 @@
-# @schift/payment-kit-stripe
+# boilpayment-stripe
 
-Stripe implementation of `@schift/payment-kit-core`'s `PaymentProvider` interface: checkout
+Stripe implementation of `boilpayment-core`'s `PaymentProvider` interface: checkout
 sessions, subscription changes with proration, refunds, webhook verification, and normalizers
 from Stripe's API objects to the kit's `Payment`/`Subscription`/`Refund` types.
 
 ## Install
 
 ```
-npm install @schift/payment-kit-stripe @schift/payment-kit-core
+npm install boilpayment-stripe boilpayment-core
 ```
 
 ## Usage
 
 ```ts
-import { StripeProvider } from '@schift/payment-kit-stripe';
+import { StripeProvider } from 'boilpayment-stripe';
 
 const provider = new StripeProvider({
   secretKey: process.env.STRIPE_SECRET_KEY!,
@@ -27,5 +27,5 @@ const checkout = await provider.createCheckout({
 });
 ```
 
-`StripeProvider` is passed as the `provider` dependency to `@schift/payment-kit-lifecycle`,
-`@schift/payment-kit-refund`, `@schift/payment-kit-usage`, and `@schift/payment-kit-webhook`.
+`StripeProvider` is passed as the `provider` dependency to `boilpayment-lifecycle`,
+`boilpayment-refund`, `boilpayment-usage`, and `boilpayment-webhook`.

@@ -1,5 +1,5 @@
 // EC:C9 — see spec/usage.pseudo.md
-import type { Clock, IdGen, Money, PaymentProvider, Policy, Repo, Subscription, UsageEvent } from '@schift/payment-kit-core';
+import type { Clock, IdGen, Money, PaymentProvider, Policy, Repo, Subscription, UsageEvent } from 'boilpayment-core';
 import { billingCurrency } from './billingCurrency.js';
 
 export interface ClosePeriodInput {

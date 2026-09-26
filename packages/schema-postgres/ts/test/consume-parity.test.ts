@@ -7,8 +7,8 @@
 // sql/0002_credits.sql paykit_expired_remaining/paykit_available) and are pinned as scenarios E and F.
 import { randomUUID } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import type { Customer, LedgerStore } from '@schift/payment-kit-core';
-import { InMemoryLedger } from '@schift/payment-kit-core';
+import type { Customer, LedgerStore } from 'boilpayment-core';
+import { InMemoryLedger } from 'boilpayment-core';
 import { PostgresLedgerStore, PostgresRepo } from '../dist/index.js';
 import { createTestDb, dropTestDb, type TestDb } from './db-helper.js';
 

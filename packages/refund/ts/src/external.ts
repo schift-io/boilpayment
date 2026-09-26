@@ -1,8 +1,8 @@
 // spec/refund.pseudo.md — EC:D8
-import { Clock, IdGen, LedgerStore, NormalizedEvent, PaymentKitError, Refund, Repo } from '@schift/payment-kit-core';
+import { Clock, IdGen, LedgerStore, NormalizedEvent, PaymentKitError, Refund, Repo } from 'boilpayment-core';
 import { weightedAvgUnitPrice } from './util.js';
 
-/** Injected instead of importing `@schift/payment-kit-cs` directly (EC:D8). */
+/** Injected instead of importing `boilpayment-cs` directly (EC:D8). */
 export interface ReconcileMismatchCaseOpener {
   openReconcileMismatchCase(input: { customerId: string; referenceId: string; reason: string }): Promise<void>;
 }

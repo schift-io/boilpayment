@@ -1,5 +1,5 @@
 /**
- * Money value-object helpers. Mirrors packages/core/py/src/schift_payment_kit_core/money.py exactly.
+ * Money value-object helpers. Mirrors packages/core/py/src/boilpayment_core/money.py exactly.
  * EC:B8 (grant unit price) / EC:D6 (refund in payment currency) rely on these staying minor-unit-exact.
  */
 import { Money } from './types.js';

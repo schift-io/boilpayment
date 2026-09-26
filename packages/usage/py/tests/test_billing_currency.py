@@ -2,8 +2,8 @@
 
 import anyio
 import pytest
-from schift_payment_kit_core import InMemoryRepo, PaymentKitError, Plan, PlanPrice
-from schift_payment_kit_usage.billing_currency import billing_currency
+from boilpayment_core import InMemoryRepo, PaymentKitError, Plan, PlanPrice
+from boilpayment_usage.billing_currency import billing_currency
 
 
 @pytest.mark.parametrize("currencies", [("KRW",), ("USD", "KRW"), ()])

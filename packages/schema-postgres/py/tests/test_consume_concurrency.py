@@ -1,7 +1,7 @@
 """[EC:B5] concurrent consume -- pg_advisory_xact_lock + FOR UPDATE must prevent overselling when
 multiple connections race to consume from the same customer's balance.
 
-Sets PAYKIT_PG_POOL_MAX before the first import of schift_payment_kit_schema_postgres (module-level
+Sets PAYKIT_PG_POOL_MAX before the first import of boilpayment_schema_postgres (module-level
 constant, read once at import time) so the shared connection pool has enough headroom for 20
 truly-concurrent consume() calls instead of queueing behind the default max of 10.
 
@@ -18,14 +18,14 @@ import asyncio
 import uuid
 from datetime import UTC, datetime
 
-from db_helper import create_test_db, drop_test_db
-from schift_payment_kit_core import (
+from boilpayment_core import (
     ConsumeInput,
     Customer,
     LedgerReference,
     NewLedgerEntry,
 )
-from schift_payment_kit_schema_postgres import PostgresLedgerStore, PostgresRepo
+from boilpayment_schema_postgres import PostgresLedgerStore, PostgresRepo
+from db_helper import create_test_db, drop_test_db
 
 
 def test_20_parallel_consumes_of_10_against_balance_100_exactly_10_succeed():

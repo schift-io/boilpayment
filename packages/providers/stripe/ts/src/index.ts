@@ -1,4 +1,4 @@
-// Schift Payment Kit — Stripe provider.
+// boilpayment — Stripe provider.
 // spec: ../../spec/stripe.pseudo.md
 import Stripe from 'stripe';
 import type {
@@ -18,8 +18,8 @@ import type {
   Subscription,
   SubscriptionStatus,
   Logger,
-} from '@schift/payment-kit-core';
-import { PaymentKitError, WebhookSignatureError, NoopLogger } from '@schift/payment-kit-core';
+} from 'boilpayment-core';
+import { PaymentKitError, WebhookSignatureError, NoopLogger } from 'boilpayment-core';
 
 export interface StripeProviderConfig {
   secretKey: string;
@@ -603,7 +603,7 @@ export class StripeProvider implements PaymentProvider {
   }
 
   /**
-   * NOT part of the PaymentProvider contract. Test-mode-only escape hatch for `paykit live`
+   * NOT part of the PaymentProvider contract. Test-mode-only escape hatch for `boilpayment live`
    * (docs/ARCHITECTURE.md live-verification tooling): creates and confirms a real Stripe
    * PaymentIntent server-side using the `pm_card_visa` test payment method, so a "real round
    * trip" can be proven without a browser completing Stripe Checkout. Guarded to `sk_test_`

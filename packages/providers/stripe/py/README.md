@@ -1,20 +1,20 @@
-# schift-payment-kit-stripe
+# boilpayment-stripe
 
-Stripe implementation of `schift-payment-kit-core`'s `PaymentProvider` protocol: checkout
+Stripe implementation of `boilpayment-core`'s `PaymentProvider` protocol: checkout
 sessions, subscription changes with proration, refunds, webhook verification, and normalizers
 from Stripe's API objects to the kit's `Payment`/`Subscription`/`Refund` types.
 
 ## Install
 
 ```
-pip install schift-payment-kit-stripe
+pip install boilpayment-stripe
 ```
 
 ## Usage
 
 ```python
-from schift_payment_kit_stripe import StripeProvider
-from schift_payment_kit_core import CreateCheckoutInput
+from boilpayment_stripe import StripeProvider
+from boilpayment_core import CreateCheckoutInput
 
 provider = StripeProvider(
     secret_key=os.environ["STRIPE_SECRET_KEY"],
@@ -28,5 +28,5 @@ checkout = await provider.create_checkout(CreateCheckoutInput(
 ))
 ```
 
-`StripeProvider` is passed as the `provider` dependency to `schift-payment-kit-lifecycle`,
-`schift-payment-kit-refund`, `schift-payment-kit-usage`, and `schift-payment-kit-webhook`.
+`StripeProvider` is passed as the `provider` dependency to `boilpayment-lifecycle`,
+`boilpayment-refund`, `boilpayment-usage`, and `boilpayment-webhook`.

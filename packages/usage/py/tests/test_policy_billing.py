@@ -5,8 +5,7 @@ from datetime import UTC, datetime
 
 import anyio
 import pytest
-from fixtures import mk_sub
-from schift_payment_kit_core import (
+from boilpayment_core import (
     DEFAULT_POLICY,
     FixedClock,
     InMemoryLedger,
@@ -16,14 +15,15 @@ from schift_payment_kit_core import (
     PaymentKitError,
     SequentialIdGen,
 )
-from schift_payment_kit_core.types import CreditConversion
-from schift_payment_kit_usage import (
+from boilpayment_core.types import CreditConversion
+from boilpayment_usage import (
     UsageEventInput,
     check,
     close_period,
     record,
     resettle_period,
 )
+from fixtures import mk_sub
 
 
 def test_conversion_obeys_promotional_first_rule() -> None:

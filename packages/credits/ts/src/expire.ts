@@ -1,5 +1,5 @@
 // spec: packages/credits/spec/credits.pseudo.md — EC:B14
-import { Clock, LedgerEntry, LedgerStore } from '@schift/payment-kit-core';
+import { Clock, LedgerEntry, LedgerStore } from 'boilpayment-core';
 
 export interface ExpireDueInput {
   ledger: LedgerStore;

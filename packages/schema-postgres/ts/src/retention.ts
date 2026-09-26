@@ -5,7 +5,7 @@
 // NEVER touches `ledger_entries` — the ledger is retained indefinitely (EC:H2/H3, 전자상거래법
 // 5-year record-keeping requirement); pruning it is out of scope on purpose, forever.
 import type { Pool } from 'pg';
-import type { Clock, Policy } from '@schift/payment-kit-core';
+import type { Clock, Policy } from 'boilpayment-core';
 
 export interface PruneRetentionInput {
   pool: Pool;

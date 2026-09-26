@@ -4,7 +4,7 @@
 // spec/portone.pseudo.md "[EC:F] issueBillingKey / chargeBillingKey / schedulePayment /
 // cancelSchedules" and "[EC:D4 D13 D14 D6] refund".
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ProviderError } from '@schift/payment-kit-core';
+import { ProviderError } from 'boilpayment-core';
 import { PortoneProvider } from '../src/index.js';
 
 const API_SECRET = 'test_sk_dummy';

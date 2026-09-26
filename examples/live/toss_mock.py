@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
 
 import httpx
-from schift_payment_kit_core import (
+from boilpayment_core import (
     CreateCheckoutInput,
     FixedClock,
     InMemoryLedger,
@@ -29,9 +29,9 @@ from schift_payment_kit_core import (
     WebhookSignatureError,
     resolve_policy,
 )
-from schift_payment_kit_lifecycle import scheduler
-from schift_payment_kit_lifecycle.scheduler import SchedulerTickInput
-from schift_payment_kit_toss import TossProvider, TossProviderConfig
+from boilpayment_lifecycle import scheduler
+from boilpayment_lifecycle.scheduler import SchedulerTickInput
+from boilpayment_toss import TossProvider, TossProviderConfig
 
 MOCK_BASE = f"http://127.0.0.1:{os.environ.get('TOSS_MOCK_PORT', 12211)}"
 

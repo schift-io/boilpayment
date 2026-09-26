@@ -1,7 +1,7 @@
 // Phase 6 regression tests — [EC:E4] verifyWebhook (Standard Webhooks / Svix-compatible scheme).
 import { createHmac } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
-import { WebhookSignatureError } from '@schift/payment-kit-core';
+import { WebhookSignatureError } from 'boilpayment-core';
 import { PortoneProvider } from '../src/index.js';
 
 const WEBHOOK_SECRET = 'whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw';

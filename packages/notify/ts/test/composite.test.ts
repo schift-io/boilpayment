@@ -1,7 +1,7 @@
 // Notification delivery must isolate every child failure.
 import { describe, expect, it } from 'vitest';
-import { CollectingNotifier } from '@schift/payment-kit-core';
-import type { Notification, Notifier } from '@schift/payment-kit-core';
+import { CollectingNotifier } from 'boilpayment-core';
+import type { Notification, Notifier } from 'boilpayment-core';
 import { composite } from '../src/index.js';
 
 const notification: Notification = { type: 'usage.soft_cap', customerId: 'cust_1', payload: { meter: 'api_call', overage: 2, included: 5 } };

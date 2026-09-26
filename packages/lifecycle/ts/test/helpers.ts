@@ -14,7 +14,7 @@ import {
   ProviderCapabilities,
   Refund,
   Subscription,
-} from '@schift/payment-kit-core';
+} from 'boilpayment-core';
 
 function unexpected(name: string): never {
   throw new Error(`unexpected call: ${name} (not wired for this test)`);

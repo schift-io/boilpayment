@@ -2,6 +2,6 @@ packages:
   - packages/*/ts
   - packages/providers/*/ts
   - apps/*
-  # examples/e2e is a real workspace member so `pnpm install` reproduces its @schift links.
+  # examples/e2e is a real workspace member so `pnpm install` reproduces its boilpayment-* links.
   # It previously resolved through a hand-made node_modules that only existed locally.
   - examples/*

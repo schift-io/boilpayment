@@ -1,5 +1,5 @@
 // HTTP adapters — framework-agnostic. See spec/webhook.pseudo.md
-import type { Clock, PaymentProvider, Repo } from '@schift/payment-kit-core';
+import type { Clock, PaymentProvider, Repo } from 'boilpayment-core';
 import { receive } from './receive.js';
 
 export interface NodeRequest {

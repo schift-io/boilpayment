@@ -1,7 +1,7 @@
 {
-  "name": "@schift/payment-kit-schema-postgres",
+  "name": "boilpayment-schema-postgres",
   "version": "0.1.0",
-  "description": "Schift Payment Kit — schema-postgres",
+  "description": "boilpayment — schema-postgres",
   "license": "MIT",
   "keywords": [
     "schift",
@@ -38,7 +38,7 @@
     "prebuild": "node ../scripts/sync-sql.mjs"
   },
   "dependencies": {
-    "@schift/payment-kit-core": "workspace:*",
+    "boilpayment-core": "workspace:*",
     "pg": "^8.13.0"
   },
   "devDependencies": {
@@ -47,12 +47,12 @@
     "vitest": "^2.1.0",
     "@types/pg": "^8.11.0"
   },
-  "homepage": "https://github.com/schift-io/payment-kit#readme",
+  "homepage": "https://github.com/schift-io/boilpayment#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/schift-io/payment-kit.git"
+    "url": "git+https://github.com/schift-io/boilpayment.git"
   },
   "bugs": {
-    "url": "https://github.com/schift-io/payment-kit/issues"
+    "url": "https://github.com/schift-io/boilpayment/issues"
   }
 }

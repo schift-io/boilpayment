@@ -12,8 +12,8 @@ import {
   runIdempotent,
   serializeLedgerEntry,
   serializeSubscription,
-} from '@schift/payment-kit-core';
-import { clawback, ClawbackResult } from '@schift/payment-kit-credits';
+} from 'boilpayment-core';
+import { clawback, ClawbackResult } from 'boilpayment-credits';
 import { revokePoolBalance, scopeProvider } from './internal.js';
 
 export interface ChurnInfo {

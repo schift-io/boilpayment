@@ -1,5 +1,5 @@
-import { hashPayload, PaymentKitError } from '@schift/payment-kit-core';
-import type { Operation, Payment, UsageEvent } from '@schift/payment-kit-core';
+import { hashPayload, PaymentKitError } from 'boilpayment-core';
+import type { Operation, Payment, UsageEvent } from 'boilpayment-core';
 import { billingCurrency } from './billingCurrency.js';
 import { settlementPeriod } from './settlementPeriod.js';
 import type { SettlePeriodInput, SettlePeriodResult } from './settlePeriod.js';

@@ -1,8 +1,8 @@
 // EC:H5 — GDPR/개인정보보호법 data export. Mirrors packages/cs/py/tests/test_export_customer.py.
 // See docs/EDGE_CASES.md H5, packages/cs/spec/cs.pseudo.md [EC:H5].
 import { describe, expect, it, beforeEach } from 'vitest';
-import { FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen, resolvePolicy } from '@schift/payment-kit-core';
-import type { Customer, Payment } from '@schift/payment-kit-core';
+import { FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen, resolvePolicy } from 'boilpayment-core';
+import type { Customer, Payment } from 'boilpayment-core';
 import { openCase } from '../src/index.js';
 import { exportCustomer } from '../src/exportCustomer.js';
 

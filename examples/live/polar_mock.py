@@ -23,7 +23,7 @@ from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import httpx
-from schift_payment_kit_core import (
+from boilpayment_core import (
     DEFAULT_POLICY,
     CollectingNotifier,
     CreateCheckoutInput,
@@ -39,11 +39,11 @@ from schift_payment_kit_core import (
     SystemClock,
     WebhookSignatureError,
 )
-from schift_payment_kit_lifecycle import OnRenewalPaidInput
-from schift_payment_kit_lifecycle import dunning as lc_dunning
-from schift_payment_kit_lifecycle import on_renewal_paid as lc_on_renewal_paid
-from schift_payment_kit_polar import PolarProvider
-from schift_payment_kit_webhook import default_handlers, process, receive
+from boilpayment_lifecycle import OnRenewalPaidInput
+from boilpayment_lifecycle import dunning as lc_dunning
+from boilpayment_lifecycle import on_renewal_paid as lc_on_renewal_paid
+from boilpayment_polar import PolarProvider
+from boilpayment_webhook import default_handlers, process, receive
 
 MOCK_PORT = int(os.environ.get("POLAR_MOCK_PORT", "12213"))
 MOCK_BASE = f"http://127.0.0.1:{MOCK_PORT}"

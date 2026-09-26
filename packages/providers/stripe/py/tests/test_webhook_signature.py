@@ -15,8 +15,8 @@ import time
 
 import pytest
 from _webhook_sig import sign_stripe_payload
-from schift_payment_kit_core import WebhookSignatureError
-from schift_payment_kit_stripe import StripeProvider
+from boilpayment_core import WebhookSignatureError
+from boilpayment_stripe import StripeProvider
 
 WEBHOOK_SECRET = "whsec_testsecret1234567890"
 

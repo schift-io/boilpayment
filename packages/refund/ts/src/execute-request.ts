@@ -1,5 +1,5 @@
-import { PaymentKitError, deserializeRefund, hashPayload, serializeRefund } from '@schift/payment-kit-core';
-import type { Refund } from '@schift/payment-kit-core';
+import { PaymentKitError, deserializeRefund, hashPayload, serializeRefund } from 'boilpayment-core';
+import type { Refund } from 'boilpayment-core';
 import type { ExecuteInput } from './execute.js';
 
 /** The submitted checkpoint is never retried, even when the provider ignores idempotency keys. */

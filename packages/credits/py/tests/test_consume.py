@@ -17,14 +17,14 @@ import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from schift_payment_kit_core import (
+from boilpayment_core import (
     ConsumeInput,
     ConsumeResult,
     FixedClock,
     LedgerReference,
     resolve_policy,
 )
-from schift_payment_kit_credits import ConsumeCreditsInput, consume
+from boilpayment_credits import ConsumeCreditsInput, consume
 
 CLOCK = FixedClock(datetime(2024, 1, 1, tzinfo=UTC))
 

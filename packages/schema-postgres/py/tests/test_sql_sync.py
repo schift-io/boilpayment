@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-_PKG_SQL = Path(__file__).resolve().parents[1] / "src" / "schift_payment_kit_schema_postgres" / "sql"
+_PKG_SQL = Path(__file__).resolve().parents[1] / "src" / "boilpayment_schema_postgres" / "sql"
 _SOURCE_SQL = Path(__file__).resolve().parents[2] / "sql"  # packages/schema-postgres/sql
 
 

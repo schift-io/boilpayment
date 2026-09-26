@@ -1,7 +1,7 @@
 # core — spec (source of truth)
 
 이 문서는 `packages/core` 의 소스 오브 트루스다. 각 섹션은 `docs/EDGE_CASES.md` 의 같은
-ID 를 가리키며, 구현(`ts/src/*`, `py/src/schift_payment_kit_core/*`)은 이 섹션을 주석으로
+ID 를 가리키며, 구현(`ts/src/*`, `py/src/boilpayment_core/*`)은 이 섹션을 주석으로
 인용한다 (`// EC:B5` / `# EC:B5`).
 
 types.ts / types.py 는 이 패키지의 계약이며 수정하지 않는다. 여기서는 `LedgerStore`,

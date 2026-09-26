@@ -15,8 +15,8 @@ from datetime import UTC, datetime
 
 import httpx
 import pytest
-from schift_payment_kit_core import Money, PaymentKitError, ProviderError
-from schift_payment_kit_portone import PortoneProvider, PortoneProviderConfig
+from boilpayment_core import Money, PaymentKitError, ProviderError
+from boilpayment_portone import PortoneProvider, PortoneProviderConfig
 
 API_SECRET = "test_sk_dummy"
 STORE_ID = "store_dummy"

@@ -1,6 +1,6 @@
 // EC:E4 EC:E5 L5 — see spec/webhook.pseudo.md
-import type { Clock, Logger, PaymentProvider, Repo, WebhookEventRecord } from '@schift/payment-kit-core';
-import { WebhookSignatureError } from '@schift/payment-kit-core';
+import type { Clock, Logger, PaymentProvider, Repo, WebhookEventRecord } from 'boilpayment-core';
+import { WebhookSignatureError } from 'boilpayment-core';
 import { resolveWebhookIdentity } from './identity.js';
 import { mintCorrelationId } from './correlation.js';
 

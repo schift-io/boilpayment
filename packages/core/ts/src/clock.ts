@@ -1,7 +1,7 @@
 /**
  * EC:G4 — Clock DI. All module functions take `clock` as a dependency; nothing calls
  * `Date.now()` directly except the SystemClock implementation itself.
- * Mirrors packages/core/py/src/schift_payment_kit_core/clock.py exactly.
+ * Mirrors packages/core/py/src/boilpayment_core/clock.py exactly.
  */
 import { Clock, IdGen } from './types.js';
 

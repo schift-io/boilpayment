@@ -1,5 +1,5 @@
 // spec/cs.pseudo.md — EC:B11 D9
-import { Clock, CsCase, IdGen, LedgerStore, NormalizedEvent, Notifier, Policy, Repo } from '@schift/payment-kit-core';
+import { Clock, CsCase, IdGen, LedgerStore, NormalizedEvent, Notifier, Policy, Repo } from 'boilpayment-core';
 import { escalate, OnCaseEvent, openCase, resolve } from './cases.js';
 import { LicenseReporter } from './metrics.js';
 

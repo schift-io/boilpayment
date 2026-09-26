@@ -8,7 +8,7 @@
 //     call made THROUGH this wrapper (by lifecycle/credits/refund/cs, which webhook's own
 //     defaultHandlers() constructs deps for) gets `correlationId` merged into the entry's
 //     `reference`/`meta` — without lifecycle/credits/refund/cs ever knowing correlationId exists.
-import type { Balance, ConsumeInput, ConsumeResult, LedgerEntry, LedgerKind, LedgerSource, LedgerStore, NewLedgerEntry, Pool } from '@schift/payment-kit-core';
+import type { Balance, ConsumeInput, ConsumeResult, LedgerEntry, LedgerKind, LedgerSource, LedgerStore, NewLedgerEntry, Pool } from 'boilpayment-core';
 
 /** EC:L5 — `corr_{providerEventId}`. Deterministic across redeliveries of the same webhook event. */
 export function mintCorrelationId(providerEventId: string): string {

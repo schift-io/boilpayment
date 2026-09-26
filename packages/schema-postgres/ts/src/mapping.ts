@@ -2,7 +2,7 @@
 // built on top of them. Tables whose shape doesn't fit a flat row 1:1 (plans+plan_prices,
 // cs_cases+policy_snapshots) get a hand-written Table instead — see repo.ts.
 import type { Pool, PoolClient } from 'pg';
-import type { Table } from '@schift/payment-kit-core';
+import type { Table } from 'boilpayment-core';
 import { runner } from './tx.js';
 
 export function camelToSnake(s: string): string {

@@ -1,7 +1,7 @@
 // Phase 6 regression tests — packages/webhook/ts/src/process.ts + handlers.ts wiring.
 // Ground truth measured via `tsx packages/webhook/ts/examples/smoke.ts` this session.
 import { describe, expect, it } from 'vitest';
-import { CollectingNotifier, DEFAULT_POLICY, FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen } from '@schift/payment-kit-core';
+import { CollectingNotifier, DEFAULT_POLICY, FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen } from 'boilpayment-core';
 import type { HandlerCtx, HandlerMap, LifecycleDeps } from '../src/index.js';
 import { defaultHandlers, process as processWebhook, receive } from '../src/index.js';
 import { FakeProvider, jsonVerify } from './helpers.js';

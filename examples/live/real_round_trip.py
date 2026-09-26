@@ -32,7 +32,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
 
-from schift_payment_kit_core import (
+from boilpayment_core import (
     CreateCheckoutInput,
     InMemoryRepo,
     Money,
@@ -42,12 +42,12 @@ from schift_payment_kit_core import (
     ProviderError,
     SystemClock,
 )
-from schift_payment_kit_polar import PolarProvider
-from schift_payment_kit_portone import PortoneProvider, PortoneProviderConfig
-from schift_payment_kit_stripe import StripeProvider
-from schift_payment_kit_toss import TossProvider, TossProviderConfig
-from schift_payment_kit_webhook import process as process_webhook
-from schift_payment_kit_webhook import receive as receive_webhook
+from boilpayment_polar import PolarProvider
+from boilpayment_portone import PortoneProvider, PortoneProviderConfig
+from boilpayment_stripe import StripeProvider
+from boilpayment_toss import TossProvider, TossProviderConfig
+from boilpayment_webhook import process as process_webhook
+from boilpayment_webhook import receive as receive_webhook
 
 REQUIRED_ENV: dict[str, list[str]] = {
     "stripe": ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"],
@@ -175,9 +175,9 @@ def plan_from_dict(p: dict[str, Any]) -> Plan:
 async def _stripe_test_payment(
     secret_key: str, amount: Money, customer_ref: str | None, idempotency_key: str
 ) -> Any:
-    """Mirrors StripeProvider.createTestPayment (ts) — not part of the schift_payment_kit_stripe
+    """Mirrors StripeProvider.createTestPayment (ts) — not part of the boilpayment_stripe
     package contract, so implemented directly here via the `stripe` package (already an indirect
-    dependency of schift_payment_kit_stripe) rather than modifying that package. Guarded to
+    dependency of boilpayment_stripe) rather than modifying that package. Guarded to
     sk_test_ keys only."""
     import stripe
 

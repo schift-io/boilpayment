@@ -1,5 +1,5 @@
-import { PaymentKitError } from '@schift/payment-kit-core';
-import type { Clock, LedgerStore, Money, Payment, PaymentProvider, Period, Policy, Repo, Subscription } from '@schift/payment-kit-core';
+import { PaymentKitError } from 'boilpayment-core';
+import type { Clock, LedgerStore, Money, Payment, PaymentProvider, Period, Policy, Repo, Subscription } from 'boilpayment-core';
 import { prepareSettlement } from './prepareSettlement.js';
 import { reportPeriod } from './reportPeriod.js';
 

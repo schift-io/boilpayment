@@ -17,7 +17,7 @@ import {
   deserializeLedgerEntry,
   runIdempotent,
   serializeLedgerEntry,
-} from '@schift/payment-kit-core';
+} from 'boilpayment-core';
 
 export interface GrantResult {
   entry: LedgerEntry | null;

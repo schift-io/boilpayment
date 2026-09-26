@@ -1,13 +1,13 @@
 [project]
-name = "schift-payment-kit-schema-postgres"
+name = "boilpayment-schema-postgres"
 version = "0.1.0"
-description = "Schift Payment Kit — schema-postgres"
+description = "boilpayment — schema-postgres"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-authors = [{ name = "Schift" }]
+authors = [{ name = "boilpayment contributors" }]
 requires-python = ">=3.11"
-dependencies = ["schift-payment-kit-core", "psycopg[binary]>=3.2", "psycopg-pool>=3.2"]
+dependencies = ["boilpayment-core", "psycopg[binary]>=3.2", "psycopg-pool>=3.2"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
@@ -19,16 +19,16 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/schift-io/payment-kit#readme"
-Repository = "https://github.com/schift-io/payment-kit.git"
-Issues = "https://github.com/schift-io/payment-kit/issues"
+Homepage = "https://github.com/schift-io/boilpayment#readme"
+Repository = "https://github.com/schift-io/boilpayment.git"
+Issues = "https://github.com/schift-io/boilpayment/issues"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/schift_payment_kit_schema_postgres"]
+packages = ["src/boilpayment_schema_postgres"]
 
 # The sql/*.sql files live in the package directory as a COMMITTED copy of the monorepo's
 # packages/schema-postgres/sql (source of truth), synced by scripts/sync-sql.mjs and drift-checked

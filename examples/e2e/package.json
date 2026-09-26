@@ -1,16 +1,16 @@
 {
-  "name": "@schift/payment-kit-example-e2e",
+  "name": "boilpayment-example-e2e",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "description": "End-to-end round-trip run by scripts/parity.sh. A workspace member so `pnpm install` reproduces its links — it used to rely on a node_modules directory that existed only on one machine, which made parity pass locally and fail on a clean checkout.",
   "dependencies": {
-    "@schift/payment-kit-core": "workspace:*",
-    "@schift/payment-kit-credits": "workspace:*",
-    "@schift/payment-kit-cs": "workspace:*",
-    "@schift/payment-kit-lifecycle": "workspace:*",
-    "@schift/payment-kit-refund": "workspace:*",
-    "@schift/payment-kit-usage": "workspace:*",
-    "@schift/payment-kit-webhook": "workspace:*"
+    "boilpayment-core": "workspace:*",
+    "boilpayment-credits": "workspace:*",
+    "boilpayment-cs": "workspace:*",
+    "boilpayment-lifecycle": "workspace:*",
+    "boilpayment-refund": "workspace:*",
+    "boilpayment-usage": "workspace:*",
+    "boilpayment-webhook": "workspace:*"
   }
 }

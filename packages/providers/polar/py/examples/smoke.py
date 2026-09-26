@@ -15,8 +15,8 @@ import json
 import time
 from datetime import UTC, datetime, timedelta
 
-from schift_payment_kit_core import WebhookSignatureError
-from schift_payment_kit_polar import (
+from boilpayment_core import WebhookSignatureError
+from boilpayment_polar import (
     PolarProvider,
     map_event_type,
     normalize_failure,

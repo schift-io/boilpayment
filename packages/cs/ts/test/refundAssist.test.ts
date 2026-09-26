@@ -1,10 +1,10 @@
 // spec/cs.pseudo.md — EC:L5
-// cs.refundAssist deliberately does NOT import `@schift/payment-kit-refund` (refundEvaluate/
+// cs.refundAssist deliberately does NOT import `boilpayment-refund` (refundEvaluate/
 // refundExecute are injected — see refundAssist.ts). This proves the wiring: the correlationId
 // passed to refundAssist() reaches the injected refundExecute function unchanged.
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_POLICY, FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen, resolvePolicy } from '@schift/payment-kit-core';
-import type { Payment, PaymentProvider, ProviderCapabilities, Refund, RefundDecision } from '@schift/payment-kit-core';
+import { DEFAULT_POLICY, FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen, resolvePolicy } from 'boilpayment-core';
+import type { Payment, PaymentProvider, ProviderCapabilities, Refund, RefundDecision } from 'boilpayment-core';
 import { openCase, refundAssist } from '../src/index.js';
 import type { RefundExecuteFn } from '../src/index.js';
 

@@ -1,4 +1,4 @@
-import { FixedClock, PaymentKitError } from '@schift/payment-kit-core';
+import { FixedClock, PaymentKitError } from 'boilpayment-core';
 import { getPurchaseSnapshot } from './purchaseSnapshot.js';
 import type { RecoverMissingGrantInput, SupportGrantOutcome } from './recoverMissingGrant.js';
 

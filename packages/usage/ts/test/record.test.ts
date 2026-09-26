@@ -1,7 +1,7 @@
 // EC:C2 (late-report period attribution) EC:C3 (UTC) EC:C4 (outbox enqueue) EC:C7 (meta stored)
 // spec: packages/usage/spec/usage.pseudo.md
 import { describe, expect, it } from 'vitest';
-import { FixedClock, InMemoryRepo, Plan, SequentialIdGen } from '@schift/payment-kit-core';
+import { FixedClock, InMemoryRepo, Plan, SequentialIdGen } from 'boilpayment-core';
 import { record } from '../src/record.js';
 import { FakeProvider, basePolicy, mkSub } from './fixtures.js';
 

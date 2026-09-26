@@ -156,7 +156,7 @@ defaultHandlers({ policy, ledger, repo, notifier, clock, ids, lifecycle?, credit
 `PaymentKitError('subscription_version_conflict')` when the row changed since it was read. Any
 handler here that reads a `Subscription` and, after real async work, ends up writing it back can
 now hit that — so every such call site is wrapped in a small locally-duplicated
-`retryOnVersionConflict(fn, attempts=3)` (deliberately NOT imported from `@schift/payment-kit-
+`retryOnVersionConflict(fn, attempts=3)` (deliberately NOT imported from `boilpayment-
 lifecycle` — this package intentionally has no dependency on it, see the EC:E3 duck-typing note
 above; the helper is ~15 lines, copied identically). `fn` re-resolves the subscription (or re-reads
 the row) on every attempt, so a retry sees the latest version instead of replaying a stale one:

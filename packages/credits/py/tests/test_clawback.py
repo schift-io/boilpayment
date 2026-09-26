@@ -6,7 +6,7 @@ import asyncio
 from datetime import UTC, datetime
 
 import pytest
-from schift_payment_kit_core import (
+from boilpayment_core import (
     FixedClock,
     InMemoryLedger,
     InsufficientBalanceError,
@@ -15,7 +15,7 @@ from schift_payment_kit_core import (
     SequentialIdGen,
     resolve_policy,
 )
-from schift_payment_kit_credits import ClawbackInput, clawback
+from boilpayment_credits import ClawbackInput, clawback
 
 CLOCK = FixedClock(datetime(2024, 1, 1, tzinfo=UTC))
 

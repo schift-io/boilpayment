@@ -1,6 +1,6 @@
-# @schift/payment-kit-portone
+# boilpayment-portone
 
-PortOne V2 implementation of `@schift/payment-kit-core`'s `PaymentProvider` interface: checkout,
+PortOne V2 implementation of `boilpayment-core`'s `PaymentProvider` interface: checkout,
 billing-key issuance/charging, PortOne's own renewal scheduling (or self-scheduling), cash
 receipts, Standard Webhooks verification, and normalizers to the kit's `Payment`/`Subscription`/
 `Refund` types. Endpoints verified against PortOne's V2 OpenAPI spec.
@@ -8,13 +8,13 @@ receipts, Standard Webhooks verification, and normalizers to the kit's `Payment`
 ## Install
 
 ```
-npm install @schift/payment-kit-portone @schift/payment-kit-core
+npm install boilpayment-portone boilpayment-core
 ```
 
 ## Usage
 
 ```ts
-import { PortoneProvider } from '@schift/payment-kit-portone';
+import { PortoneProvider } from 'boilpayment-portone';
 
 const provider = new PortoneProvider({
   apiSecret: process.env.PORTONE_API_SECRET!,
@@ -29,5 +29,5 @@ const checkout = await provider.createCheckout({
 });
 ```
 
-`PortoneProvider` is passed as the `provider` dependency to `@schift/payment-kit-lifecycle`,
-`@schift/payment-kit-refund`, `@schift/payment-kit-usage`, and `@schift/payment-kit-webhook`.
+`PortoneProvider` is passed as the `provider` dependency to `boilpayment-lifecycle`,
+`boilpayment-refund`, `boilpayment-usage`, and `boilpayment-webhook`.

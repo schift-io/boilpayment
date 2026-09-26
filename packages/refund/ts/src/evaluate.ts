@@ -1,7 +1,7 @@
 // spec/refund.pseudo.md — EC:D1 D2 D3 D4 D5 D6 D7 D10 B13 A22 B8
 import type {
   Clock, LedgerEntry, LedgerStore, Payment, Policy, RefundDecision, Repo, Subscription,
-} from '@schift/payment-kit-core';
+} from 'boilpayment-core';
 import { applyRounding, daysBetween, prorationRatio, weightedAvgUnitPrice } from './util.js';
 
 export interface EvaluateInput {

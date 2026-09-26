@@ -1,5 +1,5 @@
-import { runIdempotent, serializeCsCase, deserializeCsCase } from '@schift/payment-kit-core';
-import type { CsCase, LedgerEntry, Payment, Period, Plan, Subscription } from '@schift/payment-kit-core';
+import { runIdempotent, serializeCsCase, deserializeCsCase } from 'boilpayment-core';
+import type { CsCase, LedgerEntry, Payment, Period, Plan, Subscription } from 'boilpayment-core';
 import { escalate, reject, resolve } from './cases.js';
 import { getPurchaseSnapshot } from './purchaseSnapshot.js';
 import { applyPurchasedGrant } from './applyPurchasedGrant.js';

@@ -1,4 +1,4 @@
-// E2E round-trip across all Schift Payment Kit modules (TypeScript side).
+// E2E round-trip across all boilpayment modules (TypeScript side).
 // Uses ONLY public package exports + an in-file fake PaymentProvider.
 // Mirrors examples/e2e/round_trip.py line-for-line (except ISO tz suffix).
 import {
@@ -9,7 +9,7 @@ import {
   CollectingNotifier,
   resolvePolicy,
   WebhookSignatureError,
-} from '@schift/payment-kit-core';
+} from 'boilpayment-core';
 import type {
   Customer,
   Plan,
@@ -22,13 +22,13 @@ import type {
   Refund,
   CreateCheckoutInput,
   Checkout,
-} from '@schift/payment-kit-core';
-import * as credits from '@schift/payment-kit-credits';
-import * as lifecycle from '@schift/payment-kit-lifecycle';
-import * as refund from '@schift/payment-kit-refund';
-import * as usage from '@schift/payment-kit-usage';
-import * as webhook from '@schift/payment-kit-webhook';
-import * as cs from '@schift/payment-kit-cs';
+} from 'boilpayment-core';
+import * as credits from 'boilpayment-credits';
+import * as lifecycle from 'boilpayment-lifecycle';
+import * as refund from 'boilpayment-refund';
+import * as usage from 'boilpayment-usage';
+import * as webhook from 'boilpayment-webhook';
+import * as cs from 'boilpayment-cs';
 
 // ── in-file fake provider ────────────────────────────────────────────────────
 class FakeProvider implements PaymentProvider {

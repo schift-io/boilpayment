@@ -1,19 +1,19 @@
-# @schift/payment-kit-polar
+# boilpayment-polar
 
-Polar implementation of `@schift/payment-kit-core`'s `PaymentProvider` interface: checkout,
+Polar implementation of `boilpayment-core`'s `PaymentProvider` interface: checkout,
 native subscriptions, refunds, Standard Webhooks verification, and normalizers from Polar's REST
 API responses to the kit's `Payment`/`Subscription`/`Refund` types.
 
 ## Install
 
 ```
-npm install @schift/payment-kit-polar @schift/payment-kit-core
+npm install boilpayment-polar boilpayment-core
 ```
 
 ## Usage
 
 ```ts
-import { PolarProvider } from '@schift/payment-kit-polar';
+import { PolarProvider } from 'boilpayment-polar';
 
 const provider = new PolarProvider({
   accessToken: process.env.POLAR_ACCESS_TOKEN!,
@@ -28,5 +28,5 @@ const checkout = await provider.createCheckout({
 });
 ```
 
-`PolarProvider` is passed as the `provider` dependency to `@schift/payment-kit-lifecycle`,
-`@schift/payment-kit-refund`, `@schift/payment-kit-usage`, and `@schift/payment-kit-webhook`.
+`PolarProvider` is passed as the `provider` dependency to `boilpayment-lifecycle`,
+`boilpayment-refund`, `boilpayment-usage`, and `boilpayment-webhook`.

@@ -1,7 +1,7 @@
 // [EC:B12 B14 B3 B4 B15 H3 H4] PostgresLedgerStore + consistencyCheck regression coverage.
 import { randomUUID } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import type { Customer } from '@schift/payment-kit-core';
+import type { Customer } from 'boilpayment-core';
 import { PostgresLedgerStore, PostgresRepo, consistencyCheck } from '../dist/index.js';
 import { createTestDb, dropTestDb, type TestDb } from './db-helper.js';
 

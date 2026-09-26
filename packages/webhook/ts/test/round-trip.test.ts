@@ -3,8 +3,8 @@
 // LifecycleDeps fake, per spec/webhook.pseudo.md — lifecycle is duck-typed, not imported) and
 // results in a fresh 100-credit grant; replaying the identical event is a true no-op.
 import { describe, expect, it } from 'vitest';
-import { CollectingNotifier, DEFAULT_POLICY, FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen } from '@schift/payment-kit-core';
-import type { Payment, Subscription } from '@schift/payment-kit-core';
+import { CollectingNotifier, DEFAULT_POLICY, FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen } from 'boilpayment-core';
+import type { Payment, Subscription } from 'boilpayment-core';
 import type { LifecycleDeps } from '../src/index.js';
 import { defaultHandlers, process as processWebhook, receive } from '../src/index.js';
 import { FakeProvider, jsonVerify } from './helpers.js';

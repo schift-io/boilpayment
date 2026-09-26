@@ -6,14 +6,14 @@ import json
 import os
 from datetime import UTC, datetime
 
-from schift_payment_kit_core import (
+from boilpayment_core import (
     CreateCheckoutInput,
     Money,
     PaymentKitError,
     Plan,
     PlanPrice,
 )
-from schift_payment_kit_stripe import StripeProvider
+from boilpayment_stripe import StripeProvider
 
 
 def out(k, v):

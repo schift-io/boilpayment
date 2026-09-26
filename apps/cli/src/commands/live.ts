@@ -1,4 +1,4 @@
-// `paykit live` — proves a generated project's paykit.config.json + .env actually talk to the
+// `boilpayment live` — proves a generated project's paykit.config.json + .env actually talk to the
 // REAL provider test/sandbox environments. This is NOT the tools/mocks/* CI regression path
 // (see tools/mocks/README.md and docs/PUBLIC_SANDBOX_VERIFICATION.md) — this hits api.stripe.com / api.tosspayments.com /
 // api.portone.io / (sandbox-)api.polar.sh over the network, using whatever real test keys the
@@ -8,13 +8,13 @@ import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import pc from 'picocolors';
-import { InMemoryRepo, ProviderError, SystemClock } from '@schift/payment-kit-core';
-import type { PaymentProvider, ProviderName, Repo } from '@schift/payment-kit-core';
-import { StripeProvider } from '@schift/payment-kit-stripe';
-import { TossProvider } from '@schift/payment-kit-toss';
-import { PortoneProvider } from '@schift/payment-kit-portone';
-import { PolarProvider } from '@schift/payment-kit-polar';
-import { receive, process as processWebhook } from '@schift/payment-kit-webhook';
+import { InMemoryRepo, ProviderError, SystemClock } from 'boilpayment-core';
+import type { PaymentProvider, ProviderName, Repo } from 'boilpayment-core';
+import { StripeProvider } from 'boilpayment-stripe';
+import { TossProvider } from 'boilpayment-toss';
+import { PortoneProvider } from 'boilpayment-portone';
+import { PolarProvider } from 'boilpayment-polar';
+import { receive, process as processWebhook } from 'boilpayment-webhook';
 import { readConfig } from '../config.js';
 import type { PaykitConfig, PlanConfig } from '../config.js';
 import { loadEnvFile } from '../util/env-file.js';

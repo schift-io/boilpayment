@@ -1,5 +1,5 @@
 // spec/cs.pseudo.md — EC:I4
-import { Clock, CsCase, Repo } from '@schift/payment-kit-core';
+import { Clock, CsCase, Repo } from 'boilpayment-core';
 import { OnCaseEvent } from './cases.js';
 
 export type ChurnReason =

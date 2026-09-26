@@ -1,6 +1,6 @@
 // EC:C9 — see spec/usage.pseudo.md
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_POLICY, FixedClock, InMemoryRepo, SequentialIdGen } from '@schift/payment-kit-core';
+import { DEFAULT_POLICY, FixedClock, InMemoryRepo, SequentialIdGen } from 'boilpayment-core';
 import { closePeriod } from '../src/closePeriod.js';
 import { record } from '../src/record.js';
 import { mkSub } from './fixtures.js';

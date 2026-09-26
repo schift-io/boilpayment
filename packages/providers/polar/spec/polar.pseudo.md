@@ -2,7 +2,7 @@
 
 `PaymentProvider` 구현. `docs/ARCHITECTURE.md` §3.4/3.5, `docs/EDGE_CASES.md` F(Polar) 절 참조.
 ts: `PolarProvider` (`packages/providers/polar/ts/src/index.ts`), `@polar-sh/sdk@0.20`
-py: `PolarProvider` (`packages/providers/polar/py/src/schift_payment_kit_polar/__init__.py`), `polar-sdk` (설치판 0.32)
+py: `PolarProvider` (`packages/providers/polar/py/src/boilpayment_polar/__init__.py`), `polar-sdk` (설치판 0.32)
 
 **Polar 자체 Benefits(크레딧/라이선스키)는 사용하지 않는다. 이 킷의 원장(ledger)이 재화의 유일한 소스
 오브 트루스다.** Polar 는 결제·구독 상태·환불만 담당한다 (EC F 표).

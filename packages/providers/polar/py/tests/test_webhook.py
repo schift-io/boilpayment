@@ -15,8 +15,8 @@ import json
 import time
 
 import pytest
-from schift_payment_kit_core import WebhookSignatureError
-from schift_payment_kit_polar import PolarProvider, verify_standard_webhook_signature
+from boilpayment_core import WebhookSignatureError
+from boilpayment_polar import PolarProvider, verify_standard_webhook_signature
 
 WEBHOOK_SECRET = "whsec_c2VjcmV0a2V5Zm9ycG9sYXJ0ZXN0"
 

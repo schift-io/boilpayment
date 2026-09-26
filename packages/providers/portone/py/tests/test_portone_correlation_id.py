@@ -8,8 +8,8 @@ from __future__ import annotations
 import asyncio
 
 import httpx
-from schift_payment_kit_core import CollectingLogger
-from schift_payment_kit_portone import PortoneProvider, PortoneProviderConfig
+from boilpayment_core import CollectingLogger
+from boilpayment_portone import PortoneProvider, PortoneProviderConfig
 
 PAYMENT_FIXTURE = {
     "id": "pay_1",

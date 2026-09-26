@@ -5,8 +5,8 @@
 // No real network call is made anywhere in this file.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PolarProvider } from '../src/index.js';
-import { ProviderError, PaymentKitError } from '@schift/payment-kit-core';
-import type { Plan, PlanPrice } from '@schift/payment-kit-core';
+import { ProviderError, PaymentKitError } from 'boilpayment-core';
+import type { Plan, PlanPrice } from 'boilpayment-core';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });

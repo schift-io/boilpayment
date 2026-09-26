@@ -1,6 +1,6 @@
 // spec: packages/credits/spec/credits.pseudo.md [EC:B16]
 import { describe, expect, it } from 'vitest';
-import { FixedClock, InMemoryLedger, InMemoryRepo, NoopNotifier, SequentialIdGen, resolvePolicy } from '@schift/payment-kit-core';
+import { FixedClock, InMemoryLedger, InMemoryRepo, NoopNotifier, SequentialIdGen, resolvePolicy } from 'boilpayment-core';
 import { notifyExpiring } from '../src/notifyExpiring.js';
 
 async function grant(ledger: InMemoryLedger, customerId: string, amount: number, expiresAt: Date | null, key: string) {

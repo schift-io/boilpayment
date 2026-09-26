@@ -16,15 +16,15 @@ import { authoritativeRefundEvent } from './refund.js';
 // see markUnknownProviderRef() below.
 import {
   PaymentKitError,
-} from '@schift/payment-kit-core';
+} from 'boilpayment-core';
 import type {
   CashReceiptType, Clock, IdGen, LedgerStore, Notifier, Payment, PaymentProvider, Policy, Repo, Subscription,
-} from '@schift/payment-kit-core';
+} from 'boilpayment-core';
 import type { Handler, HandlerCtx, HandlerMap } from './process.js';
 import { withCorrelationId } from './correlation.js';
 
 // EC:K1 call-site helper — deliberately duplicated from packages/lifecycle/ts/src/retry.ts rather
-// than imported: this package intentionally does NOT depend on @schift/payment-kit-lifecycle (see
+// than imported: this package intentionally does NOT depend on boilpayment-lifecycle (see
 // the EC:E3 duck-typing note above), and adding that edge just for this ~15-line helper would
 // break that boundary. Retries `fn` when it throws PaymentKitError('subscription_version_conflict')
 // (thrown by Repo.subscriptions.put — see EC:K1), up to `attempts` times; `fn` re-reads whatever

@@ -1,6 +1,6 @@
 // EC:H4 — daily consistency check: ledger sum vs credit_balances snapshot, per (customer, pool).
 import type { Pool } from 'pg';
-import type { Pool as CreditPool } from '@schift/payment-kit-core';
+import type { Pool as CreditPool } from 'boilpayment-core';
 
 export interface BalanceMismatch {
   customerId: string;

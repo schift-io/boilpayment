@@ -8,7 +8,7 @@ import {
   ProviderCapabilities,
   Refund,
   Subscription,
-} from '@schift/payment-kit-core';
+} from 'boilpayment-core';
 
 export function mkSub(overrides: Partial<Subscription> = {}): Subscription {
   return {

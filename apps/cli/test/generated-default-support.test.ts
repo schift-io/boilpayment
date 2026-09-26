@@ -25,13 +25,13 @@ it('default --yes enables durable support and explicit plan initialization in bo
   dirs.push(dir);
   await fs.writeFile(path.join(dir, 'package.json'), JSON.stringify({ type: 'module' }));
   await generateAll(config, dir);
-  await fs.mkdir(path.join(dir, 'node_modules/@schift'), { recursive: true });
-  await fs.symlink(path.join(root, 'packages/sdk/ts'), path.join(dir, 'node_modules/@schift/payment-kit-sdk'), 'dir');
+  await fs.mkdir(path.join(dir, 'node_modules'), { recursive: true });
+  await fs.symlink(path.join(root, 'packages/sdk/ts'), path.join(dir, 'node_modules/boilpayment-sdk'), 'dir');
   await fs.writeFile(path.join(dir, 'tsconfig.json'), JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true, resolveJsonModule: true, esModuleInterop: true, skipLibCheck: true, noEmit: true }, include: ['paykit/index.ts'] }));
   await fs.writeFile(path.join(dir, 'run.ts'), `
 import assert from 'node:assert/strict';
 import { createPaymentKit } from './paykit/index.js';
-import { InMemoryRepo, InMemoryLedger, FixedClock, SequentialIdGen, NoopLogger } from '@schift/payment-kit-sdk/core';
+import { InMemoryRepo, InMemoryLedger, FixedClock, SequentialIdGen, NoopLogger } from 'boilpayment-sdk/core';
 import config from './paykit.config.json' with { type: 'json' };
 const repo = new InMemoryRepo();
 const clock = new FixedClock(new Date('2026-03-01T00:00:00Z'));
@@ -49,7 +49,7 @@ console.log('PASS');
 import asyncio, json
 from datetime import datetime, timezone
 from paykit.index import create_payment_kit
-from schift_payment_kit.core import Deps, InMemoryRepo, InMemoryLedger, FixedClock, SequentialIdGen, NoopLogger
+from boilpayment.core import Deps, InMemoryRepo, InMemoryLedger, FixedClock, SequentialIdGen, NoopLogger
 async def main():
     repo = InMemoryRepo()
     clock = FixedClock(datetime(2026, 3, 1, tzinfo=timezone.utc))

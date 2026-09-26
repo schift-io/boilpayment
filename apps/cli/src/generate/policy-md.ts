@@ -15,8 +15,8 @@ export function generatePolicyMd(config: PaykitConfig): string {
   const lines: string[] = [];
   lines.push('# Policy Summary — POLICY.md');
   lines.push('');
-  lines.push('이 문서는 `paykit init` 위저드에서 선택한 정책을 사람이 읽을 수 있게 요약한 것입니다.');
-  lines.push('This document is a human-readable summary of the policy choices made in the `paykit init` wizard.');
+  lines.push('이 문서는 `boilpayment init` 위저드에서 선택한 정책을 사람이 읽을 수 있게 요약한 것입니다.');
+  lines.push('This document is a human-readable summary of the policy choices made in the `boilpayment init` wizard.');
   lines.push('');
   lines.push(`- Providers: ${config.providers.join(', ') || '(none)'}`);
   lines.push(`- Models: ${config.models.join(', ') || '(none)'}`);

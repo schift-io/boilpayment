@@ -2,7 +2,7 @@
 // standing in for api.portone.io (no real PG calls, no live keys).
 // Run: node_modules/.bin/tsx packages/providers/portone/ts/examples/smoke.ts
 import { createHmac } from 'node:crypto';
-import { WebhookSignatureError } from '@schift/payment-kit-core';
+import { WebhookSignatureError } from 'boilpayment-core';
 import { PortoneProvider, normalizePortonePayment, normalizePortoneFailure, mapPortoneWebhook } from '../src/index.js';
 
 const WEBHOOK_SECRET = 'whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw'; // dummy Standard Webhooks test secret (Svix format)

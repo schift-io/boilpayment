@@ -1,7 +1,7 @@
 from typing import TypedDict
 
 import pytest
-from schift_payment_kit_polar import to_normalized_event
+from boilpayment_polar import to_normalized_event
 
 
 class RefundPayload(TypedDict):

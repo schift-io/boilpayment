@@ -15,7 +15,7 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 
 import anyio
-from schift_payment_kit_core import (
+from boilpayment_core import (
     CollectingNotifier,
     Customer,
     Deps,
@@ -29,13 +29,13 @@ from schift_payment_kit_core import (
     SequentialIdGen,
     Subscription,
 )
-from schift_payment_kit_portone import PortoneProvider, PortoneProviderConfig
-from schift_payment_kit_schema_postgres import (
+from boilpayment_portone import PortoneProvider, PortoneProviderConfig
+from boilpayment_schema_postgres import (
     PostgresLedgerStore,
     PostgresRepo,
     migrate,
 )
-from schift_payment_kit_usage import UsageEventInput
+from boilpayment_usage import UsageEventInput
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,5 +1,5 @@
 // spec/cs.pseudo.md — EC:E1 H4
-import { Clock, CsCase, IdGen, LedgerStore, PaymentProvider, Policy, ProviderName, Repo } from '@schift/payment-kit-core';
+import { Clock, CsCase, IdGen, LedgerStore, PaymentProvider, Policy, ProviderName, Repo } from 'boilpayment-core';
 import { openCase, OnCaseEvent } from './cases.js';
 
 export interface ReconcileInput {

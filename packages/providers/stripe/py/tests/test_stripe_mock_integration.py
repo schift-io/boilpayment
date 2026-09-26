@@ -26,7 +26,7 @@ from tempfile import TemporaryFile
 
 import httpx
 import pytest
-from schift_payment_kit_stripe import StripeProvider
+from boilpayment_stripe import StripeProvider
 
 HOST = "127.0.0.1"
 

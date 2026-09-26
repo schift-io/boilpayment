@@ -9,7 +9,7 @@ import {
   Subscription,
   SequentialIdGen,
   resolvePolicy,
-} from '@schift/payment-kit-core';
+} from 'boilpayment-core';
 import { cancel, reactivate } from '../src/index.js';
 import { FakeCorrelatingProvider, FakeNativeProvider, FakeSelfSchedulingProvider } from './helpers.js';
 

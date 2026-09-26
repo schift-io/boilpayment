@@ -1,4 +1,4 @@
-// PostgresLedgerStore implements @schift/payment-kit-core LedgerStore.
+// PostgresLedgerStore implements boilpayment-core LedgerStore.
 // EC:H3 — append-only: this store never issues UPDATE/DELETE on ledger_entries (trigger enforces it).
 // EC:B1-B15 H3 H4 — see spec/schema-postgres.pseudo.md for the consume algorithm this mirrors 1:1.
 import { randomUUID } from 'node:crypto';
@@ -16,7 +16,7 @@ import type {
   LedgerStore,
   NewLedgerEntry,
   Pool as CreditPool,
-} from '@schift/payment-kit-core';
+} from 'boilpayment-core';
 import { jsonb } from './mapping.js';
 import { runner, withCustomerTransaction } from './tx.js';
 

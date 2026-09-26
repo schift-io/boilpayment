@@ -1,5 +1,5 @@
 // spec/cs.pseudo.md — Metrics (I4/I5 support), CaseMeter (I5), LicenseReporter
-import { CsCase, CsCaseKind, CsCaseStatus, Repo } from '@schift/payment-kit-core';
+import { CsCase, CsCaseKind, CsCaseStatus, Repo } from 'boilpayment-core';
 import { BILLABLE_STATUSES, CsMetricEvent } from './cases.js';
 
 export interface MetricsSnapshot {

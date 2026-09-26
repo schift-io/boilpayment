@@ -3,7 +3,7 @@
 // deletes nothing; batching deletes more rows than a single batchSize.
 import { randomUUID } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { DEFAULT_POLICY, FixedClock, type Customer, type Operation } from '@schift/payment-kit-core';
+import { DEFAULT_POLICY, FixedClock, type Customer, type Operation } from 'boilpayment-core';
 import { PostgresRepo, PostgresLogger, pruneRetention } from '../dist/index.js';
 import { createTestDb, dropTestDb, type TestDb } from './db-helper.js';
 

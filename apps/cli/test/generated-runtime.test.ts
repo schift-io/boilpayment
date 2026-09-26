@@ -37,7 +37,7 @@ afterAll(() => {
 const CRON_TS = ['expireDue', 'dunningSweep', 'closePeriods', 'flushOutbox', 'schedulerTick'] as const;
 const CRON_PY = ['expire_due', 'dunning_sweep', 'close_periods', 'flush_outbox', 'scheduler_tick'] as const;
 // `reconcile` is deliberately not called: it fans out to provider.listPayments, i.e. the network.
-// It is covered by the provider live checks (`paykit live`), not here.
+// It is covered by the provider live checks (`boilpayment live`), not here.
 
 /**
  * The env both harnesses pass is built from the generated `.env.example`, not hand-written here.
@@ -69,7 +69,7 @@ describe('generated kit actually runs (not just typechecks)', () => {
 
     const harness = `
 import { createPaymentKit } from './paykit/index.js';
-import { InMemoryRepo, InMemoryLedger, FixedClock, SequentialIdGen, NoopLogger } from '@schift/payment-kit-sdk/core';
+import { InMemoryRepo, InMemoryLedger, FixedClock, SequentialIdGen, NoopLogger } from 'boilpayment-sdk/core';
 import config from './paykit.config.json' with { type: 'json' };
 
 const clock = new FixedClock(new Date('2026-03-01T00:00:00Z'));
@@ -99,8 +99,8 @@ console.log(JSON.stringify({ cron: Object.keys(kit.cron).sort(), pastDueStatus: 
 `;
     await fs.writeFile(path.join(dir, 'harness.ts'), harness);
     // The generated code imports the facade by name, so the temp project needs it resolvable.
-    await fs.mkdir(path.join(dir, 'node_modules/@schift'), { recursive: true });
-    await fs.symlink(path.join(ROOT, 'packages/sdk/ts'), path.join(dir, 'node_modules/@schift/payment-kit-sdk'), 'dir');
+    await fs.mkdir(path.join(dir, 'node_modules'), { recursive: true });
+    await fs.symlink(path.join(ROOT, 'packages/sdk/ts'), path.join(dir, 'node_modules/boilpayment-sdk'), 'dir');
 
     const tsx = path.join(ROOT, 'apps/cli/node_modules/.bin/tsx');
     const res = spawnSync(tsx, ['harness.ts'], { cwd: dir, encoding: 'utf8' });
@@ -120,7 +120,7 @@ console.log(JSON.stringify({ cron: Object.keys(kit.cron).sort(), pastDueStatus: 
     const harness = `
 import asyncio, importlib.util, json
 from datetime import datetime, timedelta, timezone
-from schift_payment_kit_core import (Deps, InMemoryLedger, InMemoryRepo, FixedClock, SequentialIdGen,
+from boilpayment_core import (Deps, InMemoryLedger, InMemoryRepo, FixedClock, SequentialIdGen,
                                      NoopLogger, Customer, Subscription, Period)
 
 spec = importlib.util.spec_from_file_location("gen_index", ${JSON.stringify(path.join('PLACEHOLDER'))})
@@ -192,12 +192,12 @@ describe('generated topup-only kit with optional logging', () => {
       const env = envFromExample(await fs.readFile(path.join(dir, '.env.example'), 'utf8'));
       // An invalid connection string exercises the schema call without a database or network.
       env.DATABASE_URL = 'postgres://[invalid';
-      await fs.mkdir(path.join(dir, 'node_modules/@schift'), { recursive: true });
-      await fs.symlink(path.join(ROOT, 'packages/sdk/ts'), path.join(dir, 'node_modules/@schift/payment-kit-sdk'), 'dir');
+      await fs.mkdir(path.join(dir, 'node_modules'), { recursive: true });
+      await fs.symlink(path.join(ROOT, 'packages/sdk/ts'), path.join(dir, 'node_modules/boilpayment-sdk'), 'dir');
       const tsHarness = `
 import assert from 'node:assert/strict';
 import { createPaymentKit } from './paykit/index.js';
-import { InMemoryRepo, InMemoryLedger, FixedClock, SequentialIdGen, NoopLogger } from '@schift/payment-kit-sdk/core';
+import { InMemoryRepo, InMemoryLedger, FixedClock, SequentialIdGen, NoopLogger } from 'boilpayment-sdk/core';
 import config from './paykit.config.json' with { type: 'json' };
 const clock = new FixedClock(new Date('2026-03-01T00:00:00Z'));
 const ids = new SequentialIdGen('test');
@@ -210,7 +210,7 @@ console.log('OK');
       const pyHarness = `
 import asyncio, importlib.util, json
 from datetime import datetime, timezone
-from schift_payment_kit_core import Deps, InMemoryRepo, InMemoryLedger, FixedClock, SequentialIdGen, NoopLogger
+from boilpayment_core import Deps, InMemoryRepo, InMemoryLedger, FixedClock, SequentialIdGen, NoopLogger
 spec = importlib.util.spec_from_file_location('generated', ${JSON.stringify(path.join(dir, 'paykit/index.py'))})
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)

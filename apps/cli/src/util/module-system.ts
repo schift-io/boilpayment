@@ -1,5 +1,5 @@
 // The kit is ESM-only: every package sets "type": "module" and its `exports` has no `require`
-// condition. A CommonJS host project therefore fails at `require('@schift/payment-kit-sdk/core')`
+// condition. A CommonJS host project therefore fails at `require('boilpayment-sdk/core')`
 // with ERR_PACKAGE_PATH_NOT_EXPORTED — a message that reads like the package is broken ("subpath
 // './core' is not defined by exports") when the subpath IS defined, just not for require. Detect it
 // where the user is standing and say the real cause.

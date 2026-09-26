@@ -1,6 +1,6 @@
 // spec: packages/lifecycle/spec/lifecycle.pseudo.md [EC:A13] [EC:A16] [EC:A17] [EC:A24]
 import { describe, expect, it } from 'vitest';
-import { CollectingNotifier, FixedClock, InMemoryLedger, InMemoryRepo, Plan, Payment, Repo, Subscription, SequentialIdGen, resolvePolicy } from '@schift/payment-kit-core';
+import { CollectingNotifier, FixedClock, InMemoryLedger, InMemoryRepo, Plan, Payment, Repo, Subscription, SequentialIdGen, resolvePolicy } from 'boilpayment-core';
 import { dunning } from '../src/index.js';
 import { FakeNativeProvider, FakeSelfSchedulingProvider } from './helpers.js';
 

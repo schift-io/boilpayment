@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { InMemoryRepo } from '@schift/payment-kit-core';
+import { InMemoryRepo } from 'boilpayment-core';
 import { billingCurrency } from '../src/billingCurrency.js';
 
 it.each([['KRW'], ['USD', 'KRW'], []])('requires a selection unless plan currencies %j are unique', async (...currencies) => {

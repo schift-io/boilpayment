@@ -1,3 +1,3 @@
-// Thin re-export — see ../README.md. Full surface of @schift/payment-kit-notify (resend, smtp,
+// Thin re-export — see ../README.md. Full surface of boilpayment-notify (resend, smtp,
 // slack, composite, outbox).
-export * from '@schift/payment-kit-notify';
+export * from 'boilpayment-notify';

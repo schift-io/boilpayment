@@ -1,4 +1,4 @@
-# schift-payment-kit-refund
+# boilpayment-refund
 
 Refund decisioning and execution: policy-driven `evaluate` (no-questions window, proration,
 credit vs. cash, overuse handling) followed by `execute` against a provider, plus
@@ -7,13 +7,13 @@ credit vs. cash, overuse handling) followed by `execute` against a provider, plu
 ## Install
 
 ```
-pip install schift-payment-kit-refund
+pip install boilpayment-refund
 ```
 
 ## Usage
 
 ```python
-from schift_payment_kit_refund import evaluate, EvaluateInput, execute, ExecuteInput
+from boilpayment_refund import evaluate, EvaluateInput, execute, ExecuteInput
 
 decision = await evaluate(EvaluateInput(payment=payment, sub=sub, policy=policy, ledger=ledger, repo=repo, clock=clock))
 
@@ -21,4 +21,4 @@ if decision.approved:
     refund = await execute(ExecuteInput(decision=decision, provider=provider, ledger=ledger, repo=repo, clock=clock, ids=ids))
 ```
 
-Full module contract: [docs/ARCHITECTURE.md §3.5](https://github.com/schift-io/payment-kit/blob/main/docs/ARCHITECTURE.md).
+Full module contract: [docs/ARCHITECTURE.md §3.5](https://github.com/schift-io/boilpayment/blob/main/docs/ARCHITECTURE.md).

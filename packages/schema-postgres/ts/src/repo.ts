@@ -1,11 +1,11 @@
-// PostgresRepo implements @schift/payment-kit-core Repo.
+// PostgresRepo implements boilpayment-core Repo.
 // Most tables are a straight 1:1 column mirror via the generic PgTable. Two are not:
 //   - plans: Plan.prices is a child table (plan_prices) — hand-written join.
 //   - csCases: CsCase.policySnapshot (embedded Policy) is normalized to policy_snapshots — hand-written join.
 // See spec/schema-postgres.pseudo.md "Normalization note".
 import { createHash } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
-import { PaymentKitError } from '@schift/payment-kit-core';
+import { PaymentKitError } from 'boilpayment-core';
 import type {
   Customer,
   CsCase,
@@ -26,7 +26,7 @@ import type {
   Table,
   UsageEvent,
   WebhookEventRecord,
-} from '@schift/payment-kit-core';
+} from 'boilpayment-core';
 import { camelToSnake, jsonb, PgTable } from './mapping.js';
 import { runner } from './tx.js';
 

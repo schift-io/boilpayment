@@ -1,4 +1,4 @@
-# @schift/payment-kit-refund
+# boilpayment-refund
 
 Refund decisioning and execution: policy-driven `evaluate` (no-questions window, proration,
 credit vs. cash, overuse handling) followed by `execute` against a provider, plus
@@ -7,13 +7,13 @@ credit vs. cash, overuse handling) followed by `execute` against a provider, plu
 ## Install
 
 ```
-npm install @schift/payment-kit-refund @schift/payment-kit-core
+npm install boilpayment-refund boilpayment-core
 ```
 
 ## Usage
 
 ```ts
-import { evaluate, execute } from '@schift/payment-kit-refund';
+import { evaluate, execute } from 'boilpayment-refund';
 
 const decision = await evaluate({ payment, sub, policy, ledger, repo, clock });
 
@@ -22,4 +22,4 @@ if (decision.approved) {
 }
 ```
 
-Full module contract: [docs/ARCHITECTURE.md §3.5](https://github.com/schift-io/payment-kit/blob/main/docs/ARCHITECTURE.md).
+Full module contract: [docs/ARCHITECTURE.md §3.5](https://github.com/schift-io/boilpayment/blob/main/docs/ARCHITECTURE.md).

@@ -9,8 +9,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
-from fixtures import FakeProvider, mk_sub
-from schift_payment_kit_core import (
+from boilpayment_core import (
     DEFAULT_POLICY,
     Customer,
     FixedClock,
@@ -18,7 +17,8 @@ from schift_payment_kit_core import (
     ProviderRef,
     SequentialIdGen,
 )
-from schift_payment_kit_usage import UsageEventInput, flush_outbox, record
+from boilpayment_usage import UsageEventInput, flush_outbox, record
+from fixtures import FakeProvider, mk_sub
 
 
 def harness():

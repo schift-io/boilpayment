@@ -3,7 +3,7 @@
 import {
   DEFAULT_POLICY, FixedClock, InMemoryLedger, InMemoryRepo, Payment, PaymentKitError, PaymentProvider, Policy,
   Refund, SequentialIdGen,
-} from '@schift/payment-kit-core';
+} from 'boilpayment-core';
 import { evaluate, execute } from '../src/index.js';
 
 const ids = new SequentialIdGen('id_');

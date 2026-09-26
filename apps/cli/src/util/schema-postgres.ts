@@ -29,7 +29,7 @@ export type SchemaPostgres = {
 };
 
 /**
- * Loaded lazily so `paykit init` never pays for `pg` and never fails when it is absent.
+ * Loaded lazily so `boilpayment init` never pays for `pg` and never fails when it is absent.
  *
  * Resolved from the PROJECT directory, not from wherever the CLI itself lives: the SDK is a
  * dependency of the user's app, and `npx paykit` may be running from a global cache that has no
@@ -41,8 +41,8 @@ export async function loadSchemaPostgres(dir: string): Promise<SchemaPostgres | 
   // subpath resolution fails outright. Locate the package by its package.json (which every one of
   // them exports for exactly this reason) and load the built file directly.
   const candidates: Array<[string, string]> = [
-    ['@schift/payment-kit-sdk/package.json', 'dist/postgres.js'],
-    ['@schift/payment-kit-schema-postgres/package.json', 'dist/index.js'],
+    ['boilpayment-sdk/package.json', 'dist/postgres.js'],
+    ['boilpayment-schema-postgres/package.json', 'dist/index.js'],
   ];
   for (const [manifest, rel] of candidates) {
     try {
@@ -53,7 +53,7 @@ export async function loadSchemaPostgres(dir: string): Promise<SchemaPostgres | 
     }
   }
   // Monorepo / global-install fallback: resolve against the CLI's own dependencies.
-  for (const id of ['@schift/payment-kit-sdk/postgres', '@schift/payment-kit-schema-postgres']) {
+  for (const id of ['boilpayment-sdk/postgres', 'boilpayment-schema-postgres']) {
     try {
       return (await import(id)) as unknown as SchemaPostgres;
     } catch {

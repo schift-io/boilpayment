@@ -10,8 +10,8 @@ import asyncio
 import json
 
 import stripe
-from schift_payment_kit_core import WebhookSignatureError
-from schift_payment_kit_stripe import (
+from boilpayment_core import WebhookSignatureError
+from boilpayment_stripe import (
     StripeProvider,
     map_event_type,
     normalize_failure,

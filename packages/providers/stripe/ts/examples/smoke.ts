@@ -10,7 +10,7 @@ import {
   mapEventType,
   toNormalizedEvent,
 } from '../src/index.js';
-import { WebhookSignatureError } from '@schift/payment-kit-core';
+import { WebhookSignatureError } from 'boilpayment-core';
 
 async function main() {
   const webhookSecret = 'whsec_testsecret1234567890';

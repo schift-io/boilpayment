@@ -1,6 +1,6 @@
 // spec: packages/credits/spec/credits.pseudo.md [EC:A4] [EC:B13]
 import { describe, expect, it } from 'vitest';
-import { FixedClock, InMemoryLedger, InsufficientBalanceError, SequentialIdGen, resolvePolicy } from '@schift/payment-kit-core';
+import { FixedClock, InMemoryLedger, InsufficientBalanceError, SequentialIdGen, resolvePolicy } from 'boilpayment-core';
 import { clawback } from '../src/index.js';
 
 const clock = new FixedClock(new Date('2024-01-01T00:00:00.000Z'));

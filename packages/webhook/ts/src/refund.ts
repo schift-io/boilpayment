@@ -1,5 +1,5 @@
-import { PaymentKitError } from '@schift/payment-kit-core';
-import type { NormalizedEvent, Notifier, PaymentProvider, Refund, RefundLookupProvider } from '@schift/payment-kit-core';
+import { PaymentKitError } from 'boilpayment-core';
+import type { NormalizedEvent, Notifier, PaymentProvider, Refund, RefundLookupProvider } from 'boilpayment-core';
 import type { HandlerCtx } from './process.js';
 
 const refundEventTypes = { succeeded: 'refund.created', failed: 'refund.failed', pending: 'refund.pending' } as const satisfies Record<Refund['status'], NormalizedEvent['type']>;

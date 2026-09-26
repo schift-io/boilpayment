@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from datetime import UTC, datetime
 
-from schift_payment_kit_core import Period, next_period, proration_ratio
+from boilpayment_core import Period, next_period, proration_ratio
 
 
 def test_ec_g1_clamp_keep_original_day_jan31_feb28_mar31():

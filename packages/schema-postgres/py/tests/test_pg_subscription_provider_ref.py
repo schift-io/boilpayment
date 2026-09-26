@@ -5,15 +5,15 @@ import asyncio
 from datetime import UTC, datetime
 
 import pytest
-from db_helper import create_test_db, drop_test_db
-from schift_payment_kit_core import Customer, Period, Plan, Subscription
-from schift_payment_kit_schema_postgres import (
+from boilpayment_core import Customer, Period, Plan, Subscription
+from boilpayment_schema_postgres import (
     PostgresRepo,
     connection,
     load_migrations,
     migrate,
     verify_schema,
 )
+from db_helper import create_test_db, drop_test_db
 
 FOLLOWUP = "0007_subscription_provider_ref_nullable.sql"
 

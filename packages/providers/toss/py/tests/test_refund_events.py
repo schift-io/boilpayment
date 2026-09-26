@@ -1,6 +1,6 @@
 import pytest
-from schift_payment_kit_core import Money
-from schift_payment_kit_toss import _normalize_toss_refund, map_toss_webhook
+from boilpayment_core import Money
+from boilpayment_toss import _normalize_toss_refund, map_toss_webhook
 
 
 @pytest.mark.parametrize(
@@ -109,7 +109,7 @@ def test_api_refund_transaction_status(status: str, expected: str) -> None:
 def test_authoritative_lookup_uses_exact_cancel_id() -> None:
     import anyio
     import httpx
-    from schift_payment_kit_toss import TossProvider, TossProviderConfig
+    from boilpayment_toss import TossProvider, TossProviderConfig
 
     async def run() -> None:
         raw = {

@@ -1,7 +1,7 @@
 // spec/cs.pseudo.md — EC:I6
 // Minimal HS256 JWT, stdlib-only (node:crypto) — no jsonwebtoken dependency per ARCHITECTURE.md.
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { PaymentKitError } from '@schift/payment-kit-core';
+import { PaymentKitError } from 'boilpayment-core';
 
 function b64url(input: Buffer | string): string {
   const buf = typeof input === 'string' ? Buffer.from(input, 'utf8') : input;

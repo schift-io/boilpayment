@@ -1,7 +1,7 @@
 // Phase 6 regression tests — packages/webhook/ts/src/grants.ts (EC:E13)
 import { describe, expect, it } from 'vitest';
-import { FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen } from '@schift/payment-kit-core';
-import type { Payment } from '@schift/payment-kit-core';
+import { FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen } from 'boilpayment-core';
+import type { Payment } from 'boilpayment-core';
 import { getGrantsForCheckout } from '../src/index.js';
 
 describe('webhook.getGrantsForCheckout [EC:E13]', () => {

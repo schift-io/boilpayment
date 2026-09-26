@@ -1,9 +1,9 @@
 // paykit.config.json shape + read/write.
-// Policy sub-object is the core Policy type (camelCase), resolved via @schift/payment-kit-core resolvePolicy.
+// Policy sub-object is the core Policy type (camelCase), resolved via boilpayment-core resolvePolicy.
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { DEFAULT_POLICY, resolvePolicy } from '@schift/payment-kit-core';
-import type { Policy, ProviderName } from '@schift/payment-kit-core';
+import { DEFAULT_POLICY, resolvePolicy } from 'boilpayment-core';
+import type { Policy, ProviderName } from 'boilpayment-core';
 
 export type PaymentModel = 'subscription' | 'topup' | 'usage';
 export type Good = 'credits' | 'usage_quota';

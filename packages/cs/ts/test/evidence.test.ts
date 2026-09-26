@@ -4,8 +4,8 @@ import { describe, expect, it, beforeEach } from 'vitest';
 import {
   DEFAULT_POLICY, FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen, CollectingNotifier,
   resolvePolicy,
-} from '@schift/payment-kit-core';
-import type { Customer, Payment, Policy } from '@schift/payment-kit-core';
+} from 'boilpayment-core';
+import type { Customer, Payment, Policy } from 'boilpayment-core';
 import { openCase } from '../src/index.js';
 import { checklist, collect, due, submit } from '../src/evidence.js';
 

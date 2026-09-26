@@ -17,13 +17,13 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
-from schift_payment_kit_core import (
+from boilpayment_core import (
     CollectingNotifier,
     FixedClock,
     InMemoryRepo,
     Notification,
 )
-from schift_payment_kit_notify import flush_notify_outbox, with_outbox
+from boilpayment_notify import flush_notify_outbox, with_outbox
 
 NOTIFICATION = Notification(
     type="usage.soft_cap",

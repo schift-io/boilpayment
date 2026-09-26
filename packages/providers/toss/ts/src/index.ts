@@ -1,4 +1,4 @@
-// Schift Payment Kit — Toss Payments provider.
+// boilpayment — Toss Payments provider.
 // See spec/toss.pseudo.md for the full contract. Endpoints/enums verified against
 // docs.tosspayments.com/reference and docs.tosspayments.com/reference/using-api/webhook-events (2026-09).
 import { createHash } from 'node:crypto';
@@ -16,8 +16,8 @@ import type {
   NormalizedEvent,
   NormalizedEventType,
   Logger,
-} from '@schift/payment-kit-core';
-import { PaymentKitError, WebhookSignatureError, ProviderError, NoopLogger } from '@schift/payment-kit-core';
+} from 'boilpayment-core';
+import { PaymentKitError, WebhookSignatureError, ProviderError, NoopLogger } from 'boilpayment-core';
 
 const BASE_URL = 'https://api.tosspayments.com';
 
@@ -244,7 +244,7 @@ export interface TossProviderConfig {
    * which forces the real Toss test API to respond as if that failure occurred (confirmed live
    * 2026-09-09, e.g. `REJECT_CARD_PAYMENT` → real `{"code":"REJECT_CARD_PAYMENT", "message":
    * "한도초과 혹은 잔액부족으로 결제에 실패했습니다."}`) — for exercising failure-path normalization
-   * (`normalizeTossFailure`) against real Toss responses in `paykit live`. Only works with
+   * (`normalizeTossFailure`) against real Toss responses in `boilpayment live`. Only works with
    * `test_sk_` keys; the constructor throws otherwise.
    */
   testCode?: string;
@@ -431,7 +431,7 @@ export class TossProvider implements PaymentProvider {
   }
 
   /**
-   * NOT part of the PaymentProvider contract. Test-mode-only escape hatch for `paykit live`
+   * NOT part of the PaymentProvider contract. Test-mode-only escape hatch for `boilpayment live`
    * (docs/ARCHITECTURE.md live-verification tooling): issues a billing key directly from raw
    * card fields (`POST /v1/billing/authorizations/card`), skipping the widget/browser authKey
    * flow entirely. Per Toss docs (docs.tosspayments.com/guides/v2/billing/integration-api,

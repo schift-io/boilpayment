@@ -1,6 +1,6 @@
 // spec: packages/lifecycle/spec/lifecycle.pseudo.md [EC:A3] [EC:A4] [EC:F]
 import { describe, expect, it } from 'vitest';
-import { FixedClock, InMemoryLedger, InMemoryRepo, Plan, Subscription, SequentialIdGen, resolvePolicy } from '@schift/payment-kit-core';
+import { FixedClock, InMemoryLedger, InMemoryRepo, Plan, Subscription, SequentialIdGen, resolvePolicy } from 'boilpayment-core';
 import { downgrade } from '../src/index.js';
 import { FakeNativeProvider, FakeSelfSchedulingProvider } from './helpers.js';
 

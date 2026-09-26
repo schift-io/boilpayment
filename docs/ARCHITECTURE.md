@@ -5,7 +5,7 @@
 ## 1. 모노레포 레이아웃
 
 ```
-schift-payment-kit/
+boilpayment/
   docs/                      EDGE_CASES · ARCHITECTURE · STEP1_E2E · RELEASE
   packages/
     core/                    타입 · Policy 스키마+기본값 · 인터페이스 · InMemoryLedger · 기간/일할 계산
@@ -20,7 +20,7 @@ schift-payment-kit/
     providers/
       stripe/  polar/  toss/  portone/
   apps/
-    cli/                     `npx @schift/payment-kit init` 위저드 (TS)
+    cli/                     `npx boilpayment init` 위저드 (TS)
 ```
 
 **각 패키지 내부** (공통 규칙):
@@ -28,10 +28,10 @@ schift-payment-kit/
 ```
 packages/<name>/
   spec/<name>.pseudo.md      ← 소스 오브 트루스. 섹션 제목에 [EC:<id>] 표기
-  ts/                        @schift/payment-kit-<name>
+  ts/                        boilpayment-<name>
     package.json  tsconfig.json  src/index.ts ...
-  py/                        schift-payment-kit-<name>  (모듈명 schift_payment_kit_<name>)
-    pyproject.toml  src/schift_payment_kit_<name>/__init__.py ...
+  py/                        boilpayment-<name>  (모듈명 boilpayment_<name>)
+    pyproject.toml  src/boilpayment_<name>/__init__.py ...
 ```
 
 - 구현 코드는 spec 섹션을 주석으로 인용: `// EC:A3` / `# EC:A3`
@@ -45,14 +45,14 @@ packages/<name>/
 | 빌드 | `tsc` (ESM, `dist/`) | hatchling, `src/` layout |
 | 런타임 | Node ≥ 20 | Python ≥ 3.11 |
 | 테스트(후순위) | vitest | pytest |
-| 배포 | npm `@schift/*` | PyPI `schift-payment-kit-*` |
+| 배포 | npm `boilpayment*` | PyPI `boilpayment-*` |
 
 패키지 간 의존은 워크스페이스 참조 (`workspace:*` / `{ workspace = true }`).
 
 ## 3. 핵심 계약 (core)
 
 아래 타입·인터페이스는 `packages/core/ts/src/types.ts` 와
-`packages/core/py/src/schift_payment_kit_core/types.py` 에 **동일하게** 존재한다.
+`packages/core/py/src/boilpayment_core/types.py` 에 **동일하게** 존재한다.
 다른 패키지는 이것만 import 해서 구현한다.
 
 ### 3.1 값 객체
@@ -165,7 +165,7 @@ Scheduler (self-scheduling providers 용)
 객체다.
 
 ```
-credits (ts: @schift/payment-kit-credits · py: schift_payment_kit_credits)
+credits (ts: boilpayment-credits · py: boilpayment_credits)
   grantForPeriod / grant_for_period({sub, plan, period, payment, policy, ledger, clock}) -> GrantResult                    EC:B1 B2 B7 A15
   consume({customerId, amount, policy, ledger, clock, idempotencyKey, reference?, reason?, actor?}) -> ConsumeResult       EC:B3 B4 B5 B14
   rolloverOnRenewal / rollover_on_renewal({sub, policy, ledger, clock, newPeriod}) -> RolloverResult                       EC:B1 B2
@@ -175,7 +175,7 @@ credits (ts: @schift/payment-kit-credits · py: schift_payment_kit_credits)
   grantPromo / grant_promo, grantTrial / grant_trial({customerId, amount, ledger, clock, idempotencyKey, expiresAt?, reason?, actor?, reference?}) -> GrantResult
   manualGrant / manual_grant, manualRevoke / manual_revoke({customerId, pool, amount, reason, actor, ledger, clock, idempotencyKey, expiresAt?, reference?}) -> GrantResult   EC:B9
 
-lifecycle (ts: @schift/payment-kit-lifecycle · py: schift_payment_kit_lifecycle)
+lifecycle (ts: boilpayment-lifecycle · py: boilpayment_lifecycle)
   — namespaces, both languages: lifecycle.dunning.*, lifecycle.scheduler.*, lifecycle.period.* (submodules, not flat exports)
   upgrade({sub, newPlan, policy, provider, ledger, repo, clock, ids}) -> {sub, grant, creditDelta}                         EC:A1 A2 A8
   downgrade({sub, newPlan, policy, provider, ledger, repo, clock, ids}) -> {sub, clawback}                                 EC:A3 A4
@@ -191,7 +191,7 @@ lifecycle (ts: @schift/payment-kit-lifecycle · py: schift_payment_kit_lifecycle
   period.nextPeriod / period.next_period(period, interval, anchorDay, tz, monthEndAnchor) -> Period                        EC:G1  (re-exported from core verbatim, incl. monthEndAnchor arg — not in old signature)
   period.prorationRatio / period.proration_ratio(period, now, denominator) -> number                                       EC:G2
 
-refund (ts: @schift/payment-kit-refund · py: schift_payment_kit_refund)
+refund (ts: boilpayment-refund · py: boilpayment_refund)
   evaluate({payment, sub?, policy, ledger, repo, clock, requestedAmount?, providerFeeMinor?}) -> RefundDecision            EC:D1 D2 D3 D4 D5 D7 D10 B13 B8
     ⚠ evaluate.ts:48/176, evaluate.py:78/241 call `ledger.balance(customerId, 'paid')` WITHOUT
       `now: clock.now()` — under InMemoryLedger this silently falls back to the real wall clock,
@@ -199,7 +199,7 @@ refund (ts: @schift/payment-kit-refund · py: schift_payment_kit_refund)
   execute({decision, provider, ledger, repo, clock, ids, extra?, cs?}) -> Refund                                           EC:D12 D15 B8
   onExternalRefund / on_external_refund({event, ledger, repo, cs?}) -> void                                                EC:D8
 
-usage (ts: @schift/payment-kit-usage · py: schift_payment_kit_usage)
+usage (ts: boilpayment-usage · py: boilpayment_usage)
   record({event, sub, policy, repo, clock, ids, provider?, plan?}) -> {event, duplicated}                                  EC:C2 C3 C4 C7
     py exception: keyword-only — record(*, event, sub, policy, repo, clock, ids, provider=None, plan=None)
   check({customerId, meter, quantity, sub, policy, repo, ledger, clock, ids?, includedQuantity?, idempotencyKey?}) -> {allow, overage, reason, remaining, notify?}   EC:C1 C5 C6 C8 A14
@@ -207,7 +207,7 @@ usage (ts: @schift/payment-kit-usage · py: schift_payment_kit_usage)
   closePeriod / close_period({sub, policy, repo, provider, clock}) -> ClosePeriodResult                                    EC:C2 C9
   flushOutbox / flush_outbox({repo, provider}) -> FlushOutboxResult                                                        EC:C4
 
-webhook (ts: @schift/payment-kit-webhook · py: schift_payment_kit_webhook)
+webhook (ts: boilpayment-webhook · py: boilpayment_webhook)
   receive({provider, headers, rawBody, repo, clock}) -> {status: 200|400, eventId?, duplicated?}                          EC:E4 E5
     py exception: keyword-only — receive(*, provider, headers, raw_body, repo, clock)
     note: `provider` is a single PaymentProvider instance (already resolved by the caller), not a `providers` map.
@@ -228,10 +228,10 @@ webhook (ts: @schift/payment-kit-webhook · py: schift_payment_kit_webhook)
       bare top-up payments — see FINDINGS.md #4 (not exercised, flagged from reading).
   getGrantsForCheckout / get_grants_for_checkout({checkoutIdOrPaymentRef, repo, ledger}) -> {ready, customerId?, entries?}   EC:E13
 
-notify (ts: @schift/payment-kit-notify · py: schift_payment_kit_notify) — not exercised in the e2e run
+notify (ts: boilpayment-notify · py: boilpayment_notify) — not exercised in the e2e run
   resend(cfg) / smtp(cfg) / slack(cfg) -> Notifier
 
-cs (ts: @schift/payment-kit-cs · py: schift_payment_kit_cs)
+cs (ts: boilpayment-cs · py: boilpayment_cs)
   reconcile({customerId?, providers, ledger, repo, policy, clock, ids, since, onCaseEvent?}) -> CsCase[]                   EC:E1 H4
   checkBalances / check_balances({ledger, repo, customerIds?}) -> BalanceMismatch[]   (no-op unless repo exposes a duck-typed `creditBalances`/`credit_balances` table)   EC:H4
   regrant({case, ledger, repo, policy, clock, ids, plan, approvedBy?, onCaseEvent?}) -> CsCase   (plan: {pool, amount, unitPriceMinor?, currency?, expiresAt?, idempotencyKey?, reason?, customerId?})   EC:A18 E1 E2 E14
@@ -278,7 +278,7 @@ cs (ts: @schift/payment-kit-cs · py: schift_payment_kit_cs)
 
 ## 6. 위저드 (apps/cli)
 
-`npx @schift/payment-kit init [--config paykit.config.json] [--yes]`
+`npx boilpayment init [--config paykit.config.json] [--yes]`
 
 1. 질문 (EDGE_CASES.md "위저드 질문 순서") → `paykit.config.json`
 2. 생성:
@@ -288,7 +288,7 @@ cs (ts: @schift/payment-kit-cs · py: schift_payment_kit_cs)
    - `.env.example` — provider 키 · DB URL · 알림 키
    - `POLICY.md` — 정책 요약 (사람용)
 3. 약관 생성 명령은 미지원.
-4. `paykit check` — config 검증 + 마이그레이션 적용 여부 조회 (읽기만)
+4. `boilpayment check` — config 검증 + 마이그레이션 적용 여부 조회 (읽기만)
 
 의존성 없음 원칙: prompts 는 `@clack/prompts`, 그 외 최소.
 

@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import httpx
-from schift_payment_kit_core import (
+from boilpayment_core import (
     DEFAULT_POLICY,
     FixedClock,
     InMemoryLedger,
@@ -28,14 +28,14 @@ from schift_payment_kit_core import (
     SequentialIdGen,
     WebhookSignatureError,
 )
-from schift_payment_kit_credits import TopupInput
-from schift_payment_kit_credits import topup as credits_topup
-from schift_payment_kit_portone import PortoneProvider, PortoneProviderConfig
-from schift_payment_kit_webhook import (
+from boilpayment_credits import TopupInput
+from boilpayment_credits import topup as credits_topup
+from boilpayment_portone import PortoneProvider, PortoneProviderConfig
+from boilpayment_webhook import (
     default_handlers,
     receive,
 )
-from schift_payment_kit_webhook import (
+from boilpayment_webhook import (
     process as process_webhook,
 )
 

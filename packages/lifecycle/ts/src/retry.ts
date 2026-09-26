@@ -1,7 +1,7 @@
 // EC:K1 call-site helper. Not tied to one spec section — used wherever a handler holds a
 // Subscription across an `await` that another writer (a webhook, a scheduler tick, a dunning
 // sweep) could touch before the final `repo.subscriptions.put`.
-import { PaymentKitError } from '@schift/payment-kit-core';
+import { PaymentKitError } from 'boilpayment-core';
 
 /**
  * Retries `fn` when it throws `PaymentKitError('subscription_version_conflict')` (thrown by

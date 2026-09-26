@@ -10,14 +10,14 @@ not scenario mistakes — reproduced with real code paths, not asserted from rea
 
 - `packages/refund/ts/src/evaluate.ts:48` (B8 fallback inside `consumedFromGrants`) and `:176`
   (the B13 shortfall check) both call `ledger.balance(customerId, 'paid')` — **no `now` argument**.
-- `packages/refund/py/src/schift_payment_kit_refund/evaluate.py:78` and `:241` — same, `await
+- `packages/refund/py/src/boilpayment_refund/evaluate.py:78` and `:241` — same, `await
   ledger.balance(customer_id, "paid")`.
 
 `InMemoryLedger.balance()` defaults `now` to the real wall clock (`new Date()` /
 `datetime.now(timezone.utc)`) when omitted — not the `clock` passed into `evaluate()`. Every
 other module that needs "is this grant still valid" threads `clock.now()` through explicitly,
 including credits' own `clawback()` (`packages/credits/ts/src/clawback.ts:48`,
-`packages/credits/py/src/schift_payment_kit_credits/clawback.py:57`), so this looks like a
+`packages/credits/py/src/boilpayment_credits/clawback.py:57`), so this looks like a
 localized oversight in `refund`, not a deliberate design choice.
 
 **Measured effect in this run** (step `07_refund`): under `FixedClock` (Jan–Mar 2026), the real
@@ -45,7 +45,7 @@ into both `ledger.balance(...)` calls in `evaluate.ts`/`evaluate.py`.
 ## 2. `rolloverOnRenewal`'s bank-cap "expire" entry double-counts against balance (both languages)
 
 `packages/credits/ts/src/rollover.ts` (the `expired > 0` branch, ~line 87) and its py mirror
-(`packages/credits/py/src/schift_payment_kit_credits/rollover.py`) write a bookkeeping `expire`
+(`packages/credits/py/src/boilpayment_credits/rollover.py`) write a bookkeeping `expire`
 ledger entry for the portion of a previous period's leftover that exceeds `policy.credits.bankCap`.
 That entry's `reference` carries no `grantId`, so `InMemoryLedger`'s `unbucketedTotal` treats it as
 a **direct balance deduction** — on top of the fact that the grants it's summarizing (e.g. the
@@ -93,7 +93,7 @@ All worked around locally in the example scripts (adapters live in `round_trip.p
 ## 4. Not exercised, flagged from reading only — `webhook.handlers`'s topup wiring looks broken
 
 `packages/webhook/ts/src/handlers.ts`'s `onPaymentSucceeded` (mirrored in
-`packages/webhook/py/src/schift_payment_kit_webhook/handlers.py`'s `on_payment_succeeded`) calls
+`packages/webhook/py/src/boilpayment_webhook/handlers.py`'s `on_payment_succeeded`) calls
 `credits.topup({ customerId, payment, credits: null, ... })` (py: `credits=None`) when a
 `payment.succeeded` event has no `subscriptionRef` (i.e. a bare top-up payment). But the real
 `credits.topup`/`topup()` requires `credits: number` (ts) / `credits: int` (py) — it's used

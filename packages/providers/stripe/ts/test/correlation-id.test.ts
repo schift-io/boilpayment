@@ -2,7 +2,7 @@
 // a fixed correlationId, overriding the idempotencyKey-derived default, without touching the
 // PaymentProvider interface (duck-typed, not declared there — see spec/webhook.pseudo.md [EC:L5]).
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { CollectingLogger } from '@schift/payment-kit-core';
+import { CollectingLogger } from 'boilpayment-core';
 import { StripeProvider } from '../src/index.js';
 import { installHttpMock, type HttpMock } from './helpers/mockHttp.js';
 

@@ -6,7 +6,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from schift_payment_kit_core import (
+from boilpayment_core import (
     FixedClock,
     InMemoryLedger,
     InMemoryRepo,
@@ -21,7 +21,7 @@ from schift_payment_kit_core import (
     Subscription,
     resolve_policy,
 )
-from schift_payment_kit_credits import (
+from boilpayment_credits import (
     ClawbackInput,
     ConsumeCreditsInput,
     GrantForPeriodInput,

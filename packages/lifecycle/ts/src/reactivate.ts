@@ -11,7 +11,7 @@ import {
   deserializeSubscription,
   runIdempotent,
   serializeSubscription,
-} from '@schift/payment-kit-core';
+} from 'boilpayment-core';
 import { scopeProvider } from './internal.js';
 
 export interface ReactivateInput {
@@ -48,7 +48,7 @@ export interface ReactivateResult {
 
 /**
  * EC:A23 restore — the mirror image of cancel.ts's `revoke_immediately` clawback. `cancel.ts` calls
- * `@schift/payment-kit-credits` `clawback()`, which appends ONE aggregate `revoke` ledger row
+ * `boilpayment-credits` `clawback()`, which appends ONE aggregate `revoke` ledger row
  * (`revoke:cancel:{sub.id}:{periodStart}`, no per-grant `reference.grantId`) rather than a
  * per-bucket breakdown like `cs.dispute`'s `revokeDisputedGrants`. To restore "attributed per
  * bucket, original expiry preserved" (matching the dispute-restore pattern) without changing

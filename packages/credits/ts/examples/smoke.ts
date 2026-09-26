@@ -1,6 +1,6 @@
 // Runs the real credits.* code path against core's InMemoryLedger. No test framework — prints
 // balances at each step; compare byte-for-byte against py/examples/smoke.py's stdout.
-import { FixedClock, InMemoryLedger, SequentialIdGen, Plan, Payment, Subscription, resolvePolicy } from '@schift/payment-kit-core';
+import { FixedClock, InMemoryLedger, SequentialIdGen, Plan, Payment, Subscription, resolvePolicy } from 'boilpayment-core';
 import {
   grantForPeriod,
   consume,
@@ -11,7 +11,7 @@ import {
   manualRevoke,
   clawback,
   expireDue,
-} from '@schift/payment-kit-credits';
+} from 'boilpayment-credits';
 
 async function main(): Promise<void> {
   const clock = new FixedClock(new Date('2024-01-01T00:00:00.000Z'));

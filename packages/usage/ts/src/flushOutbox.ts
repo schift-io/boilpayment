@@ -1,5 +1,5 @@
 // EC:C4 — see spec/usage.pseudo.md
-import type { Clock, OutboxItem, PaymentProvider, ProviderName, Repo } from '@schift/payment-kit-core';
+import type { Clock, OutboxItem, PaymentProvider, ProviderName, Repo } from 'boilpayment-core';
 
 export interface FlushOutboxInput {
   repo: Repo;

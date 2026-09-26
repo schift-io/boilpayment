@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import asyncio
 
-from schift_payment_kit_core import CollectingLogger
-from schift_payment_kit_stripe import _LoggingHTTPClient
+from boilpayment_core import CollectingLogger
+from boilpayment_stripe import _LoggingHTTPClient
 
 
 def run(coro):
@@ -64,7 +64,7 @@ def test_no_override_falls_back_to_idempotency_key_header():
 
 
 def test_with_correlation_id_reconstructs_a_new_provider_leaving_the_original_untouched():
-    from schift_payment_kit_stripe import StripeProvider
+    from boilpayment_stripe import StripeProvider
 
     original = StripeProvider(secret_key="sk_test_dummy", webhook_secret="whsec_x")
     scoped = original.with_correlation_id("corr_evt_456")

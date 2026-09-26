@@ -9,8 +9,8 @@ import subprocess
 import uuid
 from dataclasses import dataclass
 
-from schift_payment_kit_schema_postgres import migrate
-from schift_payment_kit_schema_postgres.tx import close_pools
+from boilpayment_schema_postgres import migrate
+from boilpayment_schema_postgres.tx import close_pools
 
 ALL_MODULES = ["core", "credits", "usage", "webhook", "refund", "cs"]
 PG_HOST = "127.0.0.1"

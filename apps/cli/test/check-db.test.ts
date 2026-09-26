@@ -41,7 +41,7 @@ describe('checkDatabase', () => {
   it('a database behind this build fails the check — not just a listing of what IS applied', async () => {
     // The regression this file exists for: `check` used to read the paykit_migrations rows and
     // print them, which can only ever describe the past. It reported a clean, green, exit-0 result
-    // for a database that `paykit migrate --dry-run` said was three migrations behind.
+    // for a database that `boilpayment migrate --dry-run` said was three migrations behind.
     schemaStatus.mockResolvedValue(
       status({ expected: ['0001_core.sql', '0002_credits.sql'], pending: ['0002_credits.sql'] }),
     );
@@ -49,7 +49,7 @@ describe('checkDatabase', () => {
     expect(report.ok).toBe(false);
     const text = report.lines.join('\n');
     expect(text).toContain('0002_credits.sql');
-    expect(text).toContain('paykit migrate');
+    expect(text).toContain('boilpayment migrate');
   });
 
   it('a database ahead of this build fails the check and does NOT suggest migrating', async () => {

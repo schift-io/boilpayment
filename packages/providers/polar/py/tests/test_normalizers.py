@@ -6,7 +6,7 @@ ts/test/normalizers.test.ts field-for-field (camelCase <-> snake_case only).
 from __future__ import annotations
 
 import pytest
-from schift_payment_kit_polar import (
+from boilpayment_polar import (
     map_event_type,
     normalize_failure,
     normalize_order,

@@ -9,7 +9,7 @@ import dataclasses
 import json
 from datetime import UTC, datetime
 
-from schift_payment_kit_core import (
+from boilpayment_core import (
     DEFAULT_POLICY,
     ConsumeInput,
     FixedClock,
@@ -23,7 +23,7 @@ from schift_payment_kit_core import (
     Refund,
     SequentialIdGen,
 )
-from schift_payment_kit_refund import EvaluateInput, ExecuteInput, evaluate, execute
+from boilpayment_refund import EvaluateInput, ExecuteInput, evaluate, execute
 
 
 class FakeProvider:

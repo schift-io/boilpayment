@@ -1,7 +1,7 @@
 // Phase 6 regression tests — packages/webhook/ts/src/receive.ts
 // Ground truth measured via `tsx packages/webhook/ts/examples/smoke.ts` this session.
 import { describe, expect, it } from 'vitest';
-import { FixedClock, InMemoryRepo } from '@schift/payment-kit-core';
+import { FixedClock, InMemoryRepo } from 'boilpayment-core';
 import { receive } from '../src/index.js';
 import { FakeProvider, jsonVerify } from './helpers.js';
 

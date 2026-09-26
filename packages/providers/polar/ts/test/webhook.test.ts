@@ -3,7 +3,7 @@
 import { createHmac } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
 import { PolarProvider, verifyStandardWebhookSignature } from '../src/index.js';
-import { WebhookSignatureError } from '@schift/payment-kit-core';
+import { WebhookSignatureError } from 'boilpayment-core';
 
 const WEBHOOK_SECRET = 'whsec_c2VjcmV0a2V5Zm9ycG9sYXJ0ZXN0';
 

@@ -1,6 +1,6 @@
 /**
  * Operation-level idempotency. See spec/core.pseudo.md [EC:J1 J2 J3 J4 J5].
- * Mirrors packages/core/py/src/schift_payment_kit_core/idempotent.py exactly.
+ * Mirrors packages/core/py/src/boilpayment_core/idempotent.py exactly.
  *
  * Design note (documents the "choose one" in the task brief): results are made JSON-safe via
  * explicit serialize-/deserialize- helpers per entity (Dates <-> ISO strings), NOT by re-reading

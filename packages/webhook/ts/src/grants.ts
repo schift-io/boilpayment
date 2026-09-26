@@ -1,5 +1,5 @@
 // EC:E13 — see spec/webhook.pseudo.md
-import type { LedgerEntry, LedgerStore, Payment, Repo } from '@schift/payment-kit-core';
+import type { LedgerEntry, LedgerStore, Payment, Repo } from 'boilpayment-core';
 
 export interface GetGrantsForCheckoutInput {
   checkoutIdOrPaymentRef: string;

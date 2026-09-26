@@ -1,5 +1,5 @@
 // spec/cs.pseudo.md — EC:I3 I7 I8 I5
-import { Clock, CsCase, CsCaseKind, CsCaseStatus, IdGen, Notification, Notifier, Policy, Repo } from '@schift/payment-kit-core';
+import { Clock, CsCase, CsCaseKind, CsCaseStatus, IdGen, Notification, Notifier, Policy, Repo } from 'boilpayment-core';
 import { LicenseReporter } from './metrics.js';
 
 export const ACTIVE_STATUSES: readonly CsCaseStatus[] = ['open', 'needs_human'];

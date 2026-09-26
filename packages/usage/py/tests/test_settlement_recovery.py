@@ -5,9 +5,9 @@ from datetime import UTC, datetime
 
 import anyio
 import pytest
+from boilpayment_core import Money, OutboxItem, Payment, PaymentKitError, Period
+from boilpayment_usage import settle_due_periods, settle_period
 from fixtures import FakeProvider
-from schift_payment_kit_core import Money, OutboxItem, Payment, PaymentKitError, Period
-from schift_payment_kit_usage import settle_due_periods, settle_period
 from test_settle_period import given
 
 

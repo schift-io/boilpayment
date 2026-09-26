@@ -30,7 +30,7 @@ async function dirHasSqlFiles(dir: string): Promise<boolean> {
 async function resolveSqlSourceDir(): Promise<{ dir: string | null; reason: string }> {
   // 1. workspace package (built or source tree) — packages/schema-postgres/sql
   try {
-    const pkgJsonPath = require.resolve('@schift/payment-kit-schema-postgres/package.json');
+    const pkgJsonPath = require.resolve('boilpayment-schema-postgres/package.json');
     const candidate = path.join(path.dirname(pkgJsonPath), '../sql');
     if (await dirHasSqlFiles(candidate)) return { dir: candidate, reason: 'workspace package' };
   } catch {

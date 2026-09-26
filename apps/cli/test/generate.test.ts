@@ -110,27 +110,27 @@ describe('generatePolicyMd', () => {
 
 const PKG_DIST: Record<string, string> = {
   // The generated paykit/index.ts imports exclusively from the single-install facade
-  // (@schift/payment-kit-sdk/<subpath> — see ts-entry.ts) rather than the ten individual
+  // (boilpayment-sdk/<subpath> — see ts-entry.ts) rather than the ten individual
   // packages, so this must actually resolve through the built facade, not bypass it. The facade
   // itself must be built before this test runs — see apps/cli/package.json's `pretest`.
-  '@schift/payment-kit-sdk': 'packages/sdk/ts/dist',
-  // The facade's own dist/*.d.ts re-export these by name (`export * from '@schift/payment-kit-core'`
+  'boilpayment-sdk': 'packages/sdk/ts/dist',
+  // The facade's own dist/*.d.ts re-export these by name (`export * from 'boilpayment-core'`
   // etc.), so tsc still needs to resolve them transitively — kept here for that reason.
-  '@schift/payment-kit-core': 'packages/core/ts/dist',
-  '@schift/payment-kit-credits': 'packages/credits/ts/dist',
-  '@schift/payment-kit-lifecycle': 'packages/lifecycle/ts/dist',
-  '@schift/payment-kit-refund': 'packages/refund/ts/dist',
-  '@schift/payment-kit-usage': 'packages/usage/ts/dist',
-  '@schift/payment-kit-webhook': 'packages/webhook/ts/dist',
-  '@schift/payment-kit-notify': 'packages/notify/ts/dist',
+  'boilpayment-core': 'packages/core/ts/dist',
+  'boilpayment-credits': 'packages/credits/ts/dist',
+  'boilpayment-lifecycle': 'packages/lifecycle/ts/dist',
+  'boilpayment-refund': 'packages/refund/ts/dist',
+  'boilpayment-usage': 'packages/usage/ts/dist',
+  'boilpayment-webhook': 'packages/webhook/ts/dist',
+  'boilpayment-notify': 'packages/notify/ts/dist',
   // EC:L1-L5 — infra.logging='postgres' (the kitchen-sink default) makes generated index.ts import
   // both of these directly (see ts-entry.ts buildLogger()).
-  '@schift/payment-kit-schema-postgres': 'packages/schema-postgres/ts/dist',
-  '@schift/payment-kit-cs': 'packages/cs/ts/dist',
-  '@schift/payment-kit-stripe': 'packages/providers/stripe/ts/dist',
-  '@schift/payment-kit-polar': 'packages/providers/polar/ts/dist',
-  '@schift/payment-kit-toss': 'packages/providers/toss/ts/dist',
-  '@schift/payment-kit-portone': 'packages/providers/portone/ts/dist',
+  'boilpayment-schema-postgres': 'packages/schema-postgres/ts/dist',
+  'boilpayment-cs': 'packages/cs/ts/dist',
+  'boilpayment-stripe': 'packages/providers/stripe/ts/dist',
+  'boilpayment-polar': 'packages/providers/polar/ts/dist',
+  'boilpayment-toss': 'packages/providers/toss/ts/dist',
+  'boilpayment-portone': 'packages/providers/portone/ts/dist',
 };
 
 describe('generated paykit/index.ts typechecks (temp-tsconfig against workspace dist)', () => {
@@ -156,9 +156,9 @@ describe('generated paykit/index.ts typechecks (temp-tsconfig against workspace 
           baseUrl: ROOT,
           paths: {
             ...Object.fromEntries(Object.entries(PKG_DIST).map(([name, dist]) => [name, [`${dist}/index.d.ts`]])),
-            // Facade subpaths (@schift/payment-kit-sdk/core, /credits, /stripe, ...) — each compiles
+            // Facade subpaths (boilpayment-sdk/core, /credits, /stripe, ...) — each compiles
             // to a same-named .d.ts under the facade's dist/ (see packages/sdk/ts/package.json exports).
-            '@schift/payment-kit-sdk/*': ['packages/sdk/ts/dist/*.d.ts'],
+            'boilpayment-sdk/*': ['packages/sdk/ts/dist/*.d.ts'],
             // 'pg' types aren't hoisted to the repo-root node_modules under pnpm (only nested under
             // packages/schema-postgres/ts/node_modules) — point at them explicitly, same reason
             // PKG_DIST exists at all.
@@ -243,8 +243,8 @@ describe('INTEGRATION.md — generated per config, and its symbols must exist in
   it('tells the reader to install exactly one package', async () => {
     const dir = await project({ providers: ['toss'], models: ['subscription'], languages: ['ts', 'py'], cs_enabled: false });
     const doc = await fs.readFile(path.join(dir, 'INTEGRATION.md'), 'utf8');
-    expect(doc).toContain('npm i @schift/payment-kit-sdk');
-    expect(doc).toContain('pip install schift-payment-kit');
-    expect(doc).not.toMatch(/@schift\/payment-kit-(core|credits|lifecycle|refund|usage|webhook|cs)\b/);
+    expect(doc).toContain('npm i boilpayment-sdk');
+    expect(doc).toContain('pip install boilpayment');
+    expect(doc).not.toMatch(/boilpayment-(core|credits|lifecycle|refund|usage|webhook|cs)\b/);
   });
 });

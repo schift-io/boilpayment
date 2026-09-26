@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 import anyio
 import pytest
-from schift_payment_kit_core import (
+from boilpayment_core import (
     Checkout,
     Customer,
     FixedClock,
@@ -23,13 +23,13 @@ from schift_payment_kit_core import (
     SequentialIdGen,
     resolve_policy,
 )
-from schift_payment_kit_credits import (
+from boilpayment_credits import (
     GrantForPeriodInput,
     TopupInput,
     grant_for_period,
     topup,
 )
-from schift_payment_kit_cs import (
+from boilpayment_cs import (
     FinishRefundCasesInput,
     RecoverMissingGrantInput,
     RegisterCompletedCheckoutInput,

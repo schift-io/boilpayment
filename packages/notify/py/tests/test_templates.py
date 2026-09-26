@@ -1,16 +1,16 @@
 """Phase 6 regression tests -- templates.render() exhaustive coverage for every NotifyType
-(the full union from schift_payment_kit_core.types), both locales ('en' and 'ko'). Expected
+(the full union from boilpayment_core.types), both locales ('en' and 'ko'). Expected
 subject/text strings are copied verbatim from
-packages/notify/py/src/schift_payment_kit_notify/templates.py (read, not guessed).
+packages/notify/py/src/boilpayment_notify/templates.py (read, not guessed).
 
 pytest-asyncio is not installed; render() is synchronous here so no asyncio.run() needed.
 """
 
 from __future__ import annotations
 
-from schift_payment_kit_notify import render, templates
+from boilpayment_notify import render, templates
 
-# The exhaustive NotifyType union, per packages/core/py/src/schift_payment_kit_core/types.py.
+# The exhaustive NotifyType union, per packages/core/py/src/boilpayment_core/types.py.
 NOTIFY_TYPES = [
     "payment.failed",
     "grace.started",

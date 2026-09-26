@@ -6,7 +6,7 @@ import anyio
 import httpx
 import pytest
 from _refund_fixtures import Status, delivery, provider_for
-from schift_payment_kit_core import (
+from boilpayment_core import (
     DEFAULT_POLICY,
     CollectingNotifier,
     FixedClock,
@@ -23,8 +23,8 @@ from schift_payment_kit_core import (
     Repo,
     SequentialIdGen,
 )
-from schift_payment_kit_refund import OnExternalRefundInput, on_external_refund
-from schift_payment_kit_webhook import default_handlers, process, receive
+from boilpayment_refund import OnExternalRefundInput, on_external_refund
+from boilpayment_webhook import default_handlers, process, receive
 
 
 @pytest.mark.parametrize("name", ["stripe", "polar", "toss", "portone"])

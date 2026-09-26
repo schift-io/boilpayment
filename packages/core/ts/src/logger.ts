@@ -1,5 +1,5 @@
 /**
- * EC:L1 L2 — Logger DI + redaction. Mirrors packages/core/py/src/schift_payment_kit_core/logger.py
+ * EC:L1 L2 — Logger DI + redaction. Mirrors packages/core/py/src/boilpayment_core/logger.py
  * exactly. See docs/EDGE_CASES.md §L.
  *
  * Design: `redact()` runs INSIDE `BaseLogger.log()`, not at call sites — a call site can pass a

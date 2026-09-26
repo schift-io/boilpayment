@@ -1,7 +1,7 @@
 // EC:K2 K4 K6 K7 — auto-issue of a KR 현금영수증 (cash receipt) from the payment.succeeded handler.
 import { describe, expect, it } from 'vitest';
-import { CollectingNotifier, DEFAULT_POLICY, FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen } from '@schift/payment-kit-core';
-import type { CreditsDeps, Payment, Policy } from '@schift/payment-kit-core';
+import { CollectingNotifier, DEFAULT_POLICY, FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen } from 'boilpayment-core';
+import type { CreditsDeps, Payment, Policy } from 'boilpayment-core';
 import { defaultHandlers, process as processWebhook, receive } from '../src/index.js';
 import { FakeProvider, jsonVerify } from './helpers.js';
 

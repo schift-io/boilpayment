@@ -2,7 +2,7 @@
 // core has no shared period-math helper (that lives in `lifecycle.period`,
 // built concurrently, not imported here). Contract-change proposal: move a
 // `period.previous(period)` helper into `core` so this doesn't get re-derived.
-import type { Period } from '@schift/payment-kit-core';
+import type { Period } from 'boilpayment-core';
 
 export function previousPeriodStart(period: Period): Date {
   const lengthMs = period.end.getTime() - period.start.getTime();

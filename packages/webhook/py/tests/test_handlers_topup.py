@@ -2,7 +2,7 @@
 default_handlers' one-time top-up branch (on_payment_succeeded, no subscription_ref) now
 REQUIRES resolve_topup_credits(payment) to resolve a credits amount. Unresolved -> the
 webhook record fails with error 'topup_credits_unresolved' instead of a null-amount
-ledger entry. See packages/webhook/py/src/schift_payment_kit_webhook/handlers.py."""
+ledger entry. See packages/webhook/py/src/boilpayment_webhook/handlers.py."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import json
 from datetime import UTC, datetime
 
 from _helpers import FakeProvider, json_verify
-from schift_payment_kit_core import (
+from boilpayment_core import (
     DEFAULT_POLICY,
     CollectingNotifier,
     FixedClock,
@@ -22,7 +22,7 @@ from schift_payment_kit_core import (
     SequentialIdGen,
     run_idempotent,
 )
-from schift_payment_kit_webhook import default_handlers, process, receive
+from boilpayment_webhook import default_handlers, process, receive
 
 
 def _make_topup_payment(clock, **overrides):

@@ -2,7 +2,7 @@
 
 `PaymentProvider` 구현. `docs/ARCHITECTURE.md` §3.4/3.5, `docs/EDGE_CASES.md` F(Stripe) 절 참조.
 ts: `StripeProvider` (`packages/providers/stripe/ts/src/index.ts`)
-py: `StripeProvider` (`packages/providers/stripe/py/src/schift_payment_kit_stripe/__init__.py`)
+py: `StripeProvider` (`packages/providers/stripe/py/src/boilpayment_stripe/__init__.py`)
 
 ## Capabilities
 

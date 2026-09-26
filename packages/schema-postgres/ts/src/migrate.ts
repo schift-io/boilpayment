@@ -141,7 +141,7 @@ export async function verifySchema(input: MigrateInput): Promise<SchemaStatus> {
   if (status.pending.length > 0) {
     throw new Error(
       `paykit: database is behind this build — ${status.pending.length} migration(s) not applied ` +
-        `(${status.pending.join(', ')}). Run \`npx paykit migrate\` before starting.`,
+        `(${status.pending.join(', ')}). Run \`npx boilpayment migrate\` before starting.`,
     );
   }
   if (status.unknown.length > 0) {

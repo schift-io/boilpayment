@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import pytest
 from _obj import _Obj
-from schift_payment_kit_core import PaymentKitError
-from schift_payment_kit_stripe import (
+from boilpayment_core import PaymentKitError
+from boilpayment_stripe import (
     invoice_payment_intent_ref,
     map_event_type,
     normalize_failure,

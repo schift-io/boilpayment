@@ -1,5 +1,5 @@
 // Resend email adapter. Never throws — see spec/notify.pseudo.md.
-import type { Notification, Notifier } from '@schift/payment-kit-core';
+import type { Notification, Notifier } from 'boilpayment-core';
 import type { Locale } from './templates.js';
 import { renderNotification } from './templates.js';
 

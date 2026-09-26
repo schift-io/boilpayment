@@ -1,5 +1,5 @@
 // spec: packages/credits/spec/credits.pseudo.md — EC:B16
-import { Clock, LedgerStore, Notifier, OutboxItem, Policy, Repo } from '@schift/payment-kit-core';
+import { Clock, LedgerStore, Notifier, OutboxItem, Policy, Repo } from 'boilpayment-core';
 
 export interface ExpiringNotice {
   customerId: string;

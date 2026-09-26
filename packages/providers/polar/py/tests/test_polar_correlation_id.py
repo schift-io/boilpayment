@@ -10,8 +10,8 @@ import asyncio
 
 import httpx
 import pytest
-from schift_payment_kit_core import CollectingLogger
-from schift_payment_kit_polar import PolarProvider
+from boilpayment_core import CollectingLogger
+from boilpayment_polar import PolarProvider
 
 
 def run(coro):

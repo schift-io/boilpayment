@@ -7,9 +7,9 @@ from __future__ import annotations
 import asyncio
 
 import psycopg
+from boilpayment_schema_postgres import load_migrations, migrate
 from db_helper import create_test_db, drop_test_db
 from psycopg.rows import dict_row
-from schift_payment_kit_schema_postgres import load_migrations, migrate
 
 EXPECTED_TABLES = [
     "customers",

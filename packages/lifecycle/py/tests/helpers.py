@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from schift_payment_kit_core import (
+from boilpayment_core import (
     Checkout,
     Money,
     NormalizedEvent,

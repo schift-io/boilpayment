@@ -9,7 +9,7 @@ import dataclasses
 import json
 from datetime import UTC, datetime
 
-from schift_payment_kit_core import (
+from boilpayment_core import (
     DEFAULT_POLICY,
     FixedClock,
     InMemoryRepo,
@@ -23,7 +23,7 @@ from schift_payment_kit_core import (
     Subscription,
     WebhookSignatureError,
 )
-from schift_payment_kit_webhook import (
+from boilpayment_webhook import (
     default_handlers,
     get_grants_for_checkout,
     process,

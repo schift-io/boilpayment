@@ -6,8 +6,8 @@
 // already proven separately in packages/schema-postgres, see spec/schema-postgres.pseudo.md
 // [EC:L1-L5] "Smoke-tested 2026-09-09").
 import { describe, expect, it } from 'vitest';
-import { CollectingLogger, DEFAULT_POLICY, FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen } from '@schift/payment-kit-core';
-import type { Payment, Subscription } from '@schift/payment-kit-core';
+import { CollectingLogger, DEFAULT_POLICY, FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen } from 'boilpayment-core';
+import type { Payment, Subscription } from 'boilpayment-core';
 import type { LifecycleDeps } from '../src/index.js';
 import { defaultHandlers, mintCorrelationId, process as processWebhook, receive } from '../src/index.js';
 import { FakeProvider, jsonVerify } from './helpers.js';

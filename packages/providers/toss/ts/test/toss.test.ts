@@ -3,8 +3,8 @@
 // examples/smoke.ts (docs.tosspayments.com example response shapes) plus the
 // status/failure/webhook mapping tables in spec/toss.pseudo.md.
 import { describe, it, expect } from 'vitest';
-import { WebhookSignatureError, ProviderError, PaymentKitError } from '@schift/payment-kit-core';
-import type { CreateCheckoutInput, Plan, PlanPrice } from '@schift/payment-kit-core';
+import { WebhookSignatureError, ProviderError, PaymentKitError } from 'boilpayment-core';
+import type { CreateCheckoutInput, Plan, PlanPrice } from 'boilpayment-core';
 import { TossProvider, normalizeTossStatus, normalizeTossFailure, normalizeTossPayment, mapTossWebhook } from '../src/index.js';
 
 // ── shared fixtures (mirrors examples/smoke.ts) ──────────────────────────────

@@ -8,7 +8,7 @@ import {
   LedgerStore,
   Policy,
   Pool,
-} from '@schift/payment-kit-core';
+} from 'boilpayment-core';
 
 const POOL_ORDER: Record<ConsumeOrder, Pool[]> = {
   expiring_first: ['paid', 'promo', 'trial'],

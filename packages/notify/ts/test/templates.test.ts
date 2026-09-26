@@ -1,9 +1,9 @@
 // Phase 6 regression tests — templates.render() exhaustive coverage for every NotifyType
-// (the full union from @schift/payment-kit-core), both locales ('en' and 'ko'). Expected
+// (the full union from boilpayment-core), both locales ('en' and 'ko'). Expected
 // subject/text strings are copied verbatim from packages/notify/ts/src/templates.ts (read,
 // not guessed) and cross-checked against a real `render()` call in this file.
 import { describe, expect, it } from 'vitest';
-import type { NotifyType } from '@schift/payment-kit-core';
+import type { NotifyType } from 'boilpayment-core';
 import { render, templates } from '../src/index.js';
 
 // The exhaustive NotifyType union, per packages/core/ts/src/types.ts.

@@ -14,8 +14,8 @@ import json
 import time
 
 import httpx
-from schift_payment_kit_core import Money, WebhookSignatureError
-from schift_payment_kit_portone import (
+from boilpayment_core import Money, WebhookSignatureError
+from boilpayment_portone import (
     PortoneProvider,
     PortoneProviderConfig,
     map_portone_webhook,

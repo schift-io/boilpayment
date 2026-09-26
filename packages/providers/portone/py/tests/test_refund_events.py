@@ -1,6 +1,6 @@
 import pytest
-from schift_payment_kit_core import Money
-from schift_payment_kit_portone import _normalize_portone_refund, map_portone_webhook
+from boilpayment_core import Money
+from boilpayment_portone import _normalize_portone_refund, map_portone_webhook
 
 
 @pytest.mark.parametrize(
@@ -67,7 +67,7 @@ def test_authoritative_lookup_matches_exact_cancellation(
 ) -> None:
     import anyio
     import httpx
-    from schift_payment_kit_portone import PortoneProvider, PortoneProviderConfig
+    from boilpayment_portone import PortoneProvider, PortoneProviderConfig
 
     async def run() -> None:
         raw = {

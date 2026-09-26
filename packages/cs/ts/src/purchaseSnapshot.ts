@@ -1,5 +1,5 @@
-import { PaymentKitError, validatePolicy } from '@schift/payment-kit-core';
-import type { Plan, PlanPrice, Policy, ProviderName, Repo } from '@schift/payment-kit-core';
+import { PaymentKitError, validatePolicy } from 'boilpayment-core';
+import type { Plan, PlanPrice, Policy, ProviderName, Repo } from 'boilpayment-core';
 
 export interface CheckoutSnapshot {
   readonly intentKey: string;

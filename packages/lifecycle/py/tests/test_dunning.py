@@ -5,8 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
-from helpers import FakeNativeProvider, FakeSelfSchedulingProvider
-from schift_payment_kit_core import (
+from boilpayment_core import (
     CollectingNotifier,
     FixedClock,
     InMemoryLedger,
@@ -22,7 +21,7 @@ from schift_payment_kit_core import (
     Subscription,
     resolve_policy,
 )
-from schift_payment_kit_lifecycle.dunning import (
+from boilpayment_lifecycle.dunning import (
     OnGraceExpiredInput,
     OnPaymentFailedInput,
     OnRecoveredInput,
@@ -34,6 +33,7 @@ from schift_payment_kit_lifecycle.dunning import (
     retry_due,
     run_retry,
 )
+from helpers import FakeNativeProvider, FakeSelfSchedulingProvider
 
 PLAN = Plan(
     id="plan_a",

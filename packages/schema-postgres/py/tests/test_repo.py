@@ -11,8 +11,7 @@ from datetime import UTC, datetime, timedelta
 
 import psycopg
 import pytest
-from db_helper import create_test_db, drop_test_db
-from schift_payment_kit_core import (
+from boilpayment_core import (
     DEFAULT_POLICY,
     CsCase,
     Customer,
@@ -28,7 +27,8 @@ from schift_payment_kit_core import (
     UsageEvent,
     WebhookEventRecord,
 )
-from schift_payment_kit_schema_postgres import PostgresRepo
+from boilpayment_schema_postgres import PostgresRepo
+from db_helper import create_test_db, drop_test_db
 
 
 def test_customers_roundtrip():

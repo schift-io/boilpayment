@@ -5,8 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
-from helpers import FakeNativeProvider, FakeSelfSchedulingProvider
-from schift_payment_kit_core import (
+from boilpayment_core import (
     FixedClock,
     InMemoryLedger,
     InMemoryRepo,
@@ -19,7 +18,8 @@ from schift_payment_kit_core import (
     Subscription,
     resolve_policy,
 )
-from schift_payment_kit_lifecycle import DowngradeInput, downgrade
+from boilpayment_lifecycle import DowngradeInput, downgrade
+from helpers import FakeNativeProvider, FakeSelfSchedulingProvider
 
 PLAN_A = Plan(
     id="plan_a",

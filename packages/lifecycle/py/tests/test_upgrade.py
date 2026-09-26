@@ -6,8 +6,7 @@ import asyncio
 from datetime import UTC, datetime
 
 import pytest
-from helpers import FakeNativeProvider, FakeSelfSchedulingProvider
-from schift_payment_kit_core import (
+from boilpayment_core import (
     FixedClock,
     InMemoryLedger,
     InMemoryRepo,
@@ -18,7 +17,8 @@ from schift_payment_kit_core import (
     Subscription,
     resolve_policy,
 )
-from schift_payment_kit_lifecycle import UpgradeInput, upgrade
+from boilpayment_lifecycle import UpgradeInput, upgrade
+from helpers import FakeNativeProvider, FakeSelfSchedulingProvider
 
 PLAN_A = Plan(
     id="plan_a",
@@ -312,7 +312,7 @@ def test_j1_calling_upgrade_twice_with_default_key_grants_exactly_once():
 def test_j2_retried_upgrade_with_same_key_but_different_new_plan_raises_idempotency_key_reused():
     import dataclasses
 
-    from schift_payment_kit_core import PaymentKitError
+    from boilpayment_core import PaymentKitError
 
     async def scenario():
         clock, ledger, repo, ids = await setup()

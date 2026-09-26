@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen, resolvePolicy, type Subscription } from '@schift/payment-kit-core';
+import { FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen, resolvePolicy, type Subscription } from 'boilpayment-core';
 import { cancel, downgrade, reactivate, upgrade } from '../src/index.js';
 import { FakeNativeProvider, FakeSelfSchedulingProvider } from './helpers.js';
 

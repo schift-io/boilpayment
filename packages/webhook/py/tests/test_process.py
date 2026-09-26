@@ -1,4 +1,4 @@
-"""Phase 6 regression tests -- packages/webhook/py/src/schift_payment_kit_webhook/process.py
+"""Phase 6 regression tests -- packages/webhook/py/src/boilpayment_webhook/process.py
 + handlers.py wiring. Ground truth measured via
 `.venv/bin/python packages/webhook/py/examples/smoke.py` this session."""
 
@@ -9,7 +9,7 @@ import json
 from datetime import UTC, datetime
 
 from _helpers import FakeProvider, json_verify
-from schift_payment_kit_core import (
+from boilpayment_core import (
     DEFAULT_POLICY,
     CollectingNotifier,
     FixedClock,
@@ -21,7 +21,7 @@ from schift_payment_kit_core import (
     SequentialIdGen,
     Subscription,
 )
-from schift_payment_kit_webhook import default_handlers, process, receive
+from boilpayment_webhook import default_handlers, process, receive
 
 
 def _setup():

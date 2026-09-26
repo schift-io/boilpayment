@@ -1,6 +1,6 @@
 """Smoke test -- real code path through cs's own modules. `refund.evaluate`/`refund.execute` are
 imported from the sibling package -- both are already on `sys.path` via the uv workspace editable
-install (verified: `schift_payment_kit_refund` imports cleanly even though cs's pyproject.toml does
+install (verified: `boilpayment_refund` imports cleanly even though cs's pyproject.toml does
 not yet declare it as a dependency; see final report's "계약 변경 제안" re: adding it formally).
 Run: .venv/bin/python packages/cs/py/examples/smoke.py
 """
@@ -12,7 +12,7 @@ import dataclasses
 import json
 from datetime import UTC, datetime
 
-from schift_payment_kit_core import (
+from boilpayment_core import (
     DEFAULT_POLICY,
     Customer,
     FixedClock,
@@ -29,7 +29,7 @@ from schift_payment_kit_core import (
     Refund,
     SequentialIdGen,
 )
-from schift_payment_kit_cs import (
+from boilpayment_cs import (
     HttpLicenseReporter,
     Metrics,
     OpenCaseInput,
@@ -45,16 +45,16 @@ from schift_payment_kit_cs import (
     timeline,
     widget,
 )
-from schift_payment_kit_cs import (
+from boilpayment_cs import (
     dispute as cs_dispute,
 )
-from schift_payment_kit_cs import (
+from boilpayment_cs import (
     regrant as cs_regrant,
 )
-from schift_payment_kit_cs.dispute import DisputeInput
-from schift_payment_kit_refund import EvaluateInput, ExecuteInput
-from schift_payment_kit_refund import evaluate as refund_evaluate_raw
-from schift_payment_kit_refund import execute as refund_execute_raw
+from boilpayment_cs.dispute import DisputeInput
+from boilpayment_refund import EvaluateInput, ExecuteInput
+from boilpayment_refund import evaluate as refund_evaluate_raw
+from boilpayment_refund import execute as refund_execute_raw
 
 
 def _to_dict(obj):

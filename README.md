@@ -1,4 +1,6 @@
-# Schift Payment Kit
+# boilpayment
+
+Part of [Schift](https://schift.io)'s boil series, alongside [boilauth](https://github.com/schift-io/boilauth).
 
 Payment boilerplate that handles the part after "payment succeeded": failed payments, refunds,
 missing grants, pending refunds and usage overage. A wizard asks how you want each edge case
@@ -9,7 +11,7 @@ Providers: Stripe, Toss Payments, PortOne V2, Polar. Languages: TypeScript and P
 behaviour, checked by parity tests).
 
 ```bash
-npx @schift/payment-kit init
+npx boilpayment init
 ```
 
 ## What you get
@@ -34,9 +36,9 @@ Requires Node 20+, and Postgres for production storage.
 
 ```bash
 mkdir my-app && cd my-app && npm init -y && npm pkg set type=module
-npx @schift/payment-kit init              # interactive wizard
+npx boilpayment init              # interactive wizard
 # or accept defaults:
-npx @schift/payment-kit init --yes --providers stripe --languages ts,py
+npx boilpayment init --yes --providers stripe --languages ts,py
 ```
 
 The wizard writes:
@@ -54,11 +56,11 @@ paykit/migrations/*.sql Postgres schema (versioned)
 Then:
 
 ```bash
-npm i @schift/payment-kit-sdk          # TypeScript: one package, modules by subpath
-pip install schift-payment-kit         # Python: one package, modules by submodule
+npm i boilpayment-sdk          # TypeScript: one package, modules by subpath
+pip install boilpayment         # Python: one package, modules by submodule
 cp .env.example .env                   # fill in sandbox keys
-npx paykit migrate --dry-run && npx paykit migrate
-npx paykit check                       # read-only: config + schema version
+npx boilpayment migrate --dry-run && npx boilpayment migrate
+npx boilpayment check                       # read-only: config + schema version
 ```
 
 ## Usage
@@ -68,8 +70,8 @@ TypeScript:
 ```ts
 import config from './paykit.config.json' with { type: 'json' };
 import { createPaymentKit } from './paykit/index.js';
-import { SystemClock, UuidIdGen } from '@schift/payment-kit-sdk/core';
-import { createPool, PostgresRepo, PostgresLedgerStore } from '@schift/payment-kit-sdk/postgres';
+import { SystemClock, UuidIdGen } from 'boilpayment-sdk/core';
+import { createPool, PostgresRepo, PostgresLedgerStore } from 'boilpayment-sdk/postgres';
 
 const pool = createPool(process.env.DATABASE_URL!);
 const kit = createPaymentKit(config, {
@@ -101,8 +103,8 @@ await kit.support.recoverMissingGrant({ customerId, paymentId });
 Python:
 
 ```python
-from schift_payment_kit.core import Deps, SystemClock, UuidIdGen
-from schift_payment_kit.postgres import PostgresRepo, PostgresLedgerStore
+from boilpayment.core import Deps, SystemClock, UuidIdGen
+from boilpayment.postgres import PostgresRepo, PostgresLedgerStore
 from paykit.index import create_payment_kit
 
 db = os.environ["DATABASE_URL"]
@@ -124,8 +126,8 @@ Schedule the crons listed in your generated `INTEGRATION.md` (`dunningSweep`, `e
 
 | npm / PyPI | |
 |---|---|
-| `@schift/payment-kit` / — | Wizard CLI (`paykit init`, `migrate`, `check`, `live`) |
-| `@schift/payment-kit-sdk` / `schift-payment-kit` | Single-install facade that re-exports every module below |
+| `boilpayment` / — | Wizard CLI (`boilpayment init`, `migrate`, `check`, `live`) |
+| `boilpayment-sdk` / `boilpayment` | Single-install facade that re-exports every module below |
 | `-core` | Types, `Policy`, interfaces, in-memory ledger and repo |
 | `-credits` | Grant, consume, rollover, clawback, expire |
 | `-lifecycle` | Upgrade, downgrade, cancel, trial, dunning, self-scheduler |

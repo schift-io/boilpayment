@@ -7,7 +7,7 @@
 import {
   Clock, CsCase, CsCaseStatus, LedgerEntry, LedgerKind, LedgerStore, Money, Payment, PaymentStatus,
   Pool, Refund, Repo, Subscription, WebhookEventRecord, WebhookEventStatus, ZERO_DECIMAL_CURRENCIES,
-} from '@schift/payment-kit-core';
+} from 'boilpayment-core';
 
 // ── Public types ─────────────────────────────────────────────────────────────────────────
 

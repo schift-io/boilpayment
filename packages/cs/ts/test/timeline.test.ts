@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_POLICY, FixedClock, InMemoryLedger, InMemoryRepo, NormalizedEvent, Payment, Refund,
   SequentialIdGen, runIdempotent,
-} from '@schift/payment-kit-core';
+} from 'boilpayment-core';
 import { dispute, explain, timeline } from '../src/index.js';
 
 function sleep(ms: number): Promise<void> {

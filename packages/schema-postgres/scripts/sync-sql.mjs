@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const src = path.resolve(dir, '../sql');
-const dest = path.resolve(dir, '../py/src/schift_payment_kit_schema_postgres/sql');
+const dest = path.resolve(dir, '../py/src/boilpayment_schema_postgres/sql');
 
 await fs.mkdir(dest, { recursive: true });
 const names = (await fs.readdir(src)).filter((f) => f.endsWith('.sql'));

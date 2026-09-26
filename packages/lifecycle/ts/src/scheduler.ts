@@ -1,5 +1,5 @@
 // spec: packages/lifecycle/spec/lifecycle.pseudo.md — EC:F (Toss/Portone self-scheduling)
-import { Clock, IdGen, NoopNotifier, Notifier, PaymentKitError, PaymentProvider, Policy, Repo, LedgerStore, Subscription } from '@schift/payment-kit-core';
+import { Clock, IdGen, NoopNotifier, Notifier, PaymentKitError, PaymentProvider, Policy, Repo, LedgerStore, Subscription } from 'boilpayment-core';
 import { onRenewalPaid } from './renewal.js';
 import { onPaymentFailed } from './dunning.js';
 import { nextPeriod } from './period.js';

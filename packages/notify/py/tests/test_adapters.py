@@ -2,7 +2,7 @@
 real network call is ever attempted.
 
 resend() takes an explicit `client` override in its constructor (the DI seam the source already
-exposes -- see py/src/schift_payment_kit_notify/resend.py), so that seam is used directly.
+exposes -- see py/src/boilpayment_notify/resend.py), so that seam is used directly.
 
 slack() and smtp() have NO such seam: slack.py creates a fresh `httpx.AsyncClient()` inside
 send(), and smtp.py calls `smtplib.SMTP(host, port)` directly inside its sync worker. Per the
@@ -20,16 +20,16 @@ import asyncio
 import importlib
 import logging
 
-from schift_payment_kit_core import Notification
-from schift_payment_kit_notify import resend, slack, smtp
+from boilpayment_core import Notification
+from boilpayment_notify import resend, slack, smtp
 
-# `schift_payment_kit_notify/__init__.py` does `from .slack import slack` (and similarly for
+# `boilpayment_notify/__init__.py` does `from .slack import slack` (and similarly for
 # smtp), which rebinds the `slack`/`smtp` *attributes* on the package to the factory functions,
-# shadowing the auto-registered submodule attribute. `import schift_payment_kit_notify.slack as x`
+# shadowing the auto-registered submodule attribute. `import boilpayment_notify.slack as x`
 # would resolve through that shadowed attribute and hand back the function, not the module — so
 # fetch the actual submodule objects straight from sys.modules via importlib instead.
-slack_mod = importlib.import_module("schift_payment_kit_notify.slack")
-smtp_mod = importlib.import_module("schift_payment_kit_notify.smtp")
+slack_mod = importlib.import_module("boilpayment_notify.slack")
+smtp_mod = importlib.import_module("boilpayment_notify.smtp")
 
 NOTIFICATION = Notification(
     type="usage.soft_cap",
@@ -111,7 +111,7 @@ def test_notify_slack_adapter_non_2xx_response_does_not_raise_is_logged_and_swal
     )
 
     notifier = slack(webhook_url="https://hooks.slack.test/services/abc")
-    with caplog.at_level(logging.ERROR, logger="schift_payment_kit_notify"):
+    with caplog.at_level(logging.ERROR, logger="boilpayment_notify"):
         asyncio.run(notifier.send(NOTIFICATION))  # must not raise
 
     assert any("notify.slack non-2xx" in r.message for r in caplog.records)
@@ -129,7 +129,7 @@ def test_notify_slack_adapter_unreachable_host_does_not_raise_is_logged_and_swal
     )
     notifier = slack(webhook_url="https://hooks.slack.test/services/abc")
 
-    with caplog.at_level(logging.ERROR, logger="schift_payment_kit_notify"):
+    with caplog.at_level(logging.ERROR, logger="boilpayment_notify"):
         asyncio.run(notifier.send(NOTIFICATION))  # must not raise
 
     assert any("notify.slack failed" in r.message for r in caplog.records)
@@ -210,7 +210,7 @@ def test_notify_resend_adapter_non_2xx_response_does_not_raise_is_logged_and_swa
         api_key="sk_fake_123", from_="a@example.com", to="b@example.com", client=client
     )
 
-    with caplog.at_level(logging.ERROR, logger="schift_payment_kit_notify"):
+    with caplog.at_level(logging.ERROR, logger="boilpayment_notify"):
         asyncio.run(notifier.send(NOTIFICATION))  # must not raise
 
     assert any("notify.resend non-2xx" in r.message for r in caplog.records)
@@ -224,7 +224,7 @@ def test_notify_resend_adapter_network_down_does_not_raise_is_logged_and_swallow
         api_key="sk_fake_123", from_="a@example.com", to="b@example.com", client=client
     )
 
-    with caplog.at_level(logging.ERROR, logger="schift_payment_kit_notify"):
+    with caplog.at_level(logging.ERROR, logger="boilpayment_notify"):
         asyncio.run(notifier.send(NOTIFICATION))  # must not raise
 
     assert any("notify.resend failed" in r.message for r in caplog.records)
@@ -333,7 +333,7 @@ def test_notify_smtp_adapter_unreachable_host_does_not_raise_is_logged_and_swall
     )
     notifier = smtp(host="127.0.0.1", port=1, from_="a@example.com", to="b@example.com")
 
-    with caplog.at_level(logging.ERROR, logger="schift_payment_kit_notify"):
+    with caplog.at_level(logging.ERROR, logger="boilpayment_notify"):
         asyncio.run(notifier.send(NOTIFICATION))  # must not raise
 
     assert any("notify.smtp failed" in r.message for r in caplog.records)

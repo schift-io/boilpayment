@@ -11,8 +11,7 @@ import asyncio
 import dataclasses
 from datetime import UTC, datetime
 
-from fixtures import BASE_POLICY, mk_sub
-from schift_payment_kit_core import (
+from boilpayment_core import (
     DEFAULT_POLICY,
     FixedClock,
     InMemoryLedger,
@@ -21,10 +20,11 @@ from schift_payment_kit_core import (
     NewLedgerEntry,
     SequentialIdGen,
 )
-from schift_payment_kit_usage import UsageEventInput, check, record
-from schift_payment_kit_usage.record import (
+from boilpayment_usage import UsageEventInput, check, record
+from boilpayment_usage.record import (
     RecordResult,  # noqa: F401 (documents return type)
 )
+from fixtures import BASE_POLICY, mk_sub
 
 
 def harness():
@@ -492,7 +492,7 @@ def test_c8_sufficient_balance_consumes_and_allows():
     async def run():
         _ids, clock, ledger, repo = harness()
         sub = mk_sub()
-        from schift_payment_kit_core.types import CreditConversion
+        from boilpayment_core.types import CreditConversion
 
         policy = with_usage_policy(
             credit_conversion=CreditConversion(unit="call", credits_per_unit=10)
@@ -535,7 +535,7 @@ def test_c8_insufficient_balance_denies_and_leaves_balance_untouched():
     async def run():
         _ids, clock, ledger, repo = harness()
         sub = mk_sub()
-        from schift_payment_kit_core.types import CreditConversion
+        from boilpayment_core.types import CreditConversion
 
         policy = with_usage_policy(
             credit_conversion=CreditConversion(unit="call", credits_per_unit=10)
@@ -578,7 +578,7 @@ def test_c8_bypasses_quota_policy_entirely():
     async def run():
         _ids, clock, ledger, repo = harness()
         sub = mk_sub()
-        from schift_payment_kit_core.types import CreditConversion
+        from boilpayment_core.types import CreditConversion
 
         policy = with_usage_policy(
             included_quantity=0,

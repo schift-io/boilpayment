@@ -1,7 +1,7 @@
 // EC:D12 D15 J1 — provider transport uncertainty and local settlement retries.
 import { expect, it, vi } from 'vitest';
-import { FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen, resolvePolicy } from '@schift/payment-kit-core';
-import type { PaymentProvider, Refund, Money } from '@schift/payment-kit-core';
+import { FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen, resolvePolicy } from 'boilpayment-core';
+import type { PaymentProvider, Refund, Money } from 'boilpayment-core';
 import { evaluate, execute } from '../src/index.js';
 
 async function setup() {

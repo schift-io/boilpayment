@@ -11,7 +11,7 @@ import asyncio
 import json
 from datetime import UTC, datetime
 
-from schift_payment_kit_core import (
+from boilpayment_core import (
     Customer,
     FixedClock,
     InMemoryLedger,
@@ -25,7 +25,7 @@ from schift_payment_kit_core import (
     SequentialIdGen,
     resolve_policy,
 )
-from schift_payment_kit_cs import (
+from boilpayment_cs import (
     ExportCustomerInput,
     OpenCaseInput,
     export_customer,

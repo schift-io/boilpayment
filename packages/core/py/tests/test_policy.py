@@ -1,9 +1,9 @@
-"""policy validation errors -- packages/core/py/src/schift_payment_kit_core/policy.py"""
+"""policy validation errors -- packages/core/py/src/boilpayment_core/policy.py"""
 
 from __future__ import annotations
 
 import pytest
-from schift_payment_kit_core import PolicyValidationError, resolve_policy
+from boilpayment_core import PolicyValidationError, resolve_policy
 
 
 def test_resolve_policy_defaults():
@@ -65,7 +65,7 @@ def test_rejects_invalid_authority_configuration(patch):
 
 
 def test_retry_arrays_are_independent_of_input_and_serialized_output():
-    from schift_payment_kit_core.policy import policy_to_dict
+    from boilpayment_core.policy import policy_to_dict
 
     retries = [12]
     policy = resolve_policy({"dunning": {"retryIntervalHours": retries}})
@@ -84,7 +84,7 @@ def test_zero_authority_limits_and_positive_window_are_valid():
 def test_validate_policy_checks_direct_dataclass_values():
     from dataclasses import replace
 
-    from schift_payment_kit_core.policy import validate_policy
+    from boilpayment_core.policy import validate_policy
 
     policy = resolve_policy()
     invalid = replace(policy, cs=replace(policy.cs, fraud=replace(policy.cs.fraud, window_days=-1)))

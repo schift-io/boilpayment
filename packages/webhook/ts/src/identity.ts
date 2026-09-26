@@ -6,7 +6,7 @@
 // outside this app). Used by both receive() (first sighting) and process() (re-verified, may
 // resolve better once more local rows exist) so a customer-scoped CS timeline can query
 // webhook_events directly instead of a full table scan.
-import type { NormalizedEvent, PaymentProvider, Repo } from '@schift/payment-kit-core';
+import type { NormalizedEvent, PaymentProvider, Repo } from 'boilpayment-core';
 
 export interface WebhookIdentity {
   customerId: string | null;

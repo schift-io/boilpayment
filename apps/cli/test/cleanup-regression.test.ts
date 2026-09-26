@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { DEFAULT_POLICY } from '@schift/payment-kit-core';
+import { DEFAULT_POLICY } from 'boilpayment-core';
 import { emptyConfig } from '../src/config.js';
 import { computeWarnings, runCheck } from '../src/commands/check.js';
 import { generateIntegrationMd } from '../src/generate/integration-md.js';

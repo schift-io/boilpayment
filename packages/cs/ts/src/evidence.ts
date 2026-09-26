@@ -10,7 +10,7 @@
 // `available: false` with a `reason`, never a fabricated value.
 import {
   Clock, CsCase, LedgerEntry, LedgerStore, Notifier, Payment, Policy, Refund, Repo, Subscription, UsageEvent,
-} from '@schift/payment-kit-core';
+} from 'boilpayment-core';
 import { ACTIVE_STATUSES, escalate, OnCaseEvent } from './cases.js';
 
 // ── Public types ─────────────────────────────────────────────────────────────────────────

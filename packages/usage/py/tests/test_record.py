@@ -10,9 +10,9 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 
+from boilpayment_core import FixedClock, InMemoryRepo, Plan, SequentialIdGen
+from boilpayment_usage import UsageEventInput, record
 from fixtures import BASE_POLICY, FakeProvider, mk_sub
-from schift_payment_kit_core import FixedClock, InMemoryRepo, Plan, SequentialIdGen
-from schift_payment_kit_usage import UsageEventInput, record
 
 PLAN = Plan(
     id="plan_pro",

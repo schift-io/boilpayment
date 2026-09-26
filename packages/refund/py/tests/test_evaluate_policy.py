@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 import anyio
 import pytest
-from schift_payment_kit_core import (
+from boilpayment_core import (
     DEFAULT_POLICY,
     ConsumeInput,
     FixedClock,
@@ -18,7 +18,7 @@ from schift_payment_kit_core import (
     SequentialIdGen,
     resolve_policy,
 )
-from schift_payment_kit_refund import EvaluateInput, evaluate
+from boilpayment_refund import EvaluateInput, evaluate
 
 
 async def scenario(policy: Policy = DEFAULT_POLICY) -> EvaluateInput:

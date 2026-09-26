@@ -3,7 +3,7 @@
 import {
   DEFAULT_POLICY, FixedClock, InMemoryRepo, LedgerStore, NormalizedEvent, Notification, Notifier, Payment,
   PaymentProvider, ProviderName, Refund, SequentialIdGen, Subscription, WebhookSignatureError,
-} from '@schift/payment-kit-core';
+} from 'boilpayment-core';
 import { defaultHandlers, getGrantsForCheckout, process as processWebhook, receive } from '../src/index.js';
 import type { LifecycleDeps } from '../src/index.js';
 

@@ -18,10 +18,10 @@ import {
   SequentialIdGen,
   Subscription,
   resolvePolicy,
-} from '@schift/payment-kit-core';
-import { upgrade, downgrade, dunning } from '@schift/payment-kit-lifecycle';
-import { onRenewalPaid } from '@schift/payment-kit-lifecycle';
-import { consume, manualRevoke, notifyExpiring } from '@schift/payment-kit-credits';
+} from 'boilpayment-core';
+import { upgrade, downgrade, dunning } from 'boilpayment-lifecycle';
+import { onRenewalPaid } from 'boilpayment-lifecycle';
+import { consume, manualRevoke, notifyExpiring } from 'boilpayment-credits';
 
 // Minimal canned PaymentProvider — only changeSubscription is actually invoked by this scenario
 // (upgrade/downgrade), and its return value is discarded by lifecycle. Everything else throws if

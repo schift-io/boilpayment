@@ -10,8 +10,8 @@ import dataclasses
 import json
 
 import httpx
-from schift_payment_kit_core import WebhookSignatureError
-from schift_payment_kit_toss import (
+from boilpayment_core import WebhookSignatureError
+from boilpayment_toss import (
     TossProvider,
     TossProviderConfig,
     map_toss_webhook,
@@ -139,7 +139,7 @@ async def main() -> None:
             str(e),
         )
 
-    from schift_payment_kit_core import Money
+    from boilpayment_core import Money
 
     refund = await provider.refund(
         payment_ref="VA_KEY",

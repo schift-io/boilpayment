@@ -1,7 +1,7 @@
 // EC:C2 C9 — see spec/usage.pseudo.md. Regression for audit gap #3: usage that lands inside the
 // late-report window AFTER closePeriod() ran was never billed.
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_POLICY, FixedClock, InMemoryRepo, SequentialIdGen } from '@schift/payment-kit-core';
+import { DEFAULT_POLICY, FixedClock, InMemoryRepo, SequentialIdGen } from 'boilpayment-core';
 import { closePeriod } from '../src/closePeriod.js';
 import { record } from '../src/record.js';
 import { resettlePeriod } from '../src/resettlePeriod.js';

@@ -1,4 +1,4 @@
-# @schift/payment-kit-webhook
+# boilpayment-webhook
 
 Provider-agnostic webhook pipeline: `receive` (verify signature, dedupe, persist), `process` /
 `processPending` (dispatch to handlers with retry), `defaultHandlers` (wires lifecycle / credits /
@@ -7,13 +7,13 @@ refund / cs together), and a Node/Fetch HTTP adapter.
 ## Install
 
 ```
-npm install @schift/payment-kit-webhook @schift/payment-kit-core
+npm install boilpayment-webhook boilpayment-core
 ```
 
 ## Usage
 
 ```ts
-import { receive, process, defaultHandlers, createNodeHandler } from '@schift/payment-kit-webhook';
+import { receive, process, defaultHandlers, createNodeHandler } from 'boilpayment-webhook';
 
 const handlers = defaultHandlers({ policy, ledger, repo, notifier, clock, ids });
 
@@ -26,4 +26,4 @@ if (result.status === 200 && result.eventId) {
 }
 ```
 
-Full module contract: [docs/ARCHITECTURE.md §3.5](https://github.com/schift-io/payment-kit/blob/main/docs/ARCHITECTURE.md).
+Full module contract: [docs/ARCHITECTURE.md §3.5](https://github.com/schift-io/boilpayment/blob/main/docs/ARCHITECTURE.md).

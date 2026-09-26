@@ -3,7 +3,7 @@
 // other 3 providers), so before this change every portone `provider.request` log line had no
 // correlationId whatsoever; withCorrelationId() is the only source now.
 import { describe, it, expect } from 'vitest';
-import { CollectingLogger } from '@schift/payment-kit-core';
+import { CollectingLogger } from 'boilpayment-core';
 import { PortoneProvider } from '../src/index.js';
 
 function jsonResponse(body: unknown, status = 200): Response {

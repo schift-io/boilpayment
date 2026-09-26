@@ -12,7 +12,7 @@ import dataclasses
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from schift_payment_kit_core import (
+from boilpayment_core import (
     Checkout,
     CollectingNotifier,
     CreateCheckoutInput,
@@ -33,7 +33,7 @@ from schift_payment_kit_core import (
     Subscription,
     resolve_policy,
 )
-from schift_payment_kit_credits import (
+from boilpayment_credits import (
     ConsumeCreditsInput,
     ManualAdjustInput,
     NotifyExpiringInput,
@@ -41,7 +41,7 @@ from schift_payment_kit_credits import (
     manual_revoke,
     notify_expiring,
 )
-from schift_payment_kit_lifecycle import (
+from boilpayment_lifecycle import (
     DowngradeInput,
     OnRenewalPaidInput,
     UpgradeInput,
@@ -49,7 +49,7 @@ from schift_payment_kit_lifecycle import (
     on_renewal_paid,
     upgrade,
 )
-from schift_payment_kit_lifecycle.dunning import (
+from boilpayment_lifecycle.dunning import (
     OnPaymentFailedInput,
     OnRecoveredInput,
     RetryDueInput,

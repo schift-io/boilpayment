@@ -1,5 +1,5 @@
 // Durable delivery via repo.outbox. See spec/notify.pseudo.md.
-import type { Clock, Notification, Notifier, OutboxItem, Repo } from '@schift/payment-kit-core';
+import type { Clock, Notification, Notifier, OutboxItem, Repo } from 'boilpayment-core';
 
 function randomId(): string {
   const g = globalThis as { crypto?: { randomUUID?: () => string } };

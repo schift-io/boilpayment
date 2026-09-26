@@ -1,5 +1,5 @@
 // Shared helpers, not part of the public spec surface.
-import { Clock, LedgerEntry, LedgerReference, LedgerStore, PaymentProvider, Plan, Pool, ProviderName } from '@schift/payment-kit-core';
+import { Clock, LedgerEntry, LedgerReference, LedgerStore, PaymentProvider, Plan, Pool, ProviderName } from 'boilpayment-core';
 
 export function resolvePriceRef(plan: Plan, provider: ProviderName): string {
   const withRef = plan.prices.find((p) => p.providerPriceRefs?.[provider]);

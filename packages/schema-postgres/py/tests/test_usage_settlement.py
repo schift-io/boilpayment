@@ -5,8 +5,7 @@ from datetime import UTC, datetime
 
 import anyio
 import pytest
-from db_helper import create_test_db, drop_test_db
-from schift_payment_kit_core import (
+from boilpayment_core import (
     DEFAULT_POLICY,
     Customer,
     FixedClock,
@@ -20,8 +19,9 @@ from schift_payment_kit_core import (
     Subscription,
     UsageEvent,
 )
-from schift_payment_kit_schema_postgres import PostgresLedgerStore, PostgresRepo
-from schift_payment_kit_usage import settle_period
+from boilpayment_schema_postgres import PostgresLedgerStore, PostgresRepo
+from boilpayment_usage import settle_period
+from db_helper import create_test_db, drop_test_db
 
 
 class BillingProvider:

@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
-import { DEFAULT_POLICY, FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen, resolvePolicy } from '@schift/payment-kit-core';
-import type { Payment, Policy } from '@schift/payment-kit-core';
+import { DEFAULT_POLICY, FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen, resolvePolicy } from 'boilpayment-core';
+import type { Payment, Policy } from 'boilpayment-core';
 import { evaluate } from '../src/evaluate.js';
 
 async function scenario(policy: Policy = DEFAULT_POLICY) {

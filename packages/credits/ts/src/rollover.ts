@@ -1,5 +1,5 @@
 // spec: packages/credits/spec/credits.pseudo.md — EC:B1 B2
-import { Clock, LedgerEntry, LedgerStore, Period, Policy, Subscription } from '@schift/payment-kit-core';
+import { Clock, LedgerEntry, LedgerStore, Period, Policy, Subscription } from 'boilpayment-core';
 
 export interface RolloverInput {
   sub: Subscription;

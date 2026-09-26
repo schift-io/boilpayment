@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createPaymentKit } from './paykit/index.ts';
-import { InMemoryRepo, InMemoryLedger, FixedClock, SequentialIdGen, NoopLogger, CollectingNotifier } from '@schift/payment-kit-sdk/core';
-import { PortoneProvider } from '@schift/payment-kit-sdk/portone';
-import { createPool, migrate, PostgresRepo, PostgresLedgerStore } from '@schift/payment-kit-sdk/postgres';
+import { InMemoryRepo, InMemoryLedger, FixedClock, SequentialIdGen, NoopLogger, CollectingNotifier } from 'boilpayment-sdk/core';
+import { PortoneProvider } from 'boilpayment-sdk/portone';
+import { createPool, migrate, PostgresRepo, PostgresLedgerStore } from 'boilpayment-sdk/postgres';
 
 const config = JSON.parse(await readFile('./paykit.config.json', 'utf8'));
 const base = process.env.STEP1_MOCK_URL;

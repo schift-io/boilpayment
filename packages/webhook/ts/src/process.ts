@@ -1,5 +1,5 @@
 // EC:E3 EC:E13 L5 — see spec/webhook.pseudo.md
-import type { Clock, Logger, NormalizedEvent, NormalizedEventType, PaymentProvider, ProviderName, Repo } from '@schift/payment-kit-core';
+import type { Clock, Logger, NormalizedEvent, NormalizedEventType, PaymentProvider, ProviderName, Repo } from 'boilpayment-core';
 import { resolveWebhookIdentity } from './identity.js';
 import { mintCorrelationId } from './correlation.js';
 

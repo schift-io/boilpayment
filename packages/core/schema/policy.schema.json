@@ -1,8 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://schift.io/schemas/payment-kit/policy.schema.json",
+  "$id": "https://schift.io/schemas/boilpayment/policy.schema.json",
   "title": "Policy",
-  "description": "Schift Payment Kit policy (paykit.config.json `policy` field). Mirrors packages/core/ts/src/policy.ts / packages/core/py/src/schift_payment_kit_core/policy.py exactly (camelCase). Defaults are the bold values in docs/EDGE_CASES.md.",
+  "description": "boilpayment policy (paykit.config.json `policy` field). Mirrors packages/core/ts/src/policy.ts / packages/core/py/src/boilpayment_core/policy.py exactly (camelCase). Defaults are the bold values in docs/EDGE_CASES.md.",
   "type": "object",
   "additionalProperties": false,
   "required": [

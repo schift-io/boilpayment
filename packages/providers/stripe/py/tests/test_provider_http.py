@@ -17,14 +17,14 @@ from urllib.parse import parse_qs
 
 import pytest
 from _fake_http import install_http_mock
-from schift_payment_kit_core import (
+from boilpayment_core import (
     CreateCheckoutInput,
     Money,
     PaymentKitError,
     Plan,
     PlanPrice,
 )
-from schift_payment_kit_stripe import StripeProvider
+from boilpayment_stripe import StripeProvider
 
 SECRET_KEY = "sk_test_dummy_secret"
 

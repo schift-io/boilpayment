@@ -2,11 +2,11 @@
 import {
   Clock, IdGen, LedgerStore, PaymentKitError, PaymentProvider, Policy, Refund, RefundDecision, Repo,
   deserializeRefund, runIdempotent, serializeRefund,
-} from '@schift/payment-kit-core';
+} from 'boilpayment-core';
 import { requestRefund } from './execute-request.js';
 import { settleRefund } from './execute-settle.js';
 
-/** Injected instead of importing `@schift/payment-kit-cs` directly — keeps refund decoupled from cs (EC:D12). */
+/** Injected instead of importing `boilpayment-cs` directly — keeps refund decoupled from cs (EC:D12). */
 export interface RefundFailedCaseOpener {
   /** `needs` flags a structured follow-up the case needs before a human can act, e.g. EC:D13
    *  'refund_receive_account' for Toss virtual-account refunds missing `extra.refundReceiveAccount`,

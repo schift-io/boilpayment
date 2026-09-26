@@ -1,5 +1,5 @@
-import { PaymentKitError, runIdempotent } from '@schift/payment-kit-core';
-import type { Checkout, Payment, ProviderName } from '@schift/payment-kit-core';
+import { PaymentKitError, runIdempotent } from 'boilpayment-core';
+import type { Checkout, Payment, ProviderName } from 'boilpayment-core';
 import type { SupportDeps } from './support.js';
 import { parseCheckoutSnapshot, parsePurchaseSnapshot, matchesCheckoutPayment } from './purchaseSnapshot.js';
 import type { CheckoutSnapshot, PurchaseSnapshot } from './purchaseSnapshot.js';

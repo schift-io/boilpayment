@@ -2,7 +2,7 @@
 // a fixed correlationId, overriding the Idempotency-Key-header-derived default, without touching
 // the PaymentProvider interface (duck-typed, not declared there).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CollectingLogger } from '@schift/payment-kit-core';
+import { CollectingLogger } from 'boilpayment-core';
 import { PolarProvider } from '../src/index.js';
 
 function jsonResponse(body: unknown, status = 200): Response {

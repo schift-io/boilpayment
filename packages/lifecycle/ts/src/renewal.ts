@@ -1,6 +1,6 @@
 // spec: packages/lifecycle/spec/lifecycle.pseudo.md — EC:A7 A15 A17 B12
-import { Clock, LedgerStore, PaymentKitError, Payment, Policy, Repo, Subscription } from '@schift/payment-kit-core';
-import { grantForPeriod, GrantResult, rolloverOnRenewal, RolloverResult } from '@schift/payment-kit-credits';
+import { Clock, LedgerStore, PaymentKitError, Payment, Policy, Repo, Subscription } from 'boilpayment-core';
+import { grantForPeriod, GrantResult, rolloverOnRenewal, RolloverResult } from 'boilpayment-credits';
 
 export interface OnRenewalPaidInput {
   sub: Subscription;

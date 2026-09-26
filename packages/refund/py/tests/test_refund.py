@@ -12,7 +12,7 @@ import dataclasses
 from datetime import UTC, datetime
 
 import pytest
-from schift_payment_kit_core import (
+from boilpayment_core import (
     DEFAULT_POLICY,
     FixedClock,
     InMemoryLedger,
@@ -27,7 +27,7 @@ from schift_payment_kit_core import (
     SequentialIdGen,
     resolve_policy,
 )
-from schift_payment_kit_refund import (
+from boilpayment_refund import (
     EvaluateInput,
     ExecuteInput,
     OnExternalRefundInput,
@@ -232,7 +232,7 @@ async def do_grant(
 
 
 async def do_consume(ledger, clock, policy, amount: int, key: str):
-    from schift_payment_kit_core import ConsumeInput
+    from boilpayment_core import ConsumeInput
 
     return await ledger.consume(
         ConsumeInput(
@@ -318,7 +318,7 @@ def test_d2_time_prorated_d3_within_elapsed_ratio_no_deny_floor_rounding():
     async def run():
         clock, _ids, ledger, repo, policy = make_env()
         pol = resolve_policy({"refund": {"method": "time_prorated"}})
-        from schift_payment_kit_core import Period
+        from boilpayment_core import Period
 
         period = Period(
             start=datetime(2026, 1, 1, tzinfo=UTC),
@@ -360,7 +360,7 @@ def test_d3_overuse_denies_time_prorated_when_deny_default():
     async def run():
         clock, _ids, ledger, repo, policy = make_env()
         pol = resolve_policy({"refund": {"method": "time_prorated"}})
-        from schift_payment_kit_core import Period
+        from boilpayment_core import Period
 
         period = Period(
             start=datetime(2026, 1, 1, tzinfo=UTC),
@@ -406,7 +406,7 @@ def test_d3_refund_time_prorated_anyway_computes_refund_despite_overuse():
                 }
             }
         )
-        from schift_payment_kit_core import Period
+        from boilpayment_core import Period
 
         period = Period(
             start=datetime(2026, 1, 1, tzinfo=UTC),
@@ -448,7 +448,7 @@ def test_d2_min_of_both_picks_unused_credits_when_smaller():
     async def run():
         clock, _ids, ledger, repo, policy = make_env()
         pol = resolve_policy({"refund": {"method": "min_of_both"}})
-        from schift_payment_kit_core import Period
+        from boilpayment_core import Period
 
         period = Period(
             start=datetime(2026, 1, 1, tzinfo=UTC),
@@ -487,7 +487,7 @@ def test_d2_min_of_both_picks_time_prorated_when_smaller():
     async def run():
         clock, _ids, ledger, repo, policy = make_env()
         pol = resolve_policy({"refund": {"method": "min_of_both"}})
-        from schift_payment_kit_core import Period
+        from boilpayment_core import Period
 
         period = Period(
             start=datetime(2026, 1, 1, tzinfo=UTC),

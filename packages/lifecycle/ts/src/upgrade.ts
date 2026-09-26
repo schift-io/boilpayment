@@ -16,7 +16,7 @@ import {
   runIdempotent,
   serializeLedgerEntry,
   serializeSubscription,
-} from '@schift/payment-kit-core';
+} from 'boilpayment-core';
 import { nextPeriod, prorationRatio } from './period.js';
 import { resolvePriceRef, scopeProvider } from './internal.js';
 

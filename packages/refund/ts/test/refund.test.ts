@@ -10,7 +10,7 @@ import {
   SequentialIdGen,
   PaymentKitError,
   resolvePolicy,
-} from '@schift/payment-kit-core';
+} from 'boilpayment-core';
 import type {
   Payment,
   PaymentProvider,
@@ -19,7 +19,7 @@ import type {
   NormalizedEvent,
   Policy,
   Money,
-} from '@schift/payment-kit-core';
+} from 'boilpayment-core';
 import { evaluate, execute, onExternalRefund } from '../src/index.js';
 import type { ReconcileMismatchCaseOpener } from '../src/external.js';
 

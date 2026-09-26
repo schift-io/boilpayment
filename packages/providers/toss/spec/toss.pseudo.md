@@ -114,7 +114,7 @@ listPayments({customerRef, since}) -> Payment[]:
 - **24시간 범위**: 다른 상점(`mId: tvivarepublica2` 등, 이 공개 문서용 키를 공유하는 다른 테스터의
   거래)의 행이 섞여 나옴 — `matched = raw.filter(t => t.customerKey == customerRef)` 로 걸러지긴
   하지만, `/v1/transactions` 자체가 **상점 경계도 안전하게 안 지켜진다**는 뜻이므로 신뢰도가 더 낮다.
-- 결론: `listPayments` 는 "호출이 성공한다"는 것 이상을 보장하지 않는다. `paykit live`/
+- 결론: `listPayments` 는 "호출이 성공한다"는 것 이상을 보장하지 않는다. `boilpayment live`/
   `examples/live/real_round_trip.py` 는 이 호출을 PASS 로 기록하되 **방금 만든 결제가 포함되는지는
   단언하지 않는다** — 위 실측 결과가 근거다.
 

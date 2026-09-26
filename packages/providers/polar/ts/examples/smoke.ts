@@ -12,7 +12,7 @@ import {
   toNormalizedEvent,
   verifyStandardWebhookSignature,
 } from '../src/index.js';
-import { WebhookSignatureError } from '@schift/payment-kit-core';
+import { WebhookSignatureError } from 'boilpayment-core';
 
 function signStandardWebhook(id: string, timestamp: string, body: string, secret: string): string {
   const secretRaw = secret.startsWith('whsec_') ? secret.slice('whsec_'.length) : secret;

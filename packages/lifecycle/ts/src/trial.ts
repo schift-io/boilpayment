@@ -14,7 +14,7 @@ import {
   runIdempotent,
   serializeLedgerEntry,
   serializeSubscription,
-} from '@schift/payment-kit-core';
+} from 'boilpayment-core';
 import { revokePoolBalance } from './internal.js';
 
 export interface ConvertTrialInput {

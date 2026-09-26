@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
-from schift_payment_kit_core import (
+from boilpayment_core import (
     DEFAULT_POLICY,
     CsCase,
     Customer,
@@ -35,7 +35,7 @@ from schift_payment_kit_core import (
     resolve_policy,
     run_idempotent,
 )
-from schift_payment_kit_cs import (
+from boilpayment_cs import (
     DisputeInput,
     TimelineOptions,
     dispute,

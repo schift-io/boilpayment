@@ -1,6 +1,6 @@
 /**
- * Schift Payment Kit — core contract.
- * Mirrors packages/core/py/src/schift_payment_kit_core/types.py exactly (camelCase ↔ snake_case).
+ * boilpayment — core contract.
+ * Mirrors packages/core/py/src/boilpayment_core/types.py exactly (camelCase ↔ snake_case).
  * See docs/ARCHITECTURE.md §3.
  */
 

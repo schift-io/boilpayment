@@ -1,20 +1,20 @@
-# schift-payment-kit-polar
+# boilpayment-polar
 
-Polar implementation of `schift-payment-kit-core`'s `PaymentProvider` protocol: checkout, native
+Polar implementation of `boilpayment-core`'s `PaymentProvider` protocol: checkout, native
 subscriptions, refunds, Standard Webhooks verification, and normalizers from Polar's REST API
 responses to the kit's `Payment`/`Subscription`/`Refund` types.
 
 ## Install
 
 ```
-pip install schift-payment-kit-polar
+pip install boilpayment-polar
 ```
 
 ## Usage
 
 ```python
-from schift_payment_kit_polar import PolarProvider
-from schift_payment_kit_core import CreateCheckoutInput
+from boilpayment_polar import PolarProvider
+from boilpayment_core import CreateCheckoutInput
 
 provider = PolarProvider(
     access_token=os.environ["POLAR_ACCESS_TOKEN"],
@@ -29,5 +29,5 @@ checkout = await provider.create_checkout(CreateCheckoutInput(
 ))
 ```
 
-`PolarProvider` is passed as the `provider` dependency to `schift-payment-kit-lifecycle`,
-`schift-payment-kit-refund`, `schift-payment-kit-usage`, and `schift-payment-kit-webhook`.
+`PolarProvider` is passed as the `provider` dependency to `boilpayment-lifecycle`,
+`boilpayment-refund`, `boilpayment-usage`, and `boilpayment-webhook`.

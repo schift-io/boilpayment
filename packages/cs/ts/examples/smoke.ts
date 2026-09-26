@@ -1,11 +1,11 @@
 // Smoke test — real code path through cs's own modules. `refund.evaluate`/`refund.execute` are
 // imported from the sibling package by relative path (cs has no workspace dependency on
-// @schift/payment-kit-refund — see ARCHITECTURE.md "새 의존성이 필요하면 ... 우회한다" and the final
+// boilpayment-refund — see ARCHITECTURE.md "새 의존성이 필요하면 ... 우회한다" and the final
 // report's "계약 변경 제안"). Run: node <tsx> packages/cs/ts/examples/smoke.ts
 import {
   Customer, DEFAULT_POLICY, FixedClock, InMemoryLedger, InMemoryRepo, NormalizedEvent, Payment,
   PaymentKitError, PaymentProvider, Policy, Refund, SequentialIdGen,
-} from '@schift/payment-kit-core';
+} from 'boilpayment-core';
 import { evaluate as refundEvaluate, execute as refundExecute } from '../../../refund/ts/src/index.js';
 import {
   dispute, explain, HttpLicenseReporter, Metrics, openCase, reconcile, refundAssist, regrant, timeline, widget,

@@ -1,8 +1,8 @@
 // EC:C2 EC:C3 EC:C4 EC:C7 — see spec/usage.pseudo.md
 import type {
   Clock, IdGen, OutboxItem, PaymentProvider, Plan, Policy, Repo, Subscription, UsageEvent,
-} from '@schift/payment-kit-core';
-import { periodContaining } from '@schift/payment-kit-core';
+} from 'boilpayment-core';
+import { periodContaining } from 'boilpayment-core';
 import { hoursBetween, previousPeriodStart } from './period.js';
 
 export interface UsageEventInput {

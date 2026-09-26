@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
-import { FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen, resolvePolicy } from '@schift/payment-kit-core';
-import type { Payment, PaymentProvider, Refund } from '@schift/payment-kit-core';
+import { FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen, resolvePolicy } from 'boilpayment-core';
+import type { Payment, PaymentProvider, Refund } from 'boilpayment-core';
 import { topup, grantForPeriod } from '../../../credits/ts/src/index.js';
 import { requestRefund, recoverMissingGrant, resolveTopupCredits, startCheckout, registerCompletedCheckout, finishRefundCases } from '../src/index.js';
 

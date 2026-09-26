@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { describe, it, expect, afterAll } from 'vitest';
 import { Pool } from 'pg';
-import type { Customer } from '@schift/payment-kit-core';
+import type { Customer } from 'boilpayment-core';
 import { PostgresLedgerStore, PostgresRepo } from '../dist/index.js';
 import { createTestDb, dropTestDb, type TestDb } from './db-helper.js';
 

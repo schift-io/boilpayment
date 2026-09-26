@@ -9,8 +9,8 @@
 // "계약 변경 제안". `append()`-based operations (grant/topup/clawback/regrant/dispute/refund) are
 // unaffected — InMemoryLedger.append() stores whatever `reference` it is given verbatim.
 import { describe, expect, it } from 'vitest';
-import { FixedClock, resolvePolicy } from '@schift/payment-kit-core';
-import type { ConsumeInput, ConsumeResult, LedgerStore } from '@schift/payment-kit-core';
+import { FixedClock, resolvePolicy } from 'boilpayment-core';
+import type { ConsumeInput, ConsumeResult, LedgerStore } from 'boilpayment-core';
 import { consume } from '../src/index.js';
 
 const clock = new FixedClock(new Date('2024-01-01T00:00:00.000Z'));

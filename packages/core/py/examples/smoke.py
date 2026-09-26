@@ -9,7 +9,7 @@ import asyncio
 import json
 from datetime import UTC, datetime, timedelta
 
-from schift_payment_kit_core import (
+from boilpayment_core import (
     ConsumeInput,
     FixedClock,
     InMemoryLedger,

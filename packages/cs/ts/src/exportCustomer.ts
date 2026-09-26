@@ -7,7 +7,7 @@
 // Relationship to EC:H2 (deletion vs 전자상거래법 5-year retention): this function only READS and
 // never deletes anything. H2's answer (anonymize `customers` PII, keep the ledger) is unaffected —
 // export is always safe to run; deletion is a separate, harder decision this function does not make.
-import { Clock, LedgerStore, Payment, Refund, Repo, Subscription, UsageEvent, redact } from '@schift/payment-kit-core';
+import { Clock, LedgerStore, Payment, Refund, Repo, Subscription, UsageEvent, redact } from 'boilpayment-core';
 import { timeline, TimelineResult } from './timeline.js';
 
 export interface ExportCustomerInput {
@@ -16,7 +16,7 @@ export interface ExportCustomerInput {
   ledger: LedgerStore;
   clock: Clock;
   /**
-   * Default true — every field is passed through `@schift/payment-kit-core` `redact()` before
+   * Default true — every field is passed through `boilpayment-core` `redact()` before
    * being returned, so card numbers / 주민번호 / API secrets never leave the kit in the clear.
    * Pass `false` ONLY when legally answering a subject access request that requires the raw
    * values — never as a default, never for anything other than that request.

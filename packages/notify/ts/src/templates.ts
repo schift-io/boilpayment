@@ -1,5 +1,5 @@
 // Templates per NotifyType, EN + KO. Plain string interpolation, no engine dep.
-import type { Notification, NotifyType } from '@schift/payment-kit-core';
+import type { Notification, NotifyType } from 'boilpayment-core';
 
 export type Locale = 'en' | 'ko';
 export interface Rendered { subject: string; text: string }

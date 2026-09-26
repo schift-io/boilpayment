@@ -10,14 +10,14 @@ import uuid
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
-from db_helper import create_test_db, drop_test_db
-from schift_payment_kit_core import DEFAULT_POLICY, Customer, FixedClock, Operation
-from schift_payment_kit_schema_postgres import (
+from boilpayment_core import DEFAULT_POLICY, Customer, FixedClock, Operation
+from boilpayment_schema_postgres import (
     PostgresLogger,
     PostgresRepo,
     connection,
     prune_retention,
 )
+from db_helper import create_test_db, drop_test_db
 
 CLOCK = FixedClock(datetime(2026, 6, 1, tzinfo=UTC))
 POLICY = replace(

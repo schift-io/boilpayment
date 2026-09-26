@@ -1,28 +1,28 @@
 [project]
-name = "schift-payment-kit-monorepo"
+name = "boilpayment-monorepo"
 version = "0.0.0"
 requires-python = ">=3.11"
 dependencies = [
-  "schift-payment-kit-core",
-  "schift-payment-kit-credits",
-  "schift-payment-kit-usage",
-  "schift-payment-kit-lifecycle",
-  "schift-payment-kit-refund",
-  "schift-payment-kit-webhook",
-  "schift-payment-kit-notify",
-  "schift-payment-kit-cs",
-  "schift-payment-kit-schema-postgres",
-  "schift-payment-kit-stripe",
-  "schift-payment-kit-polar",
-  "schift-payment-kit-toss",
-  "schift-payment-kit-portone",
-  "schift-payment-kit",
+  "boilpayment-core",
+  "boilpayment-credits",
+  "boilpayment-usage",
+  "boilpayment-lifecycle",
+  "boilpayment-refund",
+  "boilpayment-webhook",
+  "boilpayment-notify",
+  "boilpayment-cs",
+  "boilpayment-schema-postgres",
+  "boilpayment-stripe",
+  "boilpayment-polar",
+  "boilpayment-toss",
+  "boilpayment-portone",
+  "boilpayment",
 ]
 
 [project.urls]
-Homepage = "https://github.com/schift-io/payment-kit#readme"
-Repository = "https://github.com/schift-io/payment-kit.git"
-Issues = "https://github.com/schift-io/payment-kit/issues"
+Homepage = "https://github.com/schift-io/boilpayment#readme"
+Repository = "https://github.com/schift-io/boilpayment.git"
+Issues = "https://github.com/schift-io/boilpayment/issues"
 
 [tool.uv]
 package = false
@@ -34,20 +34,20 @@ members = [
 ]
 
 [tool.uv.sources]
-schift-payment-kit-core = { workspace = true }
-schift-payment-kit-credits = { workspace = true }
-schift-payment-kit-usage = { workspace = true }
-schift-payment-kit-lifecycle = { workspace = true }
-schift-payment-kit-refund = { workspace = true }
-schift-payment-kit-webhook = { workspace = true }
-schift-payment-kit-notify = { workspace = true }
-schift-payment-kit-cs = { workspace = true }
-schift-payment-kit-schema-postgres = { workspace = true }
-schift-payment-kit-stripe = { workspace = true }
-schift-payment-kit-polar = { workspace = true }
-schift-payment-kit-toss = { workspace = true }
-schift-payment-kit-portone = { workspace = true }
-schift-payment-kit = { workspace = true }
+boilpayment-core = { workspace = true }
+boilpayment-credits = { workspace = true }
+boilpayment-usage = { workspace = true }
+boilpayment-lifecycle = { workspace = true }
+boilpayment-refund = { workspace = true }
+boilpayment-webhook = { workspace = true }
+boilpayment-notify = { workspace = true }
+boilpayment-cs = { workspace = true }
+boilpayment-schema-postgres = { workspace = true }
+boilpayment-stripe = { workspace = true }
+boilpayment-polar = { workspace = true }
+boilpayment-toss = { workspace = true }
+boilpayment-portone = { workspace = true }
+boilpayment = { workspace = true }
 
 [dependency-groups]
 dev = ["pytest>=8", "ruff>=0.6"]

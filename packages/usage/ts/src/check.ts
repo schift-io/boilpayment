@@ -1,5 +1,5 @@
 // EC:C1 EC:C5 EC:C6 EC:A14 EC:C8 — see spec/usage.pseudo.md
-import type { Clock, ConsumeOrder, IdGen, LedgerStore, Policy, Pool, Repo, Subscription, UsageEvent } from '@schift/payment-kit-core';
+import type { Clock, ConsumeOrder, IdGen, LedgerStore, Policy, Pool, Repo, Subscription, UsageEvent } from 'boilpayment-core';
 
 const POOL_ORDER: Record<ConsumeOrder, Pool[]> = {
   expiring_first: ['paid', 'promo', 'trial'],

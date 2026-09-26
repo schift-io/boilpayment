@@ -1,5 +1,5 @@
 // EC:C2 C9 — see spec/usage.pseudo.md
-import type { Clock, Money, Policy, Repo, Subscription, UsageEvent } from '@schift/payment-kit-core';
+import type { Clock, Money, Policy, Repo, Subscription, UsageEvent } from 'boilpayment-core';
 import { billingCurrency } from './billingCurrency.js';
 
 export interface ResettlePeriodInput {

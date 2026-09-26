@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 
 import httpx
-from schift_payment_kit_core import CollectingLogger
-from schift_payment_kit_toss import TossProvider, TossProviderConfig
+from boilpayment_core import CollectingLogger
+from boilpayment_toss import TossProvider, TossProviderConfig
 
 
 def run(coro):

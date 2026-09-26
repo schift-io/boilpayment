@@ -9,14 +9,14 @@ from datetime import UTC, datetime
 from typing import Literal, assert_never
 
 import httpx
-from schift_payment_kit_core import (
+from boilpayment_core import (
     PaymentProvider,
     ProviderName,
 )
-from schift_payment_kit_polar import PolarProvider
-from schift_payment_kit_portone import PortoneProvider, PortoneProviderConfig
-from schift_payment_kit_stripe import StripeProvider
-from schift_payment_kit_toss import TossProvider, TossProviderConfig
+from boilpayment_polar import PolarProvider
+from boilpayment_portone import PortoneProvider, PortoneProviderConfig
+from boilpayment_stripe import StripeProvider
+from boilpayment_toss import TossProvider, TossProviderConfig
 
 SECRET = "whsec_" + base64.b64encode(b"settlement-test-secret").decode()
 Status = Literal["succeeded", "failed", "pending"]

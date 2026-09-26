@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
-from schift_payment_kit_core import (
+from boilpayment_core import (
     Customer,
     FixedClock,
     InMemoryLedger,
@@ -16,7 +16,7 @@ from schift_payment_kit_core import (
     SequentialIdGen,
     resolve_policy,
 )
-from schift_payment_kit_credits import NotifyExpiringInput, notify_expiring
+from boilpayment_credits import NotifyExpiringInput, notify_expiring
 
 
 def run(coro):
@@ -143,7 +143,7 @@ def test_ec_b16_bucket_far_beyond_the_window_is_excluded():
 
 def test_ec_b16_fully_consumed_bucket_not_reported():
     async def scenario():
-        from schift_payment_kit_core import ConsumeInput
+        from boilpayment_core import ConsumeInput
 
         clock = FixedClock(datetime(2024, 1, 1, tzinfo=UTC))
         ledger = InMemoryLedger(SequentialIdGen("led_"))

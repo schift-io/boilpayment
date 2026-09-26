@@ -6,8 +6,7 @@ import asyncio
 from datetime import UTC, datetime
 
 import pytest
-from helpers import FakeNativeProvider, FakeSelfSchedulingProvider
-from schift_payment_kit_core import (
+from boilpayment_core import (
     FixedClock,
     InMemoryLedger,
     InMemoryRepo,
@@ -19,7 +18,8 @@ from schift_payment_kit_core import (
     Subscription,
     resolve_policy,
 )
-from schift_payment_kit_lifecycle import CancelInput, cancel
+from boilpayment_lifecycle import CancelInput, cancel
+from helpers import FakeNativeProvider, FakeSelfSchedulingProvider
 
 
 def run(coro):

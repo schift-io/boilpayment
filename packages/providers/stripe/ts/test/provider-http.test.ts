@@ -6,8 +6,8 @@
 // Every assertion checks the exact method/path/Authorization header/Idempotency-Key
 // header/body the spec (packages/providers/stripe/spec/stripe.pseudo.md "엔드포인트 매핑") requires.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { PaymentKitError } from '@schift/payment-kit-core';
-import type { CreateCheckoutInput, Plan, PlanPrice } from '@schift/payment-kit-core';
+import { PaymentKitError } from 'boilpayment-core';
+import type { CreateCheckoutInput, Plan, PlanPrice } from 'boilpayment-core';
 import { StripeProvider } from '../src/index.js';
 import { installHttpMock, type HttpMock } from './helpers/mockHttp.js';
 

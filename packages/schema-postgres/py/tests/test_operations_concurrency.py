@@ -5,15 +5,15 @@ import asyncio
 from datetime import UTC, datetime
 
 import pytest
-from db_helper import create_test_db, drop_test_db
-from schift_payment_kit_core import (
+from boilpayment_core import (
     FixedClock,
     Operation,
     PaymentKitError,
     hash_payload,
     run_idempotent,
 )
-from schift_payment_kit_schema_postgres import PostgresRepo
+from boilpayment_schema_postgres import PostgresRepo
+from db_helper import create_test_db, drop_test_db
 
 
 @pytest.mark.parametrize("retry", [False, True])

@@ -3,8 +3,8 @@
 // explicit impl throws "unexpected call: <method>" so tests can prove a method
 // was (or was not) invoked — modeled on examples/e2e/round-trip.ts's FakeProvider
 // and packages/webhook/ts/examples/smoke.ts's FakeProvider/TossLikeProvider.
-import { WebhookSignatureError } from '@schift/payment-kit-core';
-import type { NormalizedEvent, Payment, PaymentProvider, ProviderCapabilities, ProviderName, Subscription } from '@schift/payment-kit-core';
+import { WebhookSignatureError } from 'boilpayment-core';
+import type { NormalizedEvent, Payment, PaymentProvider, ProviderCapabilities, ProviderName, Subscription } from 'boilpayment-core';
 
 export interface FakeProviderOpts {
   name?: ProviderName;

@@ -10,7 +10,7 @@ import json
 from datetime import UTC, datetime
 
 from _helpers import FakeProvider, json_verify
-from schift_payment_kit_core import (
+from boilpayment_core import (
     DEFAULT_POLICY,
     CollectingNotifier,
     FixedClock,
@@ -24,7 +24,7 @@ from schift_payment_kit_core import (
     SequentialIdGen,
     Subscription,
 )
-from schift_payment_kit_webhook import default_handlers, process, receive
+from boilpayment_webhook import default_handlers, process, receive
 
 
 def test_receive_process_round_trip_grants_100_credits_and_replay_is_no_op():
