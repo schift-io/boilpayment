@@ -213,8 +213,19 @@ export function generateIntegrationMd(config: PaykitConfig): string {
   }
   rows.push('| 규칙에 따른 환불 | `support.requestRefund({ customerId, paymentId, requestId, requestedAmount })` |');
   if (hasCredits) rows.push('| 미지급 복구 | `support.recoverMissingGrant({ customerId, paymentId })` |');
+  const hasReservations = hasCredits && config.reservations === true;
+  if (hasReservations) {
+    rows.push('| 작업 예산 잡기 (EC:C10) | `reservations.reserve({ customerId, jobId, amount })` |');
+    rows.push('| 작업 성공: 쓴 만큼 청구 | `reservations.commit({ customerId, jobId, amount })` |');
+    rows.push('| 작업 실패·취소: 청구 없음 | `reservations.release({ customerId, jobId })` |');
+  }
   l.push(...rows);
   l.push('');
+  if (hasReservations) {
+    l.push('오래 걸리는 작업은 시작 전에 `reservations.reserve`로 크레딧을 잡습니다. 남은 예산(잔액에서 살아 있는 예약을 뺀 값)이 모자라면 `{ ok: false, need, available }`가 돌아오니 그 값으로 사용자에게 부족분을 보여 줍니다.');
+    l.push(`같은 \`jobId\`로 다시 불러도 한 번만 잡힙니다. 작업이 성공하면 \`commit\`이 실제 사용량(예약 이하)만 청구하고 나머지를 풀고, 실패하면 \`release\`가 청구 없이 풉니다. ${config.policy.usage.reservationTtlMinutes}분 안에 둘 다 없으면 \`cron.sweepReservations()\`가 풉니다.`);
+    l.push('');
+  }
   l.push('고객·결제 ID를 넘기면 저장된 결제 근거와 판매자 규칙으로 환불 여부와 금액을 계산하고 실행합니다.');
   l.push('고객 ID는 로그인 세션에서 가져오세요. 요청 본문의 고객 ID나 임의 환불 판정을 신뢰하지 마세요.');
   if (py(config)) l.push('Python은 `kit["support"]["request_refund"](customer_id=..., payment_id=..., request_id=..., requested_amount=Money(...))`를 사용합니다.');
@@ -235,6 +246,7 @@ export function generateIntegrationMd(config: PaykitConfig): string {
   if (hasUsage) l.push('| `cron.closePeriods()` | 1일 | 마감된 이용량의 직접 청구·재확인을 처리하지 못합니다 |');
   l.push('| `cron.flushOutbox()` | 5분 | provider 사용량 보고와 알림이 밀립니다 |');
   l.push('| `cron.reconcile(since)` | 1일 | 저장된 결제의 미지급을 확인·복구하지 못합니다 |');
+  if (hasCredits && config.reservations === true) l.push('| `cron.sweepReservations()` | 5분 | 확정도 해제도 안 된 작업 예약이 예산을 계속 막습니다 |');
   l.push('');
   if (self.length > 0) {
     l.push(`> \`${self.join('`, `')}\` 는 provider 쪽에 구독이라는 개념이 없어, **우리가 빌링키로 직접 청구**합니다.`);

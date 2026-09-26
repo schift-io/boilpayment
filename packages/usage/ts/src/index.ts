@@ -12,3 +12,5 @@ export { settlePeriod } from './settlePeriod.js';
 export type { SettlePeriodInput, SettlePeriodResult } from './settlePeriod.js';
 export { settleDuePeriods } from './settleDuePeriods.js';
 export type { SettleDuePeriodsInput, DuePeriodSettlement } from './settleDuePeriods.js';
+export { reserve, commit, release, sweepReservations, listReservations } from './reservation.js';
+export type { Reservation, ReservationStatus, ReserveInput, ReserveResult, CommitInput, SettleResult } from './reservation.js';

@@ -76,6 +76,7 @@
 | C6 | 유예(past_due) 중 사용 | (A14 공유) | | usage | P0 |
 | C7 | 사용량 분쟁 ("난 안 썼다") | (CS) | `usage_events` 에 `request_id` · `ip` · `user_agent` 메타 저장 → 증빙 | cs · usage | P1 |
 | C8 | 사용량 → 크레딧 환산 (하이브리드) | `policy.usage.credit_conversion` | **`null`** / `{unit, credits_per_unit}` | usage · credits | P1 |
+| C10 | 오래 걸리는 작업의 예산 예약 (영상 처리, 대량 변환 등) | `policy.usage.reservation_ttl_minutes` | **60** 분. `usage.reserve` 가 작업 id 로 크레딧을 hold 하고(남은 예산 = 잔액 − 살아 있는 예약, 모자라면 `{need, available}` 로 거절), 성공하면 `usage.commit` 이 실제 사용량(≤ 예약)만 청구하고 나머지를 풀며, 실패·취소는 `usage.release` 로 청구 없이 푼다. 만료된 예약은 `cron.sweepReservations` 가 푼다. 같은 고객의 예약 경쟁은 고객 단위 원장 트랜잭션으로 직렬화되어 마지막 예산은 하나만 가져간다 | usage | P0 |
 | C9 | 주기 마감 후 도착한 사용량 재정산 | (구현 규칙) | 마감(`closePeriod`) 뒤에도 C2 창 안이면 `record()` 가 그 주기로 귀속시키므로, **`usage.resettlePeriod` 로 다시 정산**해 증분만 청구한다(`newlyReported` · `additionalOverage`). 정산 완료 총량은 `usage_periods` 에 갱신되어 재실행이 멱등이다. 이게 없으면 늦게 온 사용량은 **영원히 청구되지 않는다** | usage | P0 |
 
 ## D. 환불
@@ -263,7 +264,7 @@ kit 을 붙이기 전부터 결제 중인 고객이 있으면, 그 고객의 구
 9. 트라이얼: A9 (있을 때만)
 10. 갱신 실패: A13 A14 A15 A16 A17
 11. 환불: D1 D2 D3 B13 (D7 D10 은 고급)
-12. 이용량: C1 C2 C5 (usage 선택 시)
+12. 이용량: C1 C2 C5 (usage 선택 시), C10 (예산 예약을 켠 경우)
 13. 분쟁: B11 D9
 14. 현금영수증(KR): K2 K3 K5 — provider 에 toss/portone 선택 시만
 15. CS: E1(regrant mode) I1 I2 — CS 애드온 활성화 시

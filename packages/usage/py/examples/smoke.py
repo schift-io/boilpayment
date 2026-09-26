@@ -15,6 +15,7 @@ from boilpayment_core import (
     FixedClock,
     InMemoryLedger,
     InMemoryRepo,
+    NewLedgerEntry,
     Period,
     Plan,
     ProviderCapabilities,
@@ -26,8 +27,12 @@ from boilpayment_usage import (
     UsageEventInput,
     check,
     close_period,
+    commit,
     flush_outbox,
     record,
+    release,
+    reserve,
+    sweep_reservations,
 )
 
 _report_usage_calls = 0
@@ -316,6 +321,36 @@ async def main() -> None:
         "report_usage was called with customer_ref (never the internal customer_id):",
         _report_usage_customer_refs,
     )
+
+    # EC:C10 -- reservations: hold, refuse the second job, commit actual, release, sweep
+    r_ledger = InMemoryLedger(ids, clock)
+    await repo.customers.put(
+        Customer(id="cust_r", email=None, provider_refs=[], status="active", created_at=clock.now())
+    )
+    await r_ledger.append(
+        NewLedgerEntry(
+            customer_id="cust_r", pool="paid", kind="grant", amount=100, source="manual",
+            idempotency_key="r_seed", actor="smoke", reason="seed",
+        )
+    )
+    r_deps = {"customer_id": "cust_r", "policy": DEFAULT_POLICY, "ledger": r_ledger, "clock": clock}
+
+    async def avail() -> int:
+        return (await r_ledger.balance("cust_r", None, clock.now())).available
+
+    r1 = await reserve(**r_deps, job_id="job_1", amount=70)
+    r2 = await reserve(**r_deps, job_id="job_2", amount=40)
+    r2_json = {"ok": r2.ok, "reason": r2.reason, "need": r2.need, "available": r2.available}
+    print("\n[reservation] reserve job_1 70:", r1.ok, "available", await avail(), "| job_2 40:", json.dumps(r2_json))
+    c1 = await commit(**r_deps, job_id="job_1", amount=45)
+    print("[reservation] commit job_1 45:", c1.reservation.status, c1.reservation.committed_amount, "available", await avail())
+    await reserve(**r_deps, job_id="job_3", amount=20)
+    rel = await release(**r_deps, job_id="job_3")
+    print("[reservation] release job_3:", rel.reservation.status, "available", await avail())
+    await reserve(**r_deps, job_id="job_4", amount=30)
+    clock.advance((DEFAULT_POLICY.usage.reservation_ttl_minutes + 1) * 60_000)
+    sw = await sweep_reservations(repo=repo, ledger=r_ledger, clock=clock)
+    print("[reservation] sweep expired:", sw["expired"], "available", await avail())
 
     print("\nsmoke: OK")
 

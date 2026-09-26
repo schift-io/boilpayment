@@ -51,6 +51,10 @@ export type NegativeBalance = 'block' | 'allow_to_floor' | 'allow_unbounded';
 export type GrantLagBehavior = 'reject' | 'optimistic_hold';
 export type NegativeOffset = 'offset_next_grant' | 'never';
 export type PoolMode = 'separate' | 'merged';
+export type RefundReasonCategory = 'technical_failure' | 'dissatisfied' | 'user_error' | 'other';
+export type RefundReasonFull = 'rules' | 'full';
+export type RefundReasonDissatisfied = 'rules' | 'evidence_required' | 'needs_human';
+export type RefundReasonUserError = 'rules' | 'deny';
 export type RefundMethod = 'unused_credits' | 'time_prorated' | 'min_of_both' | 'deny';
 export type OveruseBehavior = 'deny' | 'refund_time_prorated_anyway';
 export type RefundRounding = 'floor_credits' | 'ceil_credits' | 'round_credits';
@@ -83,6 +87,8 @@ export interface Policy {
     expiryNoticeDays: number | null;
     /** EC:B17 — how a negative balance is settled when the next grant lands. */
     negativeOffset: NegativeOffset;
+    /** EC:B19 — default expiry in days per grant source when the caller passes no expiresAt. null = never. */
+    expiryDays: { promo: number | null; trial: number | null; manual: number | null; regrant: number | null };
   };
   upgrade: { mode: UpgradeMode; creditDelta: UpgradeCreditDelta };
   downgrade: { mode: DowngradeMode; clawbackShortfall: ClawbackShortfall };
@@ -112,12 +118,16 @@ export interface Policy {
     maxPerCustomerPerYear: number;
     annualMethod: AnnualRefundMethod;
     annualDenyAfterDays: number | null;
+    /** EC:D16 — outcome per refund reason category. 'rules' = the amount rules above (D1-D5). */
+    reasons: { technicalFailure: RefundReasonFull; dissatisfied: RefundReasonDissatisfied; userError: RefundReasonUserError };
   };
   usage: {
     overage: Overage;
     overageUnitPriceMinor: number | null;
     lateReportWindowHours: number;
     includedQuantity: number;
+    /** EC:C10 — a reservation not committed or released within this many minutes is released by the sweep. */
+    reservationTtlMinutes: number;
     creditConversion: { unit: string; creditsPerUnit: number } | null;
   };
   dispute: {

@@ -146,6 +146,37 @@ switch policy.usage.overage:
      return { allow: true, overage, reason: 'bill_overage', remaining }
 ```
 
+## [EC:C10] usage.reserve / commit / release — budget for long-running work
+
+A reservation is two ledger rows keyed by (customer, job): `hold` (−amount, `expiresAt` = now + TTL,
+source `usage`, key `usage:reserve:{c}:{job}`) and later one `release` (+amount, key
+`usage:reserve:release:{c}:{job}`, reason `reservation:committed:{n}` | `released` | `expired`).
+Holds count against `balance().available` in every store.
+
+```pseudo
+reserve({customerId, jobId, amount>0, policy, ledger, clock}):
+  ledger.transaction(customerId):                  # per-customer lock -> racing reserves serialize
+    if hold(customerId, jobId) exists: return {ok, reservation, duplicated: true}
+    release every held reservation of customerId with expiresAt <= now   (reason expired)
+    available = ledger.balance(customerId, all pools, now).available
+    if available < amount: return {ok: false, reason: 'insufficient', need: amount, available}
+    append hold(-amount, expiresAt = now + policy.usage.reservationTtlMinutes)
+commit({..., jobId, amount 0..reserved}):
+  ledger.transaction(customerId):
+    r = reservation; none -> error reservation_not_found
+    r committed -> duplicated; r released/expired -> error reservation_closed
+    r.expiresAt <= now -> release(expired); error reservation_expired
+    amount > r.amount -> error reservation_exceeded
+    amount > 0: ledger.consume(amount, key usage:reserve:commit:{c}:{job})   # charge first
+                not ok -> error reservation_commit_short (hold stays; caller may release)
+    append release(+r.amount, reason committed:{amount})
+release({..., jobId}): held -> append release(reason released); otherwise duplicated
+sweepReservations({repo, ledger, clock}): for each customer, in its transaction, expire due holds
+```
+
+`check` is unchanged. A direct `ledger.consume` draws from grant buckets and does not look at holds;
+gate work through `reserve` (or `balance().available`) so reservations are respected.
+
 ## [EC:C9] usage.closePeriod — aggregate + overage bill
 
 ```pseudo

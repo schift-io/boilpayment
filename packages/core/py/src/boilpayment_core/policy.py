@@ -89,7 +89,13 @@ def _build(cls: type, data: dict[str, Any], path: str, errors: list[str]) -> Any
                 if val > 0:
                     errors.append(f"{here}: must be <= 0")
             elif here not in {"credits.bank_cap", "credits.expiry_notice_days"}:
-                minimum = 1 if here == "cs.fraud.window_days" or here.startswith("retention.") else 0
+                minimum = (
+                    1
+                    if here == "cs.fraud.window_days"
+                    or here.startswith(("retention.", "credits.expiry_days."))
+                    or here == "usage.reservation_ttl_minutes"
+                    else 0
+                )
                 if val < minimum:
                     errors.append(f"{here}: must be >= {minimum}")
         if origin is list and (

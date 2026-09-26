@@ -6,6 +6,7 @@ Mirrors packages/core/ts/src/memory.ts exactly.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import dataclasses
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -148,6 +149,11 @@ class InMemoryLedger:
         self._by_idempotency_key: dict[str, LedgerEntry] = {}
         self._consume_results: dict[str, ConsumeResult] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+        # Reentrant per customer, like the Postgres store: a ledger call made inside transaction()
+        # for the same customer (e.g. usage.commit calling consume) joins it instead of deadlocking.
+        self._held: contextvars.ContextVar[frozenset[str]] = contextvars.ContextVar(
+            f"inmemory_ledger_held_{id(self)}", default=frozenset()
+        )
 
     def _lock_for(self, customer_id: str) -> asyncio.Lock:
         lock = self._locks.get(customer_id)
@@ -157,8 +163,15 @@ class InMemoryLedger:
         return lock
 
     async def transaction(self, customer_id: str, fn: Callable[[], Awaitable[T]]) -> T:
-        async with self._lock_for(customer_id):
+        held = self._held.get()
+        if customer_id in held:
             return await fn()
+        async with self._lock_for(customer_id):
+            token = self._held.set(held | {customer_id})
+            try:
+                return await fn()
+            finally:
+                self._held.reset(token)
 
     # EC:B12 — idempotency_key is UNIQUE across the whole ledger; a re-append returns the existing row.
     async def append(self, entry: NewLedgerEntry) -> AppendResult:

@@ -56,6 +56,8 @@ export interface PaykitConfig {
   };
   /** enabled controls optional usage reporting; support rules and durable cases are always included. */
   cs: { enabled: boolean; widget: boolean };
+  /** EC:C10 — generate kit.reservations (reserve/commit/release) and cron.sweepReservations. Needs credits. */
+  reservations?: boolean;
   plans: PlanConfig[];
 }
 

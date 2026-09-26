@@ -8,6 +8,7 @@ export const DEFAULT_POLICY: Policy = {
     rollover: 'none', bankCap: null, bankReset: 'on_renewal', consumeOrder: 'expiring_first',
     negativeBalance: 'block', negativeFloor: 0, pools: 'separate', topupExpiryDays: null, grantLagBehavior: 'reject',
     expiryNoticeDays: null, negativeOffset: 'offset_next_grant',
+    expiryDays: { promo: null, trial: null, manual: null, regrant: null },
   },
   upgrade: { mode: 'immediate_prorate_reset_anchor', creditDelta: 'full_delta' },
   downgrade: { mode: 'end_of_period', clawbackShortfall: 'clamp_to_zero' },
@@ -24,8 +25,9 @@ export const DEFAULT_POLICY: Policy = {
     noQuestionsDays: 7, method: 'unused_credits', overuseBehavior: 'deny', rounding: 'floor_credits',
     revokeShortfall: 'clamp_and_reduce_refund', feeBearer: 'merchant', maxPerCustomerPerYear: 2,
     annualMethod: 'same_as_monthly', annualDenyAfterDays: null,
+    reasons: { technicalFailure: 'rules', dissatisfied: 'rules', userError: 'rules' },
   },
-  usage: { overage: 'hard_block', overageUnitPriceMinor: null, lateReportWindowHours: 48, includedQuantity: 0, creditConversion: null },
+  usage: { overage: 'hard_block', overageUnitPriceMinor: null, lateReportWindowHours: 48, includedQuantity: 0, reservationTtlMinutes: 60, creditConversion: null },
   dispute: { onOpen: 'freeze_customer', onLost: 'revoke_and_ban', evidenceDueDays: 7 },
   cashReceipt: { mode: 'off', defaultType: 'personal', cancelOnRefund: true },
   cs: { regrant: { mode: 'auto' }, autoApprove: { maxAmountMinor: 50_000, maxCredits: 10_000 }, fraud: { refundVelocity: 2, windowDays: 30 } },
@@ -84,7 +86,7 @@ export function validatePolicy(p: unknown): Policy {
         if (here === 'credits.negativeFloor') {
           if (vv > 0) errors.push(`${here}: must be <= 0`);
         } else if (here !== 'credits.bankCap' && here !== 'credits.expiryNoticeDays') {
-          const minimum = here === 'cs.fraud.windowDays' || here.startsWith('retention.') ? 1 : 0;
+          const minimum = here === 'cs.fraud.windowDays' || here.startsWith('retention.') || here.startsWith('credits.expiryDays.') || here === 'usage.reservationTtlMinutes' ? 1 : 0;
           if (vv < minimum) errors.push(`${here}: must be >= ${minimum}`);
         }
       }
@@ -124,6 +126,9 @@ export function validatePolicy(p: unknown): Policy {
     enumCheck('refund.feeBearer', pol.refund.feeBearer, ['merchant', 'customer']);
     enumCheck('refund.annualMethod', pol.refund.annualMethod, ['same_as_monthly', 'deny_after_days']);
     enumCheck('usage.overage', pol.usage.overage, ['hard_block', 'soft_cap_notify', 'bill_overage']);
+    enumCheck('refund.reasons.technicalFailure', pol.refund.reasons.technicalFailure, ['rules', 'full']);
+    enumCheck('refund.reasons.dissatisfied', pol.refund.reasons.dissatisfied, ['rules', 'evidence_required', 'needs_human']);
+    enumCheck('refund.reasons.userError', pol.refund.reasons.userError, ['rules', 'deny']);
     enumCheck('dispute.onOpen', pol.dispute.onOpen, ['freeze_customer', 'revoke_disputed_grant', 'none']);
     enumCheck('dispute.onLost', pol.dispute.onLost, ['revoke_and_ban', 'revoke_only']);
     enumCheck('credits.negativeOffset', pol.credits.negativeOffset, ['offset_next_grant', 'never']);

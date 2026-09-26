@@ -19,5 +19,7 @@ export function toPaykitConfig(wc: WizardConfig): PaykitConfig {
   for (const k of TRANSIENT_KEYS) delete out[k];
   // EC:M1 — "no existing customers" leaves paykit.config.json exactly as it was before the question existed.
   if (!wc.situation?.existingCustomers) delete out.situation;
+  // EC:C10 — reservations off leaves the config as it was before the question existed.
+  if (!wc.reservations) delete out.reservations;
   return out as unknown as PaykitConfig;
 }

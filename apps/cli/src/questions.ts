@@ -653,6 +653,26 @@ export const QUESTIONS: Question[] = [
     message: '무료 티어 포함 사용량 (Included quantity, 주기당)',
     default: def('usage.includedQuantity'),
   },
+  {
+    id: 'reservations',
+    configPath: 'reservations',
+    ec: ['C10'],
+    type: 'confirm',
+    group: 'usage',
+    when: hasCredits,
+    message: '오래 걸리는 작업(영상 처리, 대량 변환 등)에 크레딧을 미리 잡아 두고, 성공하면 쓴 만큼만 청구할까요? (Reservations)',
+    default: false,
+  },
+  {
+    id: 'usage_reservation_ttl_minutes',
+    policyPath: 'usage.reservationTtlMinutes',
+    ec: ['C10'],
+    type: 'number',
+    group: 'usage',
+    when: (c) => hasCredits(c) && c.reservations === true,
+    message: '작업 예약 만료 (Reservation TTL, 분). 오래 걸리는 작업 전에 잡아 둔 크레딧을 이 시간 안에 확정하거나 풀지 않으면 자동으로 풉니다',
+    default: def('usage.reservationTtlMinutes'),
+  },
 
   // 14. 현금영수증(KR): K2 K3 K5 — provider 에 toss/portone 선택 시만
   {

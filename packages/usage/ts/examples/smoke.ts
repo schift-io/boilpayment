@@ -4,7 +4,7 @@ import {
   DEFAULT_POLICY, FixedClock, InMemoryLedger, InMemoryRepo, Payment, PaymentProvider, Plan, Refund,
   SequentialIdGen, Subscription,
 } from 'boilpayment-core';
-import { check, closePeriod, flushOutbox, record } from '../src/index.js';
+import { check, closePeriod, commit, flushOutbox, record, release, reserve, sweepReservations } from '../src/index.js';
 
 const ids = new SequentialIdGen('id_');
 const clock = new FixedClock(new Date('2026-02-02T00:00:00Z')); // 1 day into the Feb period
@@ -119,6 +119,25 @@ async function main() {
   const pendingAfter2 = await repo.outbox.list({ kind: 'usage.report' });
   console.log('outbox after #2 (cust_1 item: attempts=2 sent; cust_3 item: unchanged, failed/no_provider_ref):', pendingAfter2.map((i) => ({ status: i.status, attempts: i.attempts, error: (i.payload as { error?: string }).error ?? null })));
   console.log('reportUsage was called with customerRef (never the internal customerId):', reportUsageCustomerRefs);
+
+  // EC:C10 — reservations: hold, refuse the second job, commit actual, release, sweep
+  const rLedger = new InMemoryLedger(ids, clock);
+  await repo.customers.put({ id: 'cust_r', email: null, providerRefs: [], status: 'active', createdAt: clock.now() });
+  await rLedger.append({ customerId: 'cust_r', pool: 'paid', kind: 'grant', amount: 100, unitPriceMinor: null, currency: null, expiresAt: null, source: 'manual', reference: {}, idempotencyKey: 'r_seed', actor: 'smoke', reason: 'seed' });
+  const rDeps = { customerId: 'cust_r', policy: DEFAULT_POLICY, ledger: rLedger, clock };
+  const avail = async () => (await rLedger.balance('cust_r', undefined, clock.now())).available;
+  const rv1 = await reserve({ ...rDeps, jobId: 'job_1', amount: 70 });
+  const rv2 = await reserve({ ...rDeps, jobId: 'job_2', amount: 40 });
+  console.log('\n[reservation] reserve job_1 70:', rv1.ok, 'available', await avail(), '| job_2 40:', JSON.stringify(rv2));
+  const c1 = await commit({ ...rDeps, jobId: 'job_1', amount: 45 });
+  console.log('[reservation] commit job_1 45:', c1.reservation.status, c1.reservation.committedAmount, 'available', await avail());
+  await reserve({ ...rDeps, jobId: 'job_3', amount: 20 });
+  const rel = await release({ ...rDeps, jobId: 'job_3' });
+  console.log('[reservation] release job_3:', rel.reservation.status, 'available', await avail());
+  await reserve({ ...rDeps, jobId: 'job_4', amount: 30 });
+  clock.advance((DEFAULT_POLICY.usage.reservationTtlMinutes + 1) * 60_000);
+  const sw = await sweepReservations({ repo, ledger: rLedger, clock });
+  console.log('[reservation] sweep expired:', sw.expired, 'available', await avail());
 
   console.log('\nsmoke: OK');
 }

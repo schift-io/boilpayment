@@ -3,6 +3,7 @@
  * See spec/core.pseudo.md [EC:B5] [EC:B14] [EC:B3] [EC:B4] [EC:B12].
  * Mirrors packages/core/py/src/boilpayment_core/memory.py exactly.
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
 import {
   AppendResult,
   Balance,
@@ -168,8 +169,16 @@ export class InMemoryLedger implements LedgerStore {
     return m;
   }
 
+  // Reentrant per customer, like the Postgres store (schema-postgres tx.ts): a ledger call made
+  // inside transaction() for the same customer (e.g. usage.commit calling consume) joins it instead
+  // of queueing behind itself.
+  private readonly held = new AsyncLocalStorage<ReadonlySet<string>>();
+
   async transaction<T>(customerId: string, fn: () => Promise<T>): Promise<T> {
-    return this.mutexFor(customerId).run(fn);
+    const current = this.held.getStore();
+    if (current?.has(customerId)) return fn();
+    const next = new Set(current ?? []).add(customerId);
+    return this.mutexFor(customerId).run(() => this.held.run(next, fn));
   }
 
   // EC:B12 — idempotency_key is UNIQUE across the whole ledger; a re-append returns the existing row.

@@ -42,6 +42,10 @@ UpgradeMode = Literal[
     "immediate_prorate_reset_anchor", "immediate_prorate_keep_anchor", "next_period"
 ]
 UpgradeCreditDelta = Literal["full_delta", "prorated_delta"]
+RefundReasonCategory = Literal["technical_failure", "dissatisfied", "user_error", "other"]
+RefundReasonFull = Literal["rules", "full"]
+RefundReasonDissatisfied = Literal["rules", "evidence_required", "needs_human"]
+RefundReasonUserError = Literal["rules", "deny"]
 DowngradeMode = Literal["end_of_period", "immediate_keep", "immediate_clawback"]
 ClawbackShortfall = Literal["clamp_to_zero", "allow_negative", "deny_downgrade"]
 CancelMode = Literal["end_of_period", "immediate"]
@@ -99,6 +103,16 @@ class CreditConversion:
 
 
 @dataclass(kw_only=True, slots=True)
+class CreditExpiryDays:
+    """EC:B19 -- default expiry in days per grant source when the caller passes no expires_at. None = never."""
+
+    promo: int | None = None
+    trial: int | None = None
+    manual: int | None = None
+    regrant: int | None = None
+
+
+@dataclass(kw_only=True, slots=True)
 class CreditsPolicy:
     rollover: Rollover = "none"
     bank_cap: int | None = None
@@ -113,6 +127,8 @@ class CreditsPolicy:
     expiry_notice_days: int | None = None
     # EC:B17 -- how a negative balance is settled when the next grant lands.
     negative_offset: NegativeOffset = "offset_next_grant"
+    # EC:B19
+    expiry_days: CreditExpiryDays = field(default_factory=CreditExpiryDays)
 
 
 @dataclass(kw_only=True, slots=True)
@@ -165,6 +181,15 @@ class DunningPolicy:
 
 
 @dataclass(kw_only=True, slots=True)
+class RefundReasons:
+    """EC:D16 -- outcome per refund reason category. "rules" = the amount rules (D1-D5)."""
+
+    technical_failure: RefundReasonFull = "rules"
+    dissatisfied: RefundReasonDissatisfied = "rules"
+    user_error: RefundReasonUserError = "rules"
+
+
+@dataclass(kw_only=True, slots=True)
 class RefundPolicy:
     no_questions_days: int = 7
     method: RefundMethod = "unused_credits"
@@ -175,6 +200,7 @@ class RefundPolicy:
     max_per_customer_per_year: int = 2
     annual_method: AnnualRefundMethod = "same_as_monthly"
     annual_deny_after_days: int | None = None
+    reasons: RefundReasons = field(default_factory=RefundReasons)
 
 
 @dataclass(kw_only=True, slots=True)
@@ -183,6 +209,8 @@ class UsagePolicy:
     overage_unit_price_minor: int | None = None
     late_report_window_hours: int = 48
     included_quantity: int = 0
+    # EC:C10 -- a reservation not committed or released within this many minutes is released by the sweep.
+    reservation_ttl_minutes: int = 60
     credit_conversion: CreditConversion | None = None
 
 
