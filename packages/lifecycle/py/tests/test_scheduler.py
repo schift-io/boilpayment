@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
-import pytest
 from boilpayment_core import (
     FixedClock,
     InMemoryLedger,
@@ -189,11 +188,12 @@ def test_ec_f_tick_preserves_unknown_provider_outcome_without_dunning():
         provider.next_charge_throws = True
         policy = resolve_policy()
 
-        with pytest.raises(RuntimeError, match="provider unavailable"):
-            await tick(SchedulerTickInput(
-                provider=provider, repo=repo, policy=policy, ledger=ledger,
-                clock=clock, ids=ids,
-            ))
+        # EC:A30 -- reported per subscription, not raised out of the whole tick.
+        res = await tick(SchedulerTickInput(
+            provider=provider, repo=repo, policy=policy, ledger=ledger,
+            clock=clock, ids=ids,
+        ))
+        assert [(e.subscription_id, "provider unavailable" in e.message) for e in res.errors] == [("sub_1", True)]
         assert (await repo.subscriptions.get("sub_1")).status == "active"
         assert await repo.outbox.list() == []
 

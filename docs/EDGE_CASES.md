@@ -43,6 +43,10 @@
 | A26 | 자체 스케줄 갱신 결제(Toss, PortOne scheduler=self)가 로컬 결제 행으로 남지 않음 (Toss 는 빌링 결제에 webhook 을 보내지 않음) | (구현 규칙) | `scheduler.tick` 이 성공한 청구를 결제 행(kind `subscription`, 구독 id, 청구 기간)으로 저장한 뒤 `onRenewalPaid` 로 지급하고 지급은 그 행을 가리킨다. 같은 청구의 재시도는 `(provider, providerRef)` 행을 다시 쓴다. 실패한 청구는 행 없이 dunning 으로 | lifecycle | P0 |
 | A27 | 결제사 구독이 `paused`(결제수단 없이 트라이얼 종료, 인보이스 없음) 또는 `incomplete`(첫 결제 전) | (구현 규칙) | 로컬 상태도 `paused` / `incomplete` 로 두고 권한이 없는 상태로 본다: `usage.check` 는 `subscription_inactive` 로 거절, 첫 결제 실패에 dunning·유예를 시작하지 않는다. `subscription.updated` webhook 이 결제사 상태를 다시 조회해 이 두 상태로 들어가고 나오는 전이만 반영(재개, 첫 결제 완료). 나머지 전이는 dunning·갱신·취소 처리기 몫. Postgres 는 0011 이 상태 제약을 넓힌다 | core + lifecycle + usage + webhook + providers | P0 |
 | A28 | 여러 통화로 가격을 둔 플랜의 갱신·dunning 재시도·업그레이드 청구 | (구현 규칙) | 구독이 산 통화(`subscription.currency`)를 저장하고(checkout, backfill, 인앱결제, Stripe/Polar 조회값), 청구는 그 통화의 플랜 가격으로 한다. 플랜에 그 통화 가격이 없으면 다른 통화로 청구하지 않고 실패(`plan_price_missing`). 통화가 없는 옛 행은 첫 가격을 쓴다(이전 동작). 네이티브 가격 ref 도 같은 통화의 것을 고른다. Postgres 는 0012 가 열을 더한다 | core + lifecycle + cs + providers + schema-postgres | P0 |
+| A29 | 예약된 플랜 변경(다운그레이드 등)이 걸린 구독의 갱신 청구 | (구현 규칙) | 갱신 청구 가격은 갱신 **후** 플랜(`scheduledPlanId ?? planId`)의 가격이다. 지급도 같은 플랜으로 한다. 자체 스케줄 갱신, dunning 재시도, 회복(onRecovered) 모두 같은 규칙. 이전 구현은 옛 플랜 가격으로 청구하고 새 플랜 크레딧을 지급했다(5만 원 청구, Basic 100 크레딧) | lifecycle | P0 |
+| A30 | 자체 스케줄 tick 에서 구독 하나의 청구가 미확정(pending)이거나, 청구 성공 뒤 로컬 단계가 실패 | (구현 규칙) | 구독마다 따로 처리하고 오류는 `result.errors` 에 모은다: 한 행이 뒤의 모든 갱신을 멈추지 않는다. 청구가 성공하면 로컬 단계 전에 결제 행을 기록하고, 다음 tick 은 그 기간의 성공 결제가 있으면 다시 청구하지 않고 로컬 단계만 이어서 한다. 미확정 결제는 dunning 을 시작하지 않는다(reconcile 대상) | lifecycle | P0 |
+| A31 | 갱신하려는 플랜이 삭제됐거나 구독 통화 가격이 없음 (설정 오류) | (구현 규칙) | 청구하지 않고, 구독을 dunning(past_due, 유예)에 넣고 `cs.needs_human`(`kind: plan_price_missing`)으로 사람에게 알린다. 활성 상태로 무기한 남지 않는다. dunning 재시도도 같은 상황이면 알리고 재시도 일정을 유지해, 가격을 고치면 다음 시도에서 청구된다 | lifecycle | P0 |
+| A32 | 결제사에서 이미 취소·만료된 구독의 갱신 결제가 늦게 처리됨 | (구현 규칙) | 낸 기간의 크레딧은 지급하되 구독을 `active` 로 되살리지 않는다(`canceled`·`expired` 유지) | lifecycle | P0 |
 
 ## B. 크레딧 원장
 

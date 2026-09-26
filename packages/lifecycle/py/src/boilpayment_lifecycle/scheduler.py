@@ -12,6 +12,7 @@ from boilpayment_core import (
     LedgerStore,
     Money,
     NoopNotifier,
+    Notification,
     Notifier,
     Payment,
     PaymentKitError,
@@ -23,7 +24,7 @@ from boilpayment_core import (
 )
 
 from .dunning import OnPaymentFailedInput, on_payment_failed
-from .internal import price_for_subscription, scope_provider
+from .internal import price_for_subscription, renewal_plan_id, scope_provider
 from .period import next_period
 from .renewal import OnRenewalPaidInput, on_renewal_paid
 from .retry import retry_on_version_conflict
@@ -64,9 +65,18 @@ class SchedulerTickInput:
 
 
 @dataclass(kw_only=True, slots=True)
+class SchedulerTickError:
+    subscription_id: str
+    code: str
+    message: str
+
+
+@dataclass(kw_only=True, slots=True)
 class SchedulerTickResult:
     charged: list[Subscription] = field(default_factory=list)
     failed: list[Subscription] = field(default_factory=list)
+    # EC:A30 -- one subscription's failure never stops the others; each is reported here.
+    errors: list[SchedulerTickError] = field(default_factory=list)
 
 
 # EC:F — charge every due self-scheduled subscription and drive the renewal/dunning outcome.
@@ -85,7 +95,7 @@ async def tick(input: SchedulerTickInput) -> SchedulerTickResult:
     notifier = input.notifier or NoopNotifier()
 
     if provider.capabilities().scheduling != "self":
-        return SchedulerTickResult(charged=[], failed=[])
+        return SchedulerTickResult(charged=[], failed=[], errors=[])
 
     # No provider termination webhook exists for locally scheduled cancellations.
     cancellations = [
@@ -110,6 +120,7 @@ async def tick(input: SchedulerTickInput) -> SchedulerTickResult:
     due = await due_subscriptions(DueSubscriptionsInput(repo=repo, clock=clock))
     charged: list[Subscription] = []
     failed: list[Subscription] = []
+    errors: list[SchedulerTickError] = []
 
     for due_sub in due:
         # Keep the original period key across retries and revalidate cancellation/period changes.
@@ -127,11 +138,37 @@ async def tick(input: SchedulerTickInput) -> SchedulerTickResult:
                 or sub.current_period.end != due_sub.current_period.end
             ):
                 return None
-            plan = await repo.plans.get(sub.plan_id)
+            # EC:A29 -- charge the plan the subscription renews INTO (a scheduled change applies at
+            # this renewal), the same plan on_renewal_paid grants.
+            plan = await repo.plans.get(renewal_plan_id(sub))
             # EC:A28 -- the price in the subscription's currency; none means no charge.
             price = price_for_subscription(plan, sub) if plan is not None else None
             if plan is None or price is None:
-                return ("failed", sub)
+                # EC:A31 -- a configuration fault: no charge; dunning (past_due, grace) and a person told.
+                await notifier.send(Notification(type="cs.needs_human", customer_id=sub.customer_id, payload={
+                    "kind": "plan_price_missing", "subscription_id": sub.id,
+                    "plan_id": renewal_plan_id(sub), "currency": sub.currency}))
+                missing = await on_payment_failed(OnPaymentFailedInput(
+                    sub=sub, policy=policy, repo=repo, notifier=notifier, clock=clock,
+                ))
+                return ("failed", missing.sub)
+            charged_period = next_period(
+                sub.current_period,
+                plan.interval or "month",
+                sub.anchor_day,
+                policy.period.timezone,
+                policy.period.month_end_anchor,
+            )
+            # EC:A30 -- a charge that already succeeded for this period (its local steps failed on an
+            # earlier tick) is resumed from the stored payment, never charged again.
+            paid = next((p for p in await repo.payments.list(subscription_id=sub.id)
+                         if p.kind == "subscription" and p.status == "succeeded"
+                         and p.period is not None and p.period.start == charged_period.start), None)
+            if paid is not None:
+                resumed = await on_renewal_paid(OnRenewalPaidInput(
+                    sub=sub, payment=paid, policy=policy, ledger=ledger, repo=repo, clock=clock,
+                ))
+                return ("charged", resumed.sub)
             # Transport errors and local persistence errors do not prove a declined charge.
             # Propagate them for reconciliation instead of starting customer dunning.
             payment = await scope_provider(provider, correlation_id).charge_billing_key(
@@ -143,13 +180,6 @@ async def tick(input: SchedulerTickInput) -> SchedulerTickResult:
             )
             match payment.status:
                 case "succeeded":
-                    charged_period = next_period(
-                        sub.current_period,
-                        plan.interval or "month",
-                        sub.anchor_day,
-                        policy.period.timezone,
-                        policy.period.month_end_anchor,
-                    )
                     stored = await _record_renewal_payment(
                         repo=repo, ids=input.ids, sub=sub, payment=payment, period=charged_period
                     )
@@ -172,7 +202,17 @@ async def tick(input: SchedulerTickInput) -> SchedulerTickResult:
                 case unreachable:
                     assert_never(unreachable)
 
-        outcome = await retry_on_version_conflict(_attempt)
+        # EC:A30 -- isolate each subscription: an unresolved charge or a local failure is reported
+        # and the loop moves on, so one row can never stall every renewal after it.
+        try:
+            outcome = await retry_on_version_conflict(_attempt)
+        except Exception as err:  # noqa: BLE001 -- reported per subscription, see EC:A30
+            errors.append(SchedulerTickError(
+                subscription_id=due_sub.id,
+                code=err.code if isinstance(err, PaymentKitError) else "scheduler_error",
+                message=str(err),
+            ))
+            continue
         if outcome is None:
             continue
         kind, result_sub = outcome
@@ -181,7 +221,7 @@ async def tick(input: SchedulerTickInput) -> SchedulerTickResult:
         else:
             failed.append(result_sub)
 
-    return SchedulerTickResult(charged=charged, failed=failed)
+    return SchedulerTickResult(charged=charged, failed=failed, errors=errors)
 
 
 async def _record_renewal_payment(

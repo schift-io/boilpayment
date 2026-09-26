@@ -42,7 +42,7 @@ describe("EC:F scheduler.tick — only runs for provider.capabilities().scheduli
     const policy = resolvePolicy();
 
     const res = await scheduler.tick({ provider, repo, policy, ledger, clock, ids });
-    expect(res).toEqual({ charged: [], failed: [] });
+    expect(res).toEqual({ charged: [], failed: [], errors: [] });
   });
 
   it("scheduling='self' (Toss) charges due subscriptions and drives onRenewalPaid on success", async () => {
@@ -95,7 +95,9 @@ describe("EC:F scheduler.tick — only runs for provider.capabilities().scheduli
     provider.nextChargeThrows = true;
     const policy = resolvePolicy();
 
-    await expect(scheduler.tick({ provider, repo, policy, ledger, clock, ids })).rejects.toThrow('provider unavailable');
+    // EC:A30 — reported per subscription, not thrown out of the whole tick.
+    const res = await scheduler.tick({ provider, repo, policy, ledger, clock, ids });
+    expect(res.errors.map((e) => [e.subscriptionId, e.message])).toEqual([['sub_1', expect.stringContaining('provider unavailable')]]);
     expect((await repo.subscriptions.get('sub_1'))?.status).toBe('active');
     expect(await repo.outbox.list()).toEqual([]);
   });
@@ -118,7 +120,7 @@ describe('scheduler bad-case boundaries', () => {
     if (!sub) throw new Error('fixture missing');
     await input.repo.subscriptions.put({ ...sub, cancelAtPeriodEnd: true });
     expect(await scheduler.dueSubscriptions(input)).toEqual([]);
-    expect(await scheduler.tick(input)).toEqual({ charged: [], failed: [] });
+    expect(await scheduler.tick(input)).toEqual({ charged: [], failed: [], errors: [] });
     expect(input.provider.lastCharge).toBeNull();
     const canceled = await input.repo.subscriptions.get('sub_1');
     expect(canceled?.status).toBe('canceled');
@@ -136,24 +138,24 @@ describe('scheduler bad-case boundaries', () => {
       provider: change === 'wrong_provider' ? 'stripe' : sub.provider,
       currentPeriod: change === 'advanced' ? { start: sub.currentPeriod.end, end: new Date('2024-03-01T00:00:00.000Z') } : sub.currentPeriod };
     vi.spyOn(input.repo.subscriptions, 'get').mockResolvedValue(current);
-    expect(await scheduler.tick(input)).toEqual({ charged: [], failed: [] });
+    expect(await scheduler.tick(input)).toEqual({ charged: [], failed: [], errors: [] });
     expect(input.provider.lastCharge).toBeNull();
   });
 
   it('does not dunn a pending charge', async () => {
     const input = await setup();
     input.provider.nextChargeStatus = 'pending';
-    await expect(scheduler.tick(input)).rejects.toMatchObject({ code: 'scheduler_charge_unresolved' });
+    expect((await scheduler.tick(input)).errors).toMatchObject([{ subscriptionId: 'sub_1', code: 'scheduler_charge_unresolved' }]);
     expect((await input.repo.subscriptions.get('sub_1'))?.status).toBe('active');
     expect(await input.repo.outbox.list()).toEqual([]);
   });
 
-  it.each(['ledger', 'repository'] as const)('propagates post-charge %s failure without dunning', async (failure) => {
+  it.each(['ledger', 'repository'] as const)('reports post-charge %s failure without dunning', async (failure) => {
     const input = await setup();
     const error = new PaymentKitError('storage unavailable', 'storage_unavailable');
     if (failure === 'ledger') vi.spyOn(input.ledger, 'append').mockRejectedValue(error);
     else vi.spyOn(input.repo.subscriptions, 'put').mockRejectedValue(error);
-    await expect(scheduler.tick(input)).rejects.toBe(error);
+    expect((await scheduler.tick(input)).errors).toMatchObject([{ subscriptionId: 'sub_1', code: 'storage_unavailable' }]);
     expect(input.provider.lastCharge).not.toBeNull();
     expect((await input.repo.subscriptions.get('sub_1'))?.status).toBe('active');
     expect(await input.repo.outbox.list()).toEqual([]);
@@ -162,7 +164,7 @@ describe('scheduler bad-case boundaries', () => {
     const input = await setup();
     const put = vi.spyOn(input.repo.subscriptions, 'put');
     put.mockRejectedValueOnce(new PaymentKitError('storage unavailable', 'storage_unavailable'));
-    await expect(scheduler.tick(input)).rejects.toMatchObject({ code: 'storage_unavailable' });
+    expect((await scheduler.tick(input)).errors).toMatchObject([{ subscriptionId: 'sub_1', code: 'storage_unavailable' }]);
     const firstCharge = input.provider.lastCharge;
     const result = await scheduler.tick(input);
     expect(result.charged[0].currentPeriod.start).toEqual(new Date('2024-02-01T00:00:00.000Z'));

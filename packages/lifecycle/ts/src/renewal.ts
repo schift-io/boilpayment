@@ -1,4 +1,4 @@
-// spec: packages/lifecycle/spec/lifecycle.pseudo.md — EC:A7 A15 A17 A25 B12
+// spec: packages/lifecycle/spec/lifecycle.pseudo.md — EC:A7 A15 A17 A25 A32 B12
 import { Clock, LedgerStore, PaymentKitError, Payment, Policy, Repo, Subscription } from 'boilpayment-core';
 import { grantForPeriod, GrantResult, rolloverOnRenewal, RolloverResult } from 'boilpayment-credits';
 
@@ -89,6 +89,11 @@ export async function onRenewalPaid(input: OnRenewalPaidInput): Promise<OnRenewa
     clock,
   });
 
+  // EC:A32 — a late payment for a subscription the provider already canceled/expired buys the
+  // period it paid for (granted above) but never brings the subscription back to active.
+  if (sub.status === 'canceled' || sub.status === 'expired') {
+    return { sub, grant, rollover, duplicated: false, recovered: false };
+  }
   const updated: Subscription = {
     ...sub,
     planId: plan.id,

@@ -8,6 +8,11 @@ export function resolvePriceRef(plan: Plan, provider: ProviderName, currency?: s
   return withRef?.providerPriceRefs?.[provider] ?? plan.prices[0]?.providerPriceRefs?.[provider] ?? plan.id;
 }
 
+/** EC:A29 — the plan a renewal moves the subscription into: a scheduled change applies at renewal. */
+export function renewalPlanId(sub: Pick<Subscription, 'planId' | 'scheduledPlanId'>): string {
+  return sub.scheduledPlanId ?? sub.planId;
+}
+
 /**
  * EC:A28 — the plan price a subscription is charged: the one in its currency. A subscription
  * written before `currency` existed falls back to the first price (previous behaviour). Returns null

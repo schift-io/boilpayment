@@ -132,6 +132,11 @@ async def on_renewal_paid(input: OnRenewalPaidInput) -> OnRenewalPaidResult:
         )
     )
 
+    # EC:A32 -- a late payment for a subscription the provider already canceled/expired buys the
+    # period it paid for (granted above) but never brings the subscription back to active.
+    if sub.status in ("canceled", "expired"):
+        return OnRenewalPaidResult(sub=sub, grant=grant, rollover=rollover, duplicated=False, recovered=False)
+
     updated = replace_sub(
         sub,
         plan_id=plan.id,

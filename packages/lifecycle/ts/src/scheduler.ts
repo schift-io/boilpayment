@@ -5,7 +5,7 @@ import { onRenewalPaid } from './renewal.js';
 import { onPaymentFailed } from './dunning.js';
 import { nextPeriod } from './period.js';
 import { retryOnVersionConflict } from './retry.js';
-import { priceForSubscription, scopeProvider } from './internal.js';
+import { priceForSubscription, renewalPlanId, scopeProvider } from './internal.js';
 
 export interface DueSubscriptionsInput {
   repo: Repo;
@@ -31,9 +31,17 @@ export interface SchedulerTickInput {
   notifier?: Notifier; // not in the ARCHITECTURE.md signature; defaults to a no-op notifier
 }
 
+export interface SchedulerTickError {
+  subscriptionId: string;
+  code: string;
+  message: string;
+}
+
 export interface SchedulerTickResult {
   charged: Subscription[];
   failed: Subscription[];
+  /** EC:A30 — one subscription's failure never stops the others; each is reported here. */
+  errors: SchedulerTickError[];
 }
 
 // EC:F — charge every due self-scheduled subscription and drive the renewal/dunning outcome.
@@ -46,7 +54,7 @@ export async function tick(input: SchedulerTickInput): Promise<SchedulerTickResu
   const notifier = input.notifier ?? new NoopNotifier();
 
   if (provider.capabilities().scheduling !== 'self') {
-    return { charged: [], failed: [] };
+    return { charged: [], failed: [], errors: [] };
   }
 
   // Self-scheduled providers emit no termination webhook for a locally scheduled cancel.
@@ -66,68 +74,101 @@ export async function tick(input: SchedulerTickInput): Promise<SchedulerTickResu
   const due = await dueSubscriptions({ repo, clock });
   const charged: Subscription[] = [];
   const failed: Subscription[] = [];
+  const errors: SchedulerTickError[] = [];
 
   for (const dueSub of due) {
-    // Reuse the original period key after a version conflict; never charge a newer period
-    // or a subscription canceled/removed by another writer while this tick was running.
-    const idempotencyKey = `charge:${dueSub.id}:${dueSub.currentPeriod.end.toISOString()}`;
-    const correlationId = `corr_sched_${dueSub.id}_${dueSub.currentPeriod.end.toISOString()}`;
-    const outcome = await retryOnVersionConflict(async () => {
-      const sub = await repo.subscriptions.get(dueSub.id);
-      if (!sub || sub.status !== 'active' || sub.cancelAtPeriodEnd ||
-          sub.provider !== provider.name || !sub.billingKey ||
-          sub.currentPeriod.end > clock.now() ||
-          sub.currentPeriod.end.getTime() !== dueSub.currentPeriod.end.getTime()) {
-        return null;
-      }
-      const plan = await repo.plans.get(sub.planId);
-      // EC:A28 — the price in the subscription's currency; none means no charge (never another currency).
-      const price = plan ? priceForSubscription(plan, sub) : null;
-      if (!plan || !price) {
-        return { kind: 'failed' as const, sub };
-      }
-      // Transport exceptions do not prove a declined charge. Propagate for reconciliation;
-      // local renewal/ledger failures must likewise never trigger another payment or dunning.
-      const payment = await scopeProvider(provider, correlationId).chargeBillingKey({
-        billingKey: sub.billingKey,
-        amount: { amountMinor: price.amountMinor, currency: price.currency },
-        orderId: idempotencyKey,
-        customerRef: sub.customerId,
-        idempotencyKey,
+    // EC:A30 — isolate each subscription: an unresolved charge or a local failure is reported and
+    // the loop moves on, so one row can never stall every renewal after it.
+    try {
+      const outcome = await renewOne(input, dueSub, notifier);
+      if (!outcome) continue;
+      if (outcome.kind === 'charged') charged.push(outcome.sub);
+      else failed.push(outcome.sub);
+    } catch (err) {
+      errors.push({
+        subscriptionId: dueSub.id,
+        code: err instanceof PaymentKitError ? err.code : 'scheduler_error',
+        message: err instanceof Error ? err.message : String(err),
       });
-      switch (payment.status) {
-        case 'succeeded': {
-          const interval = plan.interval ?? 'month';
-          const chargedPeriod = nextPeriod(sub.currentPeriod, interval, sub.anchorDay, policy.period.timezone, policy.period.monthEndAnchor);
-          const stored = await recordRenewalPayment({ repo, ids: input.ids, sub, payment, period: chargedPeriod });
-          const result = await onRenewalPaid({ sub, payment: stored, policy, ledger, repo, clock });
-          return { kind: 'charged' as const, sub: result.sub };
-        }
-        case 'failed': {
-          const result = await onPaymentFailed({ sub, policy, repo, notifier, clock });
-          return { kind: 'failed' as const, sub: result.sub };
-        }
-        case 'pending':
-        case 'requires_action':
-        case 'refunded':
-        case 'partially_refunded':
-        case 'disputed':
-          throw new PaymentKitError('Renewal charge requires reconciliation', 'scheduler_charge_unresolved', {
-            subscriptionId: sub.id, paymentId: payment.id, status: payment.status, idempotencyKey,
-          });
-        default: {
-          const unreachable: never = payment.status;
-          throw new PaymentKitError('Unknown payment status', 'scheduler_charge_unresolved', unreachable);
-        }
-      }
-    });
-    if (!outcome) continue;
-    if (outcome.kind === 'charged') charged.push(outcome.sub);
-    else failed.push(outcome.sub);
+    }
   }
 
-  return { charged, failed };
+  return { charged, failed, errors };
 }
+
+async function renewOne(input: SchedulerTickInput, dueSub: Subscription, notifier: Notifier) {
+  const { provider, repo, policy, ledger, clock } = input;
+  // Reuse the original period key after a version conflict; never charge a newer period
+  // or a subscription canceled/removed by another writer while this tick was running.
+  const idempotencyKey = `charge:${dueSub.id}:${dueSub.currentPeriod.end.toISOString()}`;
+  const correlationId = `corr_sched_${dueSub.id}_${dueSub.currentPeriod.end.toISOString()}`;
+  const outcome = await retryOnVersionConflict(async () => {
+    const sub = await repo.subscriptions.get(dueSub.id);
+    if (!sub || sub.status !== 'active' || sub.cancelAtPeriodEnd ||
+        sub.provider !== provider.name || !sub.billingKey ||
+        sub.currentPeriod.end > clock.now() ||
+        sub.currentPeriod.end.getTime() !== dueSub.currentPeriod.end.getTime()) {
+      return null;
+    }
+    // EC:A29 — charge the plan the subscription renews INTO (a scheduled downgrade/change applies at
+    // this renewal), the same plan onRenewalPaid grants.
+    const plan = await repo.plans.get(renewalPlanId(sub));
+    // EC:A28 — the price in the subscription's currency; none means no charge (never another currency).
+    const price = plan ? priceForSubscription(plan, sub) : null;
+    if (!plan || !price) {
+      // EC:A31 — a missing plan or price is a configuration fault: no charge, the subscription goes
+      // through dunning (past_due, grace) and a person is told, instead of staying active unpaid.
+      await notifier.send({ type: 'cs.needs_human', customerId: sub.customerId, payload: {
+        kind: 'plan_price_missing', subscriptionId: sub.id, planId: renewalPlanId(sub), currency: sub.currency ?? null } });
+      const result = await onPaymentFailed({ sub, policy, repo, notifier, clock });
+      return { kind: 'failed' as const, sub: result.sub };
+    }
+    const interval = plan.interval ?? 'month';
+    const chargedPeriod = nextPeriod(sub.currentPeriod, interval, sub.anchorDay, policy.period.timezone, policy.period.monthEndAnchor);
+    // EC:A30 — a charge that already succeeded for this period (its local steps failed on an
+    // earlier tick) is resumed from the stored payment, never charged again.
+    const paid = (await repo.payments.list({ subscriptionId: sub.id } as Partial<Payment>)).find((p) =>
+      p.kind === 'subscription' && p.status === 'succeeded' && p.period?.start.getTime() === chargedPeriod.start.getTime());
+    if (paid) {
+      const result = await onRenewalPaid({ sub, payment: paid, policy, ledger, repo, clock });
+      return { kind: 'charged' as const, sub: result.sub };
+    }
+    // Transport exceptions do not prove a declined charge. Propagate for reconciliation;
+    // local renewal/ledger failures must likewise never trigger another payment or dunning.
+    const payment = await scopeProvider(provider, correlationId).chargeBillingKey({
+      billingKey: sub.billingKey,
+      amount: { amountMinor: price.amountMinor, currency: price.currency },
+      orderId: idempotencyKey,
+      customerRef: sub.customerId,
+      idempotencyKey,
+    });
+    switch (payment.status) {
+      case 'succeeded': {
+        const stored = await recordRenewalPayment({ repo, ids: input.ids, sub, payment, period: chargedPeriod });
+        const result = await onRenewalPaid({ sub, payment: stored, policy, ledger, repo, clock });
+        return { kind: 'charged' as const, sub: result.sub };
+      }
+      case 'failed': {
+        const result = await onPaymentFailed({ sub, policy, repo, notifier, clock });
+        return { kind: 'failed' as const, sub: result.sub };
+      }
+      case 'pending':
+      case 'requires_action':
+      case 'refunded':
+      case 'partially_refunded':
+      case 'disputed':
+        throw new PaymentKitError('Renewal charge requires reconciliation', 'scheduler_charge_unresolved', {
+          subscriptionId: sub.id, paymentId: payment.id, status: payment.status, idempotencyKey,
+        });
+      default: {
+        const unreachable: never = payment.status;
+        throw new PaymentKitError('Unknown payment status', 'scheduler_charge_unresolved', unreachable);
+      }
+    }
+  });
+  return outcome;
+}
+
 
 /**
  * EC:A26 — a self-scheduled renewal has no webhook to create its payment row (Toss sends none for

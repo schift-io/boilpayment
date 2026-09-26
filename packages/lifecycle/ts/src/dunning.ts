@@ -15,7 +15,7 @@ import {
 } from 'boilpayment-core';
 import { grantForPeriod, GrantResult } from 'boilpayment-credits';
 import { retryOnVersionConflict } from './retry.js';
-import { priceForSubscription } from './internal.js';
+import { priceForSubscription, renewalPlanId } from './internal.js';
 
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
@@ -197,15 +197,16 @@ export async function onRecovered(input: OnRecoveredInput): Promise<OnRecoveredR
     return { sub: updated, grants };
   }
 
-  const plan = await repo.plans.get(sub.planId);
-  if (!plan) throw new PaymentKitError(`plan not found: ${sub.planId}`, 'plan_not_found');
+  // EC:A29 — recovery completes the renewal into the plan it was renewing to (a scheduled change).
+  const plan = await repo.plans.get(renewalPlanId(sub));
+  if (!plan) throw new PaymentKitError(`plan not found: ${renewalPlanId(sub)}`, 'plan_not_found');
 
   // 'regrant_current_period' and 'regrant_all_missed' both regrant the current period here;
   // multi-period backfill needs a paid-period history the Repo doesn't track yet (see spec note #3).
-  const g = await grantForPeriod({ sub: { ...sub, status: 'active' }, plan, period: sub.currentPeriod, payment, policy, ledger, clock });
+  const g = await grantForPeriod({ sub: { ...sub, planId: plan.id, status: 'active' }, plan, period: sub.currentPeriod, payment, policy, ledger, clock });
   grants.push(g);
 
-  const updated: Subscription = { ...sub, status: 'active', graceUntil: null };
+  const updated: Subscription = { ...sub, planId: plan.id, scheduledPlanId: null, status: 'active', graceUntil: null };
   await repo.subscriptions.put(updated);
 
   return { sub: updated, grants };
@@ -280,12 +281,19 @@ export async function runRetry(input: RunRetryInput): Promise<RunRetryResult> {
       return { outcome: 'deferred_to_provider' as const, sub, grants: [] };
     }
 
-    const plan = await repo.plans.get(sub.planId);
+    const plan = await repo.plans.get(renewalPlanId(sub)); // EC:A29
     const price = plan ? priceForSubscription(plan, sub) : null; // EC:A28
     if (!plan || !price) {
-      item.status = 'failed';
+      // EC:A31 — a configuration fault, not a decline: tell a person and keep the retry schedule so a
+      // fixed plan price is charged on the next attempt.
+      item.status = 'sent';
       item.attempts += 1;
       await repo.outbox.put(item);
+      await notifier.send({ type: 'cs.needs_human', customerId: sub.customerId, payload: {
+        kind: 'plan_price_missing', subscriptionId: sub.id, planId: renewalPlanId(sub), currency: sub.currency ?? null } });
+      if (payload.attempt < policy.dunning.retryAttempts) {
+        await scheduleRetry(repo, sub.id, payload.attempt + 1, clock.now(), policy.dunning.retryIntervalHours);
+      }
       return { outcome: 'failed' as const, sub, grants: [] };
     }
     // Deterministic per (sub, attempt) — a version-conflict retry of this whole function

@@ -255,6 +255,8 @@ export function generateIntegrationMd(config: PaykitConfig): string {
   if (self.length > 0) {
     l.push(`> \`${self.join('`, `')}\` 는 provider 쪽에 구독이라는 개념이 없어, **우리가 빌링키로 직접 청구**합니다.`);
     l.push('> `schedulerTick` 이 그 청구를 겁니다. 이것만은 빠뜨리면 안 됩니다.');
+    l.push('> 구독 하나가 실패해도 나머지는 계속 갱신되고, 실패는 결과의 `errors` 에 구독별로 담깁니다.');
+    l.push('> `errors` 가 비어 있지 않으면 로그나 알림으로 남기세요(미확정 결제는 dunning 을 시작하지 않습니다).');
     l.push('');
   }
 

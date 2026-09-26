@@ -560,3 +560,41 @@ resolvePriceRef(plan, provider, sub.currency): the provider price ref of the sam
 Currency is recorded when the subscription is created: checkout (the captured sale price), backfill
 (provider subscription currency, else the row's `currency`, else the plan's only price), in-app
 purchases (the matched catalog price), and the Stripe/Polar subscription mappers.
+
+
+## [EC:A29] [EC:A30] [EC:A31] 자체 스케줄 갱신 루프
+
+```pseudo
+tick():
+   errors = []
+   for due in dueSubscriptions():
+      try: renewOne(due)                          # EC:A30 구독 하나의 실패가 루프를 멈추지 않는다
+      except err: errors.push({ subscriptionId, code, message })
+   return { charged, failed, errors }
+
+renewOne(sub):
+   plan = plans.get(sub.scheduledPlanId ?? sub.planId)     # EC:A29 갱신 후 플랜으로 청구 = 지급 플랜
+   price = priceForSubscription(plan, sub)                  # EC:A28
+   if plan is null or price is null:                        # EC:A31
+      notify cs.needs_human { kind: 'plan_price_missing' }
+      return onPaymentFailed(sub)                           # dunning: past_due, 유예
+   chargedPeriod = nextPeriod(sub.currentPeriod)
+   paid = payments(sub).find(succeeded and period.start == chargedPeriod.start)
+   if paid: return onRenewalPaid(sub, paid)                 # EC:A30 이미 낸 돈은 다시 청구하지 않는다
+   payment = chargeBillingKey(price, key = charge:{sub}:{period.end})
+   succeeded -> record payment row, onRenewalPaid
+   failed    -> onPaymentFailed
+   pending | requires_action | ... -> raise scheduler_charge_unresolved (errors 로 보고, dunning 없음)
+```
+
+dunning 재시도(`runRetry`)와 회복(`onRecovered`)도 같은 갱신 후 플랜을 쓴다. 재시도에서 가격이 없으면
+`cs.needs_human` 으로 알리고 다음 재시도를 예약한다.
+
+## [EC:A32] 늦게 온 갱신 결제는 취소된 구독을 되살리지 않는다
+
+```pseudo
+onRenewalPaid(sub, payment):
+   ... grant the paid period ...
+   if sub.status in ('canceled', 'expired'): return { sub }   # 상태·기간 그대로
+   put { ...sub, planId, scheduledPlanId: null, currentPeriod: period, status: 'active' }
+```

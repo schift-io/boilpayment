@@ -81,9 +81,8 @@ def test_pending_charge_does_not_start_dunning():
     async def scenario():
         input = await setup()
         input.provider.next_charge_status = "pending"
-        with pytest.raises(PaymentKitError) as exc:
-            await tick(input)
-        assert exc.value.code == "scheduler_charge_unresolved"
+        res = await tick(input)
+        assert [(e.subscription_id, e.code) for e in res.errors] == [("sub_1", "scheduler_charge_unresolved")]
         assert (await input.repo.subscriptions.get("sub_1")).status == "active"
         assert await input.repo.outbox.list() == []
 
@@ -91,15 +90,14 @@ def test_pending_charge_does_not_start_dunning():
 
 
 @pytest.mark.parametrize("failure", ["ledger", "repository"])
-def test_post_charge_persistence_failure_does_not_start_dunning(failure, monkeypatch):
+def test_post_charge_persistence_failure_is_reported_without_dunning(failure, monkeypatch):
     async def scenario():
         input = await setup()
         error = PaymentKitError("storage unavailable", "storage_unavailable")
         target, method = (input.ledger, "append") if failure == "ledger" else (input.repo.subscriptions, "put")
         monkeypatch.setattr(target, method, AsyncMock(side_effect=error))
-        with pytest.raises(PaymentKitError) as exc:
-            await tick(input)
-        assert exc.value is error
+        res = await tick(input)
+        assert [(e.subscription_id, e.code) for e in res.errors] == [("sub_1", "storage_unavailable")]
         assert input.provider.last_charge is not None
         assert (await input.repo.subscriptions.get("sub_1")).status == "active"
         assert await input.repo.outbox.list() == []
@@ -113,8 +111,7 @@ def test_recovers_already_granted_renewal_after_failed_subscription_write(monkey
         original_put = input.repo.subscriptions.put
         monkeypatch.setattr(input.repo.subscriptions, "put", AsyncMock(
             side_effect=PaymentKitError("storage unavailable", "storage_unavailable")))
-        with pytest.raises(PaymentKitError):
-            await tick(input)
+        assert [e.code for e in (await tick(input)).errors] == ["storage_unavailable"]
         first_charge = input.provider.last_charge
         monkeypatch.setattr(input.repo.subscriptions, "put", original_put)
         result = await tick(input)

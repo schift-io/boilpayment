@@ -50,6 +50,11 @@ def resolve_price_ref(plan: Plan, provider: str, currency: str | None = None) ->
     return plan.id
 
 
+def renewal_plan_id(sub: Subscription) -> str:
+    """EC:A29 -- the plan a renewal moves the subscription into: a scheduled change applies now."""
+    return sub.scheduled_plan_id or sub.plan_id
+
+
 def price_for_subscription(plan: Plan, sub: Subscription) -> PlanPrice | None:
     """EC:A28 -- the plan price a subscription is charged: the one in its currency. A subscription
     written before `currency` existed falls back to the first price (previous behaviour). None when

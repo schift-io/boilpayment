@@ -29,7 +29,7 @@ from boilpayment_credits import (
     grant_for_period,
 )
 
-from .internal import price_for_subscription, replace_sub
+from .internal import price_for_subscription, renewal_plan_id, replace_sub
 from .retry import retry_on_version_conflict
 
 _HOUR = timedelta(hours=1)
@@ -271,13 +271,14 @@ async def on_recovered(input: OnRecoveredInput) -> OnRecoveredResult:
         await repo.subscriptions.put(updated)
         return OnRecoveredResult(sub=updated, grants=grants)
 
-    plan = await repo.plans.get(sub.plan_id)
+    # EC:A29 -- recovery completes the renewal into the plan it was renewing to (a scheduled change).
+    plan = await repo.plans.get(renewal_plan_id(sub))
     if plan is None:
-        raise PaymentKitError(f"plan not found: {sub.plan_id}", "plan_not_found")
+        raise PaymentKitError(f"plan not found: {renewal_plan_id(sub)}", "plan_not_found")
 
     # 'regrant_current_period' and 'regrant_all_missed' both regrant the current period here;
     # multi-period backfill needs a paid-period history the Repo doesn't track yet (spec note #3).
-    active_sub = replace_sub(sub, status="active")
+    active_sub = replace_sub(sub, plan_id=plan.id, status="active")
     g = await grant_for_period(
         GrantForPeriodInput(
             sub=active_sub,
@@ -291,7 +292,7 @@ async def on_recovered(input: OnRecoveredInput) -> OnRecoveredResult:
     )
     grants.append(g)
 
-    updated = replace_sub(sub, status="active", grace_until=None)
+    updated = replace_sub(sub, plan_id=plan.id, scheduled_plan_id=None, status="active", grace_until=None)
     await repo.subscriptions.put(updated)
 
     return OnRecoveredResult(sub=updated, grants=grants)
@@ -386,12 +387,19 @@ async def run_retry(input: RunRetryInput) -> RunRetryResult:
                 )
             return RunRetryResult(outcome="deferred_to_provider", sub=sub, grants=[])
 
-        plan = await repo.plans.get(sub.plan_id)
+        plan = await repo.plans.get(renewal_plan_id(sub))  # EC:A29
         price = price_for_subscription(plan, sub) if plan is not None else None  # EC:A28
         if plan is None or price is None:
-            item.status = "failed"
+            # EC:A31 -- a configuration fault, not a decline: tell a person and keep the retry
+            # schedule so a fixed plan price is charged on the next attempt.
+            item.status = "sent"
             item.attempts += 1
             await repo.outbox.put(item)
+            await notifier.send(Notification(type="cs.needs_human", customer_id=sub.customer_id, payload={
+                "kind": "plan_price_missing", "subscription_id": sub.id,
+                "plan_id": renewal_plan_id(sub), "currency": sub.currency}))
+            if attempt < policy.dunning.retry_attempts:
+                await _schedule_retry(repo, sub.id, attempt + 1, clock.now(), policy.dunning.retry_interval_hours)
             return RunRetryResult(outcome="failed", sub=sub, grants=[])
         # Deterministic per (sub, attempt) — a version-conflict retry of this whole function
         # re-issues the same idempotency_key, safe even if the first attempt already reached the
