@@ -81,6 +81,12 @@ export async function onExternalRefund(input: OnExternalRefundInput): Promise<Re
   // balance read and the revoke (which drove the balance below zero under negativeBalance=block).
   const customerId = payment.customerId;
   return ledger.transaction(customerId, async () => {
+    // EC:D19 — the same provider refund can arrive twice at once (Stripe sends refund.created,
+    // refund.updated and charge.refund.updated for one refund). The lookup above ran outside the lock;
+    // the one that matters runs here, under it: a refund already settled with this reference wins.
+    const settled = (await repo.refunds.list({ paymentId: payment.id }))
+      .find((refund) => refund.providerRef === refundRef && refund.status !== 'pending');
+    if (settled) return settled;
     let pendingCredits = 0;
     if (pending) {
       if (event.amount && (event.amount.amountMinor !== pending.amount.amountMinor || event.amount.currency !== pending.amount.currency)) {

@@ -151,6 +151,17 @@ async def on_external_refund(input: OnExternalRefundInput) -> Refund:
     # ledger lock, the same one consume() takes, so a concurrent consume cannot spend the credits
     # between the balance read and the revoke (which drove the balance below zero under block).
     async def _settle() -> Refund:
+        # EC:D19 -- the same provider refund can arrive twice at once (Stripe sends refund.created,
+        # refund.updated and charge.refund.updated for one refund). The lookup above ran outside the
+        # lock; the one that matters runs here, under it: a refund already settled with this
+        # reference wins.
+        settled = next(
+            (r for r in await repo.refunds.list(payment_id=payment.id)
+             if r.provider_ref == refund_ref and r.status != "pending"),
+            None,
+        )
+        if settled is not None:
+            return settled
         pending_credits = 0
         if pending is not None:
             if event.amount is not None and event.amount != pending.amount:

@@ -70,3 +70,39 @@ def test_ec_d18_external_refund_vs_consume_never_negative() -> None:
         assert revoked + (100 if consumed else 0) <= 100
         if revoked < 100:
             assert cases > 0
+
+
+def test_ec_d19_same_provider_refund_twice_at_once() -> None:
+    async def run():
+        db = await create_test_db("py_extrefunddup")
+        out = []
+        try:
+            ledger, repo = PostgresLedgerStore(db.dsn), PostgresRepo(db.dsn)
+            for rnd in range(6):
+                c = f"c_{uuid.uuid4()}"
+                await repo.customers.put(Customer(id=c, email=None, provider_refs=[], status="active", created_at=datetime.now(UTC)))
+                payment = Payment(id=f"p_{uuid.uuid4()}", customer_id=c, provider="stripe", provider_ref=f"pi_{uuid.uuid4()}",
+                                  subscription_id=None, amount=Money(amount_minor=1000, currency="USD"), status="succeeded",
+                                  kind="topup", period=None, occurred_at=datetime.now(UTC), failure=None)
+                await repo.payments.put(payment)
+                await ledger.append(NewLedgerEntry(customer_id=c, pool="paid", kind="grant", amount=100, unit_price_minor=10,
+                                                   currency="USD", source="topup", reference=LedgerReference(payment_id=payment.id),
+                                                   idempotency_key=f"topup:{payment.id}", actor="t"))
+
+                def event(eid: str) -> NormalizedEvent:
+                    return NormalizedEvent(id=eid, provider="stripe", type="refund.created", occurred_at=datetime.now(UTC), customer_ref=None,
+                                           subscription_ref=None, payment_ref=payment.provider_ref, refund_ref=f"re_same_{rnd}",
+                                           amount=Money(amount_minor=500, currency="USD"), raw={})
+                await asyncio.gather(*[
+                    on_external_refund(OnExternalRefundInput(event=event(e), ledger=ledger, repo=repo, cs=_Cs(), clock=SystemClock(), ids=UuidIdGen()))
+                    for e in ("evt_a", "evt_b")
+                ])
+                rows = await repo.refunds.list(payment_id=payment.id)
+                revoked = -sum(e.amount for e in await ledger.entries(c, kind="revoke"))
+                out.append((len(rows), revoked, (await repo.payments.get(payment.id)).status))
+        finally:
+            await drop_test_db(db)
+        return out
+    out = asyncio.run(run())
+    print("[EC:D19] rounds", out)
+    assert out == [(1, 50, "partially_refunded")] * 6

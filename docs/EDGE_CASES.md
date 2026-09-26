@@ -119,6 +119,7 @@
 | D16 | 환불 사유별 처리 — 사용자 과실 | `policy.refund.reasons.user_error` | **`rules`** / `deny`. 사유는 `support.requestRefund({ ..., reason: { category, evidenceRef } })` 로 넘기고, 카테고리는 `technical_failure` · `dissatisfied` · `user_error` · `other`(항상 금액 규칙) | refund · cs | P0 |
 | D17 | 같은 결제에 키가 다른 환불 요청 두 개가 동시에 도착 (합이 결제액 초과) | (구현 규칙) | 남은 환불 가능액 검사부터 보류·pending 환불 기록까지를 고객 단위 임계구역(`ledger.transaction`: 메모리 잠금, Postgres advisory lock)에서 실행해 하나만 통과한다. 결제사 호출은 잠금 밖 | refund | P0 |
 | D18 | 외부(결제사 대시보드) 환불의 크레딧 회수가 같은 고객의 consume 과 겹침, 또는 회수 뒤 consume | (구현 규칙) | 잔액 조회·회수량 clamp·회수 기록·환불 행 쓰기를 고객 원장 잠금(`ledger.transaction`, consume 과 같은 잠금) 안에서 한다. 회수는 grant 버킷에 묶어(`reference.grantId`, 그 결제의 grant 먼저, 이어서 만료가 이른 순) 기록해, 회수된 크레딧을 뒤이은 consume 이 다시 쓰지 못한다. 승인된 `allow_negative` pending 환불이 버킷보다 많이 회수할 때만 넘는 부분을 grant 없는 회수로 남긴다. clamp 되면 reconcile 케이스를 연다. 이전 구현은 경합 시 8/8 라운드에서 `block` 인데 잔액 -100 이었다 | refund | P0 |
+| D19 | 같은 결제사 환불이 동시에 두 번 도착(Stripe 는 한 환불에 `refund.created`, `refund.updated`, `charge.refund.updated` 를 보낸다) | (구현 규칙) | 환불 참조(`refundRef`)로 이미 정산된 환불이 있는지를 고객 원장 잠금 안에서 다시 확인하고, 있으면 그 환불을 돌려준다. 이전에는 확인이 잠금 밖에 있어 환불 행이 2 개, 크레딧 회수가 두 번, 결제가 전액 환불로 표시되어 남은 금액을 kit 으로 환불할 수 없었다(Postgres 6/6 재현) | refund | P0 |
 | D15 | 환불 중 소비 시도 (회수 전) | (구현 규칙) | 환불 시작 시 `hold` 행으로 잔액 선차감. 실패 시 hold 해제 | refund · credits | P0 |
 
 ## E. 결제 실패 · 복구 (CS 수익의 본체)

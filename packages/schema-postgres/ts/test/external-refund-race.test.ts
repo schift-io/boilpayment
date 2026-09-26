@@ -44,3 +44,35 @@ describe('[EC:D18] external refund vs consume on Postgres', () => {
     }
   });
 });
+
+describe('[EC:D19] the same provider refund delivered twice at once', () => {
+  let db: TestDb; let repo: PostgresRepo; let ledger: PostgresLedgerStore;
+  beforeAll(async () => { db = await createTestDb('extrefunddup'); repo = new PostgresRepo(db.pool); ledger = new PostgresLedgerStore(db.pool); });
+  afterAll(async () => { await dropTestDb(db); });
+
+  it('[EC:D19] 6 rounds: one refund row, credits revoked once, the rest of the payment stays refundable', async () => {
+    const out: string[] = [];
+    for (let round = 0; round < 6; round++) {
+      const c = `c_${randomUUID()}`;
+      await repo.customers.put({ id: c, email: null, providerRefs: [], status: 'active', createdAt: new Date() });
+      const payment: Payment = { id: `p_${randomUUID()}`, customerId: c, provider: 'stripe', providerRef: `pi_${randomUUID()}`, subscriptionId: null,
+        amount: { amountMinor: 1000, currency: 'USD' }, status: 'succeeded', kind: 'topup', period: null, occurredAt: new Date(), failure: null };
+      await repo.payments.put(payment);
+      await ledger.append({ customerId: c, pool: 'paid', kind: 'grant', amount: 100, unitPriceMinor: 10, currency: 'USD', expiresAt: null,
+        source: 'topup', reference: { paymentId: payment.id }, idempotencyKey: `topup:${payment.id}`, actor: 't', reason: null });
+      const cs = { openReconcileMismatchCase: async () => {} };
+      const event = (id: string) => ({ id, provider: 'stripe', type: 'refund.created', occurredAt: new Date(), customerRef: null, subscriptionRef: null,
+        paymentRef: payment.providerRef, refundRef: `re_same_${round}`, amount: { amountMinor: 500, currency: 'USD' }, raw: {} }) as unknown as NormalizedEvent;
+      await Promise.all([
+        onExternalRefund({ event: event('evt_a'), ledger, repo, cs, clock: new SystemClock(), ids: new UuidIdGen() }),
+        onExternalRefund({ event: event('evt_b'), ledger, repo, cs, clock: new SystemClock(), ids: new UuidIdGen() }),
+      ]);
+      const rows = await repo.refunds.list({ paymentId: payment.id });
+      const revoked = -(await ledger.entries(c, { kind: 'revoke' })).reduce((s, e) => s + e.amount, 0);
+      const status = (await repo.payments.get(payment.id))!.status;
+      out.push(`rows=${rows.length},revoked=${revoked},payment=${status}`);
+      expect([rows.length, revoked, status]).toEqual([1, 50, 'partially_refunded']);
+    }
+    console.log('[EC:D19] rounds', out.join(' | '));
+  });
+});

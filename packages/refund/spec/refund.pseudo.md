@@ -430,3 +430,13 @@ onExternalRefund(event):
 
 grant 에 묶이지 않은 회수는 잔액만 줄이고 버킷은 그대로 두어, 이어지는 consume 이 회수된 크레딧을
 다시 쓸 수 있었다(잔액 -100).
+
+## [EC:D19] 같은 결제사 환불의 동시 중복 처리
+
+```pseudo
+onExternalRefund(event):
+   ... (잠금 밖 조회는 빠른 경로일 뿐)
+   ledger.transaction(customer):
+      if refunds(payment).any(r.providerRef == refundRef and r.status != pending): return that refund
+      ... 회수, 환불 행, 결제 상태
+```
