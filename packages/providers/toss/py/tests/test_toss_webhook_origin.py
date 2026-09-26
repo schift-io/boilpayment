@@ -45,7 +45,16 @@ def test_ec_e18_reverify_after_receipt_needs_no_address() -> None:
 
 
 def test_ec_e18_deposit_callback_secret() -> None:
-    p = make_provider(_payment_with_secret)
-    assert asyncio.run(p.verify_webhook(headers={}, raw_body=_deposit("s3cr3t"))).type == "payment.succeeded"
+    p = make_provider(_payment_with_secret, allowed_webhook_ips=["203.0.113.10"])
+    src = "203.0.113.10"
+    assert asyncio.run(p.verify_webhook(headers={}, raw_body=_deposit("s3cr3t"), remote_address=src)).type == "payment.succeeded"
     with pytest.raises(WebhookSignatureError):
-        asyncio.run(p.verify_webhook(headers={}, raw_body=_deposit("guess")))
+        asyncio.run(p.verify_webhook(headers={}, raw_body=_deposit("guess"), remote_address=src))
+
+
+def test_ec_e19_deposit_callback_without_secret_refused() -> None:
+    p = make_provider(_payment_with_secret, allowed_webhook_ips=["203.0.113.10"])
+    body = json.loads(_deposit("s3cr3t"))
+    del body["secret"]
+    with pytest.raises(WebhookSignatureError):
+        asyncio.run(p.verify_webhook(headers={}, raw_body=json.dumps(body), remote_address="203.0.113.10"))

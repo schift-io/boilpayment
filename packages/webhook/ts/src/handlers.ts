@@ -221,6 +221,12 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
         });
       }
     } else if (credits) {
+      // EC:E19 — only money that arrived buys credits: the status re-fetched from the provider must be
+      // 'succeeded' (a forged or early notification, a pending virtual account, or a payment refunded
+      // before this retry is refused; the record fails and a later delivery/retry re-checks).
+      if (payment.status !== 'succeeded') {
+        throw new PaymentKitError('Top-up payment has not succeeded', 'topup_payment_not_succeeded', { paymentId: payment.id, status: payment.status });
+      }
       // EC:B10 — the kit cannot know how many credits a one-time payment buys; the app resolves it.
       const n = input.resolveTopupCredits ? await input.resolveTopupCredits(payment) : null;
       if (n === null || n === undefined) throw new Error('topup_credits_unresolved');

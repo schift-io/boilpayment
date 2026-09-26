@@ -139,6 +139,7 @@
 | E16 | 네이티브 구독(Stripe/Polar) 갱신 인보이스가 webhook 으로 먼저 도착 (로컬 결제 행 없음) | (구현 규칙) | 로컬 구독이 있으면 provider 에서 결제를 재조회(E3) → 그 구독의 결제일 때만 결제 행 기록 → 갱신 지급. 다른 구독 결제·모르는 구독은 `unknown_provider_ref`. 같은 인보이스 재전송은 행 1개 (`payments (provider, provider_ref)` unique) | webhook | P0 |
 | E17 | 받은 뒤 5분 넘게 지나 재처리하는 webhook (processPending 재시도) | (구현 규칙) | `receive()` 가 서명과 타임스탬프 허용 범위(Stripe 300초, Standard Webhooks 5분)를 벽시계로 검사한다. `process()` 는 저장된 원문의 서명만 다시 검증하고 나이는 보지 않는다(`receivedAt` 전달). Google push 토큰 exp·Apple 인증서 유효기간은 `receivedAt` 기준. 저장 뒤 원문이 바뀐 행은 서명 불일치로 실패 | webhook + providers | P0 |
 | E18 | 서명 없는 Toss webhook 의 출처 위조 (요청 헤더로 IP 허용목록 통과, 가상계좌 입금 콜백 위조) | (구현 규칙) | IP 허용목록은 앱이 소켓에서 읽어 넘기는 연결 주소(`remoteAddress`)만 쓰고 요청 헤더(`x-paykit-remote-ip`, `x-forwarded-for`)는 쓰지 않는다. `DEPOSIT_CALLBACK` 은 `orderId` 로 결제를 다시 조회해 그 결제의 `secret` 과 상수 시간 비교가 맞을 때만 받는다(Toss 문서 webhook-events). 두 검사는 수신 시점에 하고, `process()` 의 재검증은 이미 통과한 저장 행이라 다시 하지 않는다. Toss 를 고른 생성 프로젝트의 `handleWebhook` 은 `remoteAddress` 를 받는다 | providers(toss) + webhook | P0 |
+| E19 | 서명 없는 Toss 웹훅 위조로 충전 크레딧 지급 (허용목록 미설정, secret 뺀 입금 콜백, 입금 전 가상계좌), 재시도 사이에 환불된 결제 | (구현 규칙) | 일회성 충전은 결제사에서 다시 조회한 결제 상태가 `succeeded` 일 때만 지급한다(A25 와 같은 규칙, 아니면 `topup_payment_not_succeeded` 로 기록 실패, 다음 전달·재시도가 다시 확인). Toss 는 허용목록이 비어 있으면 수신 시점에 모든 웹훅을 거부하고(fail closed), `DEPOSIT_CALLBACK` 은 `secret` 이 없으면 거부한다. 생성 코드는 `TOSS_WEBHOOK_ALLOWED_IPS` 를 읽는다. 이전에는 허용목록 없이 생성되어, 서명 없는 요청 한 통으로 입금 전 가상계좌에 5000 크레딧이 지급됐다 | webhook + providers(toss) + cli | P0 |
 
 ## F. Provider 별 특이점
 

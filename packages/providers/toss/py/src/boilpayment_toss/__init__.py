@@ -797,6 +797,11 @@ class TossProvider:
         # EC:E4 E18 -- Toss webhooks carry no signature. Origin checks run at receipt (no
         # received_at); webhook.process re-verifies a stored row that already passed them.
         at_receipt = received_at is None
+        # EC:E19 -- with no signature, the source address is the only origin proof: no allowlist
+        # means every sender is accepted (a forged DONE notification was enough), so receipt fails
+        # closed.
+        if at_receipt and not self._allowed_webhook_ips:
+            raise WebhookSignatureError("toss webhook ip allowlist is not configured (allowed_webhook_ips)")
         # The peer address the app read from its socket. A request header (x-paykit-remote-ip,
         # x-forwarded-for) is client-controlled and is never used.
         if (
@@ -809,6 +814,10 @@ class TossProvider:
             )
         # EC:E18 -- a virtual-account DEPOSIT_CALLBACK is genuine only when its `secret` equals the
         # one Toss returned on that payment (Toss docs: webhook-events, DEPOSIT_CALLBACK.secret).
+        event_type = body.get("eventType") or body.get("event_type")
+        # EC:E19 -- a DEPOSIT_CALLBACK without its secret cannot be checked, so it is refused.
+        if at_receipt and event_type == "DEPOSIT_CALLBACK" and not isinstance(body.get("secret"), str):
+            raise WebhookSignatureError("toss deposit callback without secret")
         if at_receipt and isinstance(body.get("secret"), str):
             order_id = body.get("orderId") or (body.get("data") or {}).get("orderId")
             if not order_id:

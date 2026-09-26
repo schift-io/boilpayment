@@ -296,15 +296,15 @@ class TestVerifyWebhookIpAllowlist:
         with pytest.raises(WebhookSignatureError):
             asyncio.run(run())
 
-    def test_ec_e4_no_allowlist_configured_skips_ip_check(self):
+    def test_ec_e19_no_allowlist_configured_refuses_at_receipt(self):
         provider = make_provider(unreachable_transport, allowed_webhook_ips=None)
         raw_body = json.dumps(WEBHOOK_FIXTURE)
 
         async def run():
-            return await provider.verify_webhook(headers={}, raw_body=raw_body)
+            return await provider.verify_webhook(headers={}, raw_body=raw_body, remote_address="203.0.113.10")
 
-        event = asyncio.run(run())
-        assert event.type == "payment.succeeded"
+        with pytest.raises(WebhookSignatureError):
+            asyncio.run(run())
 
 
 class TestMapTossWebhook:

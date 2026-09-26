@@ -200,11 +200,10 @@ describe('[EC:E4] verifyWebhook — IP allowlist (Toss has no signature)', () =>
     const rawBody = JSON.stringify(WEBHOOK_FIXTURE);
     await expect(provider.verifyWebhook({ headers: {}, rawBody })).rejects.toBeInstanceOf(WebhookSignatureError);
   });
-  it('[EC:E4] no allowlist configured skips the IP check entirely', async () => {
+  it('[EC:E19] no allowlist configured refuses the webhook at receipt (fail closed)', async () => {
     const provider = new TossProvider({ secretKey: 'sk_test' }, (async () => { throw new Error('should not fetch'); }) as any);
     const rawBody = JSON.stringify(WEBHOOK_FIXTURE);
-    const event = await provider.verifyWebhook({ headers: {}, rawBody });
-    expect(event.type).toBe('payment.succeeded');
+    await expect(provider.verifyWebhook({ headers: {}, rawBody, remoteAddress: '203.0.113.10' })).rejects.toBeInstanceOf(WebhookSignatureError);
   });
 });
 

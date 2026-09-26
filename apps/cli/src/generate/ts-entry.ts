@@ -40,7 +40,8 @@ function providerConstructionTs(config: PaykitConfig): string {
     lines.push(`  providers.polar = new PolarProvider({ accessToken: env.POLAR_ACCESS_TOKEN, webhookSecret: env.POLAR_WEBHOOK_SECRET, logger });`);
   }
   if (config.providers.includes('toss')) {
-    lines.push(`  providers.toss = new TossProvider({ secretKey: env.TOSS_SECRET_KEY, clientKey: env.TOSS_CLIENT_KEY, logger });`);
+    // EC:E19 — no allowlist means every Toss webhook is refused at receipt (fail closed).
+    lines.push(`  providers.toss = new TossProvider({ secretKey: env.TOSS_SECRET_KEY, clientKey: env.TOSS_CLIENT_KEY, allowedWebhookIps: (env.TOSS_WEBHOOK_ALLOWED_IPS ?? '').split(',').map((ip: string) => ip.trim()).filter(Boolean), logger });`);
   }
   if (config.providers.includes('portone')) {
     lines.push(`  providers.portone = new PortoneProvider({ apiSecret: env.PORTONE_API_SECRET, storeId: env.PORTONE_STORE_ID, webhookSecret: env.PORTONE_WEBHOOK_SECRET, logger });`);
@@ -114,7 +115,7 @@ export function generateIndexTs(config: PaykitConfig): string {
   l.push(`  DATABASE_URL: string;`);
   if (config.providers.includes('stripe')) { l.push(`  STRIPE_SECRET_KEY: string;`); l.push(`  STRIPE_WEBHOOK_SECRET: string;`); }
   if (config.providers.includes('polar')) { l.push(`  POLAR_ACCESS_TOKEN: string;`); l.push(`  POLAR_WEBHOOK_SECRET: string;`); }
-  if (config.providers.includes('toss')) { l.push(`  TOSS_SECRET_KEY: string;`); l.push(`  TOSS_CLIENT_KEY: string;`); }
+  if (config.providers.includes('toss')) { l.push(`  TOSS_SECRET_KEY: string;`); l.push(`  TOSS_CLIENT_KEY: string;`); l.push(`  TOSS_WEBHOOK_ALLOWED_IPS?: string; // comma list; empty refuses every Toss webhook (EC:E19)`); }
   if (config.providers.includes('portone')) { l.push(`  PORTONE_API_SECRET: string;`); l.push(`  PORTONE_STORE_ID: string;`); l.push(`  PORTONE_WEBHOOK_SECRET: string;`); }
   if (config.infra.notify.email === 'resend') { l.push(`  RESEND_API_KEY: string;`); l.push(`  RESEND_FROM_EMAIL: string;`); l.push(`  RESEND_TO_EMAIL: string; // fallback recipient when a notification has no per-customer email`); }
   if (config.infra.notify.email === 'smtp') { l.push(`  SMTP_HOST: string; SMTP_PORT: string; SMTP_USER: string; SMTP_PASS: string; SMTP_FROM_EMAIL: string;`); l.push(`  SMTP_TO_EMAIL: string; // fallback recipient when a notification has no per-customer email`); }

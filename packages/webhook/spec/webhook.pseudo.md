@@ -451,3 +451,18 @@ handlers['subscription.updated'] = async (ctx):
 
 Other transitions (past_due via dunning, renewal, cancel) keep their own handlers, so local grace
 state is never overwritten here.
+
+
+## [EC:E19] 충전 지급은 결제사가 확인한 성공 결제만
+
+```pseudo
+handlers['payment.succeeded'] (subscriptionRef 없음, 일회성 충전):
+   payment = resolveLocalPayment(...)          # 결제사에서 다시 조회한 status 포함
+   if payment.status != 'succeeded':
+      raise PaymentKitError('topup_payment_not_succeeded')   # 기록 실패, 다음 전달·재시도가 다시 확인
+   n = resolveTopupCredits(payment); credits.topup(...)
+```
+
+Toss (서명 없음): 수신 시점에 허용목록이 비어 있으면 거부(fail closed), `DEPOSIT_CALLBACK` 은 `secret`
+이 없으면 거부, 있으면 결제의 secret 과 상수 시간 비교(E18). 생성 코드는 `TOSS_WEBHOOK_ALLOWED_IPS` 를
+`allowedWebhookIps` 로 넘기고 `handleWebhook` 에 소켓 주소(`remoteAddress`)를 넘긴다.

@@ -25,8 +25,14 @@ describe('[EC:E18] Toss webhook origin', () => {
     expect(e.type).toBe('payment.succeeded');
   });
   it('[EC:E18] DEPOSIT_CALLBACK with the payment\'s secret passes, a wrong secret is refused', async () => {
-    const ok = new TossProvider({ secretKey: 'test_sk_x' }, paymentWithSecret('s3cr3t'));
-    expect((await ok.verifyWebhook({ headers: {}, rawBody: deposit('s3cr3t') })).type).toBe('payment.succeeded');
-    await expect(ok.verifyWebhook({ headers: {}, rawBody: deposit('guess') })).rejects.toBeInstanceOf(WebhookSignatureError);
+    const ok = new TossProvider({ secretKey: 'test_sk_x', allowedWebhookIps: ['203.0.113.10'] }, paymentWithSecret('s3cr3t'));
+    const from = { headers: {}, remoteAddress: '203.0.113.10' };
+    expect((await ok.verifyWebhook({ ...from, rawBody: deposit('s3cr3t') })).type).toBe('payment.succeeded');
+    await expect(ok.verifyWebhook({ ...from, rawBody: deposit('guess') })).rejects.toBeInstanceOf(WebhookSignatureError);
+  });
+  it('[EC:E19] DEPOSIT_CALLBACK without a secret is refused (it used to skip the check)', async () => {
+    const p = new TossProvider({ secretKey: 'test_sk_x', allowedWebhookIps: ['203.0.113.10'] }, paymentWithSecret('s3cr3t'));
+    const body = JSON.parse(deposit('s3cr3t')); delete body.secret;
+    await expect(p.verifyWebhook({ headers: {}, remoteAddress: '203.0.113.10', rawBody: JSON.stringify(body) })).rejects.toBeInstanceOf(WebhookSignatureError);
   });
 });

@@ -348,6 +348,14 @@ def default_handlers(
 
                 await _retry_on_version_conflict(_attempt)
         elif credits is not None:
+            # EC:E19 -- only money that arrived buys credits: the status re-fetched from the provider
+            # must be 'succeeded' (a forged or early notification, a pending virtual account, or a
+            # payment refunded before this retry is refused; a later delivery/retry re-checks).
+            if payment.status != "succeeded":
+                raise PaymentKitError(
+                    "Top-up payment has not succeeded", "topup_payment_not_succeeded",
+                    {"payment_id": payment.id, "status": payment.status},
+                )
             # EC:B10 -- the kit cannot know how many credits a one-time payment buys; the app resolves it.
             n = await resolve_topup_credits(payment) if resolve_topup_credits else None
             if n is None:
