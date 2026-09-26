@@ -66,7 +66,7 @@ describe('PostgresLedgerStore', () => {
     expect(second.duplicated).toBe(true);
     expect(second.entries.map((e) => e.id)).toEqual(first.entries.map((e) => e.id));
     const rows = await db.pool.query(
-      `select count(*)::int as n from ledger_entries where idempotency_key = $1 or idempotency_key like $1 || ':%'`,
+      `select count(*)::int as n from ledger_entries where consume_key = $1`, // EC:B21 B23 — every row of a consume carries its key here
       [key],
     );
     expect(rows.rows[0].n).toBe(first.entries.length);

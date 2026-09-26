@@ -17,6 +17,7 @@ import type {
   NewLedgerEntry,
   Pool as CreditPool,
 } from 'boilpayment-core';
+import { PaymentKitError } from 'boilpayment-core';
 import { jsonb } from './mapping.js';
 import { runner, withCustomerTransaction } from './tx.js';
 
@@ -78,6 +79,38 @@ function balanceRowToBalance(customerId: string, pool: CreditPool, row: Record<s
     held: row ? Number(row.held) : 0,
     expiring,
   };
+}
+
+/**
+ * EC:B21 B22 — the rows an earlier consume with this key wrote. Rows since 0013 carry consume_key
+ * (exact match). Rows written before it have consume_key null: the first row carried the key itself
+ * and follow-up rows '<key>:<n>', all in one transaction (same created_at). So a legacy row keyed
+ * 'job:1' that sits next to a 'job' row of the same transaction is a follow-up of 'job', not a
+ * consume of its own; and a retry of 'job' gets all of its rows back.
+ */
+async function findConsume(client: Runner, customerId: string, key: string): Promise<Record<string, unknown>[]> {
+  const current = await client.query(
+    `select * from ledger_entries where customer_id = $1 and kind = 'consume' and consume_key = $2 order by created_at asc`,
+    [customerId, key],
+  );
+  if (current.rows.length) return current.rows;
+  const legacy = await client.query(
+    `select * from ledger_entries where customer_id = $1 and kind = 'consume' and consume_key is null and idempotency_key = $2`,
+    [customerId, key],
+  );
+  const first = legacy.rows[0];
+  if (!first) return [];
+  const sameTx = (await client.query(
+    `select * from ledger_entries where customer_id = $1 and kind = 'consume' and consume_key is null and created_at = $2 order by idempotency_key asc`,
+    [customerId, first.created_at],
+  )).rows;
+  const followUp = /^(.*):(\d+)$/.exec(key);
+  if (followUp && sameTx.some((r) => r.idempotency_key === followUp[1])) return []; // a follow-up row of another consume
+  const parts = sameTx.filter((r) => {
+    const k = r.idempotency_key as string;
+    return k.startsWith(`${key}:`) && /^\d+$/.test(k.slice(key.length + 1));
+  });
+  return [first, ...parts];
 }
 
 export class PostgresLedgerStore implements LedgerStore {
@@ -184,14 +217,9 @@ export class PostgresLedgerStore implements LedgerStore {
     return withCustomerTransaction(this.pool, input.customerId, async () => {
       const client = this.client(input.customerId);
 
-      const existing = await client.query(
-        // EC:B21 — exact match only: the caller's key is never used as a pattern.
-        `select * from ledger_entries where customer_id = $2 and kind = 'consume'
-           and (consume_key = $1 or (consume_key is null and idempotency_key = $1)) order by created_at asc`,
-        [input.idempotencyKey, input.customerId],
-      );
-      if (existing.rows.length) {
-        return { ok: true, entries: existing.rows.map(rowToLedgerEntry), shortfall: 0, duplicated: true };
+      const existing = await findConsume(client, input.customerId, input.idempotencyKey);
+      if (existing.length) {
+        return { ok: true, entries: existing.map(rowToLedgerEntry), shortfall: 0, duplicated: true };
       }
 
       let remaining = input.amount;
@@ -253,13 +281,20 @@ export class PostgresLedgerStore implements LedgerStore {
         }
       }
 
+      // EC:B23 — a row key another operation already holds is refused (same condition and error as
+      // the in-memory store), never a raw unique violation.
+      if (writes.length) {
+        const taken = await client.query('select 1 from ledger_entries where customer_id = $1 and idempotency_key = any($2) limit 1',
+          [input.customerId, writes.map((_, i) => `${input.idempotencyKey}#${i}`)]);
+        if (taken.rows.length) throw new PaymentKitError(`idempotency key ${input.idempotencyKey} collides with an existing ledger row`, 'idempotency_key_conflict');
+      }
       const entries: LedgerEntry[] = [];
       for (let i = 0; i < writes.length; i++) {
         const w = writes[i];
         const id = `le_${randomUUID()}`;
-        // EC:B21 — follow-up rows get a random key so they never collide with a key a caller picks;
-        // every row is found again through consume_key.
-        const key = i === 0 ? input.idempotencyKey : `consume-part:${randomUUID()}`;
+        // EC:B23 — row i is keyed '<key>#<i>', the same as the in-memory store; every row is found again
+        // through consume_key.
+        const key = `${input.idempotencyKey}#${i}`;
         const reference = referenceToJson({ ...input.meta, grantId: w.grantId ?? undefined });
         const res = await client.query(
           `insert into ledger_entries

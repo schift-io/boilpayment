@@ -405,3 +405,19 @@ consume(input):
 
 호출자 키를 LIKE 패턴으로 쓰지 않는다. 이전 구현(`idempotency_key like key || ':%'`)은 `topup`,
 `%`, `_` 같은 키가 무관한 행에 걸려 차감 없이 중복으로 답했다.
+
+## [EC:B22] [EC:B23] consume 행 찾기와 행 키
+
+```pseudo
+findConsume(customer, k):
+   rows = consume rows where consume_key = k                        # 0013 이후
+   if rows: return rows
+   first = legacy consume row (consume_key null) where idempotency_key = k
+   if none: return []
+   sameTx = legacy consume rows with created_at = first.created_at
+   if k = "<b>:<n>" and some row in sameTx has key b: return []      # k 는 b 의 뒤쪽 행
+   return [first] + rows in sameTx whose key = k + ":" + digits
+
+write row i of consume k with idempotency_key "<k>#<i>", consume_key k
+before writing: if any "<k>#<i>" is already taken for the customer -> idempotency_key_conflict
+```

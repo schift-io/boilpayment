@@ -7,6 +7,7 @@ EC:B1-B15 H3 H4 — see spec/schema-postgres.pseudo.md for the consume algorithm
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime
 from typing import Any
@@ -22,6 +23,7 @@ from boilpayment_core import (
     LedgerReference,
     LedgerSource,
     NewLedgerEntry,
+    PaymentKitError,
     Pool,
 )
 
@@ -103,6 +105,45 @@ def _row_to_balance(
         held=int(row["held"]) if row else 0,
         expiring=expiring,
     )
+
+
+
+async def _find_consume(cur: Any, customer_id: str, key: str) -> list[dict[str, Any]]:
+    """EC:B21 B22 — the rows an earlier consume with this key wrote. Rows since 0013 carry
+    consume_key (exact match). Rows written before it have consume_key null: the first row carried
+    the key itself and follow-up rows '<key>:<n>', all in one transaction (same created_at). So a
+    legacy row keyed 'job:1' next to a 'job' row of the same transaction is a follow-up of 'job',
+    not a consume of its own; and a retry of 'job' gets all of its rows back."""
+    await cur.execute(
+        "select * from ledger_entries where customer_id = %s and kind = 'consume' and consume_key = %s "
+        "order by created_at asc",
+        (customer_id, key),
+    )
+    current = await cur.fetchall()
+    if current:
+        return list(current)
+    await cur.execute(
+        "select * from ledger_entries where customer_id = %s and kind = 'consume' and consume_key is null "
+        "and idempotency_key = %s",
+        (customer_id, key),
+    )
+    first = await cur.fetchone()
+    if first is None:
+        return []
+    await cur.execute(
+        "select * from ledger_entries where customer_id = %s and kind = 'consume' and consume_key is null "
+        "and created_at = %s order by idempotency_key asc",
+        (customer_id, first["created_at"]),
+    )
+    same_tx = list(await cur.fetchall())
+    follow_up = re.match(r"^(.*):(\d+)$", key)
+    if follow_up and any(r["idempotency_key"] == follow_up.group(1) for r in same_tx):
+        return []  # a follow-up row of another consume
+    parts = [
+        r for r in same_tx
+        if r["idempotency_key"].startswith(f"{key}:") and r["idempotency_key"][len(key) + 1:].isdigit()
+    ]
+    return [first, *parts]
 
 
 class PostgresLedgerStore:
@@ -242,14 +283,7 @@ class PostgresLedgerStore:
                 connection(self._dsn, input.customer_id) as conn,
                 conn.cursor() as cur,
             ):
-                await cur.execute(
-                    # EC:B21 — exact match only: the caller's key is never used as a pattern.
-                    "select * from ledger_entries where customer_id = %s and kind = 'consume' "
-                    "and (consume_key = %s or (consume_key is null and idempotency_key = %s)) "
-                    "order by created_at asc",
-                    (input.customer_id, input.idempotency_key, input.idempotency_key),
-                )
-                existing = await cur.fetchall()
+                existing = await _find_consume(cur, input.customer_id, input.idempotency_key)
                 if existing:
                     return ConsumeResult(
                         ok=True,
@@ -346,12 +380,24 @@ class PostgresLedgerStore:
                         )
                         shortfall = 0
 
+                # EC:B23 — a row key another operation already holds is refused (same condition and
+                # error as the in-memory store), never a raw unique violation.
+                if writes:
+                    await cur.execute(
+                        "select 1 from ledger_entries where customer_id = %s and idempotency_key = any(%s) limit 1",
+                        (input.customer_id, [f"{input.idempotency_key}#{i}" for i in range(len(writes))]),
+                    )
+                    if await cur.fetchone():
+                        raise PaymentKitError(
+                            f"idempotency key {input.idempotency_key} collides with an existing ledger row",
+                            "idempotency_key_conflict",
+                        )
                 entries: list[LedgerEntry] = []
                 for i, w in enumerate(writes):
                     entry_id = f"le_{uuid.uuid4()}"
-                    # EC:B21 — follow-up rows get a random key so they never collide with a key a
-                    # caller picks; every row is found again through consume_key.
-                    key = input.idempotency_key if i == 0 else f"consume-part:{uuid.uuid4()}"
+                    # EC:B23 — row i is keyed '<key>#<i>', the same as the in-memory store; every row
+                    # is found again through consume_key.
+                    key = f"{input.idempotency_key}#{i}"
 
                     reference = _reference_to_json(input.meta)
                     if w["grant_id"] is not None:

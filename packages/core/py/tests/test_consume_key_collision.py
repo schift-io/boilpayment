@@ -29,3 +29,20 @@ def test_ec_b21_memory_consume_key_collision_is_refused() -> None:
         return err.value.code, (await ledger.balance("c", None, clock.now())).available
 
     assert asyncio.run(run()) == ("idempotency_key_conflict", 105)
+
+
+def test_ec_b23_consume_key_equal_to_grant_key_is_separate_operation() -> None:
+    import asyncio
+    from datetime import UTC, datetime
+
+    from boilpayment_core import ConsumeInput, FixedClock, InMemoryLedger, LedgerReference, NewLedgerEntry, UuidIdGen
+
+    async def run():
+        clock = FixedClock(datetime(2026, 1, 1, tzinfo=UTC))
+        ledger = InMemoryLedger(UuidIdGen(), clock)
+        await ledger.append(NewLedgerEntry(customer_id="c", pool="paid", kind="grant", amount=50, unit_price_minor=None, currency=None,
+                                           expires_at=None, source="topup", reference=LedgerReference(), idempotency_key="k", actor="t"))
+        r = await ledger.consume(ConsumeInput(customer_id="c", pool_order=["paid"], amount=10, idempotency_key="k", meta=LedgerReference(),
+                                              now=clock.now(), negative_balance="block", negative_floor=0))
+        return r.ok, r.duplicated, r.entries[0].idempotency_key
+    assert asyncio.run(run()) == (True, False, "k#0")

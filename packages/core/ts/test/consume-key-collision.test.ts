@@ -18,3 +18,15 @@ describe('[EC:B21] in-memory consume key collision', () => {
     expect((await ledger.balance('c', undefined, clock.now())).available).toBe(105);
   });
 });
+
+describe('[EC:B23] in-memory consume key conflicts match Postgres', () => {
+  it('[EC:B23] a consume key equal to a grant key is a separate operation', async () => {
+    const clock = new FixedClock(new Date('2026-01-01T00:00:00Z'));
+    const ledger = new InMemoryLedger(new UuidIdGen(), clock);
+    await ledger.append({ customerId: 'c', pool: 'paid', kind: 'grant', unitPriceMinor: null, currency: null, expiresAt: null,
+      source: 'topup', reference: {}, actor: 't', reason: null, amount: 50, idempotencyKey: 'k' });
+    const r = await ledger.consume({ customerId: 'c', poolOrder: ['paid'], amount: 10, idempotencyKey: 'k', meta: {},
+      now: clock.now(), negativeBalance: 'block', negativeFloor: 0 });
+    expect([r.ok, r.duplicated, r.entries[0].idempotencyKey]).toEqual([true, false, 'k#0']);
+  });
+});

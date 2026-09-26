@@ -51,3 +51,64 @@ describe('[EC:B21] Postgres consume key is an exact match', () => {
     expect((await ledger.balance(c, undefined, new Date())).available).toBe(20);
   });
 });
+
+describe('[EC:B22] consume rows written before 0013 (consume_key null) after the upgrade', () => {
+  let db: TestDb; let ledger: PostgresLedgerStore; let repo: PostgresRepo;
+  beforeAll(async () => { db = await createTestDb('consumelegacy'); ledger = new PostgresLedgerStore(db.pool); repo = new PostgresRepo(db.pool); });
+  afterAll(async () => { await dropTestDb(db); });
+
+  async function legacyCustomer(): Promise<string> {
+    const id = `cust_${randomUUID()}`;
+    await repo.customers.put({ id, email: null, providerRefs: [], status: 'active', createdAt: new Date() });
+    await ledger.append({ customerId: id, pool: 'paid', kind: 'grant', amount: 100, unitPriceMinor: null, currency: null,
+      expiresAt: null, source: 'topup', reference: {}, idempotencyKey: 'g', actor: 'test', reason: null });
+    // What the pre-0013 build wrote for consume('job', 80) split over two grants: 'job' and 'job:1' in one transaction.
+    const at = '2026-01-01T00:00:00Z';
+    for (const [key, amount] of [['job', -50], ['job:1', -30]] as const) {
+      await db.pool.query(`insert into ledger_entries (id, customer_id, pool, kind, amount, source, reference, idempotency_key, actor, created_at)
+        values ($1, $2, 'paid', 'consume', $3, 'usage', '{}'::jsonb, $4, 'app', $5)`, [`le_${randomUUID()}`, id, amount, key, at]);
+    }
+    await db.pool.query('select paykit_refresh_balance($1)', [id]);
+    return id;
+  }
+  const consume = (customerId: string, amount: number, key: string) => ledger.consume({
+    customerId, poolOrder: ['paid'], amount, idempotencyKey: key, meta: {}, now: new Date(), negativeBalance: 'allow_unbounded', negativeFloor: 0 });
+
+  it('[EC:B22] a new consume whose key equals an old follow-up row key is charged', async () => {
+    const c = await legacyCustomer();
+    const r = await consume(c, 20, 'job:1');
+    expect([r.ok, r.duplicated, r.entries.reduce((s, e) => s + e.amount, 0)]).toEqual([true, false, -20]);
+    expect((await ledger.balance(c, undefined, new Date())).available).toBe(0);
+  });
+  it('[EC:B22] retrying the old consume returns every row it wrote (the whole 80), not only the first', async () => {
+    const c = await legacyCustomer();
+    const r = await consume(c, 80, 'job');
+    expect([r.ok, r.duplicated, r.entries.reduce((s, e) => s + e.amount, 0), r.entries.length]).toEqual([true, true, -80, 2]);
+    expect((await ledger.balance(c, undefined, new Date())).available).toBe(20);
+  });
+});
+
+describe('[EC:B23] consume key conflicts: same condition and error as the in-memory store', () => {
+  let db: TestDb; let ledger: PostgresLedgerStore; let repo: PostgresRepo;
+  beforeAll(async () => { db = await createTestDb('consumeconflict'); ledger = new PostgresLedgerStore(db.pool); repo = new PostgresRepo(db.pool); });
+  afterAll(async () => { await dropTestDb(db); });
+  async function cust(grantKeys: string[]): Promise<string> {
+    const id = `cust_${randomUUID()}`;
+    await repo.customers.put({ id, email: null, providerRefs: [], status: 'active', createdAt: new Date() });
+    for (const k of grantKeys) await ledger.append({ customerId: id, pool: 'paid', kind: 'grant', amount: 50, unitPriceMinor: null, currency: null,
+      expiresAt: null, source: 'topup', reference: {}, idempotencyKey: k, actor: 'test', reason: null });
+    return id;
+  }
+  const consume = (customerId: string, key: string) => ledger.consume({
+    customerId, poolOrder: ['paid'], amount: 10, idempotencyKey: key, meta: {}, now: new Date(), negativeBalance: 'block', negativeFloor: 0 });
+  it('[EC:B23] a consume key equal to a grant key is a separate operation (was a raw 23505)', async () => {
+    const c = await cust(['k']);
+    const r = await consume(c, 'k');
+    expect([r.ok, r.duplicated]).toEqual([true, false]);
+  });
+  it('[EC:B23] a grant holding the consume row key "k#0" refuses the consume with idempotency_key_conflict', async () => {
+    const c = await cust(['g', 'k#0']);
+    await expect(consume(c, 'k')).rejects.toMatchObject({ code: 'idempotency_key_conflict' });
+    expect((await ledger.balance(c, undefined, new Date())).available).toBe(100);
+  });
+});
