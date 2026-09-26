@@ -61,3 +61,22 @@ it.each([{ customerId: 'other', amount: 10 }, { customerId: 'c', amount: -1 }])(
   expect(await ledger.entries('c')).toHaveLength(0);
   expect(await ledger.entries('other')).toHaveLength(0);
 });
+
+// EC:B19 — a regrant without plan.expiresAt takes policy.credits.expiryDays.regrant from the case snapshot
+it('regrant uses the case policy regrant expiry when the plan has none; an explicit plan expiry wins', async () => {
+  const repo = new InMemoryRepo(); const ids = new SequentialIdGen('exp_');
+  const ledger = new InMemoryLedger(ids);
+  const policy = resolvePolicy({ cs: { regrant: { mode: 'auto' } }, credits: { expiryDays: { regrant: 30 } } });
+  const c1 = await openCase({ customerId: 'e', kind: 'regrant', referenceId: 'r1', policy, repo, clock, ids });
+  await regrant({ case: c1, ledger, repo, policy, clock, ids, plan: { pool: 'paid', amount: 10 } });
+  const c2 = await openCase({ customerId: 'e', kind: 'regrant', referenceId: 'r2', policy, repo, clock, ids });
+  const explicit = new Date('2026-03-05T00:00:00.000Z');
+  await regrant({ case: c2, ledger, repo, policy, clock, ids, plan: { pool: 'paid', amount: 5, expiresAt: explicit } });
+  const [a, b] = await ledger.entries('e', { kind: 'grant' });
+  expect(a.expiresAt).toEqual(new Date(+clock.now() + 30 * 86_400_000));
+  expect(b.expiresAt).toEqual(explicit);
+  const plain = resolvePolicy({ cs: { regrant: { mode: 'auto' } } });
+  const c3 = await openCase({ customerId: 'f', kind: 'regrant', referenceId: 'r3', policy: plain, repo, clock, ids });
+  await regrant({ case: c3, ledger, repo, policy: plain, clock, ids, plan: { pool: 'paid', amount: 1 } });
+  expect((await ledger.entries('f', { kind: 'grant' }))[0].expiresAt).toBeNull();
+});

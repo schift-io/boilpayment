@@ -183,6 +183,10 @@ const NUMBER: Record<string, NumberFn> = {
   'refund.noQuestionsDays': (v) => v === 0
     ? { ko: '무조건 환불 창이 없습니다 — 모든 환불은 정책 기준 심사를 거칩니다.', en: 'There is no no-questions-asked refund window; every refund is evaluated against policy.' }
     : { ko: `결제 후 ${v}일 이내에는 사용량과 무관하게 전액 환불됩니다.`, en: `Within ${v} days of payment, refunds are issued in full regardless of usage.` },
+  'credits.expiryDays.promo': (v) => (v === 0 ? { ko: '프로모션 크레딧은 지급 시 만료일을 따로 주지 않으면 만료되지 않습니다.', en: 'Promo credits never expire unless the grant sets an expiry.' } : { ko: `프로모션 크레딧은 지급 시 만료일을 따로 주지 않으면 ${v}일 뒤 만료됩니다.`, en: `Promo credits expire ${v} days after the grant unless the grant sets an expiry.` }),
+  'credits.expiryDays.trial': (v) => (v === 0 ? { ko: '트라이얼 직접 지급 크레딧은 지급 시 만료일을 따로 주지 않으면 만료되지 않습니다.', en: 'Directly granted trial credits never expire unless the grant sets an expiry.' } : { ko: `트라이얼 직접 지급 크레딧은 지급 시 만료일을 따로 주지 않으면 ${v}일 뒤 만료됩니다.`, en: `Directly granted trial credits expire ${v} days after the grant unless the grant sets an expiry.` }),
+  'credits.expiryDays.manual': (v) => (v === 0 ? { ko: '운영자 수동 지급 크레딧은 지급 시 만료일을 따로 주지 않으면 만료되지 않습니다.', en: 'Manually granted credits never expire unless the grant sets an expiry.' } : { ko: `운영자 수동 지급 크레딧은 지급 시 만료일을 따로 주지 않으면 ${v}일 뒤 만료됩니다.`, en: `Manually granted credits expire ${v} days after the grant unless the grant sets an expiry.` }),
+  'credits.expiryDays.regrant': (v) => (v === 0 ? { ko: 'CS 재지급 크레딧은 지급 시 만료일을 따로 주지 않으면 만료되지 않습니다.', en: 'CS regrant credits never expire unless the grant sets an expiry.' } : { ko: `CS 재지급 크레딧은 지급 시 만료일을 따로 주지 않으면 ${v}일 뒤 만료됩니다.`, en: `CS regrant credits expire ${v} days after the grant unless the grant sets an expiry.` }),
   'refund.maxPerCustomerPerYear': (v) => ({ ko: `고객 1인당 연간 환불은 최대 ${v}회까지 허용됩니다.`, en: `A customer may receive at most ${v} refund(s) per year.` }),
   'usage.overageUnitPriceMinor': (v) => ({ ko: `초과 사용분은 단위당 ${v.toLocaleString()} (minor unit) 로 과금됩니다.`, en: `Overage usage is billed at ${v.toLocaleString()} (minor unit) per unit.` }),
   'usage.lateReportWindowHours': (v) => ({ ko: `사용량 보고가 주기 마감 후 ${v}시간 이내에 도착하면 직전 주기로 귀속됩니다.`, en: `Usage reported within ${v} hours after period close is attributed to the prior period.` }),
@@ -205,6 +209,8 @@ export function consequenceFor(policyPath: string, value: unknown): Consequence 
     if (TEXT[policyPath]) return TEXT[policyPath](value);
   }
   if (typeof value === 'number' && NUMBER[policyPath]) return NUMBER[policyPath](value);
+  // EC:B19 — null means "never" for the per-source expiry keys (other null numbers keep their old output).
+  if (value === null && policyPath.startsWith('credits.expiryDays.')) return NUMBER[policyPath](0);
   if (typeof value === 'boolean' && BOOL[policyPath]) return BOOL[policyPath](value);
   return null;
 }

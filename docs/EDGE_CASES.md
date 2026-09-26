@@ -62,6 +62,10 @@
 | B15 | 잔액 조회 성능 (원장 합계) | (구현 규칙) | `credit_balances` 스냅샷 테이블 + 원장 트리거/앱 갱신. 정합성 검사 잡 | schema | P1 |
 | B16 | 크레딧 만료 예정 알림 | `policy.credits.expiry_notice_days` | **`null`** (알림 없음) / N (만료 N일 전부터 알림). `credits.notifyExpiring({customerId?, ledger, repo, notifier, policy, clock})` 가 paid pool 의 grant 잔여 버킷 중 `expiresAt` 이 `[now, now+N일]` 안에 드는 것을 찾아 `pending` 목록으로 반환한다. `(customer, expiresAt, day)` 단위로 멱등(같은 날 재실행은 스팸 방지, 다음날은 다시 알림) — `repo.outbox` 를 dedup 마커로 사용, 키 `credits-expiry-notice:{customerId}:{expiresAt}:{day}`. ⚠ 계약 변경 제안: 실제 발송에는 core `NotifyType` 에 크레딧 만료 전용 케이스가 필요(`card.expiring` 은 결제 카드 전용 문구라 재사용 불가) — core 수정 권한 밖이라 이 함수는 `pending` 만 반환하고 notifier 는 아직 호출하지 않는다 | credits | P0 |
 | B17 | 음수 잔액 상태에서 새 지급이 들어올 때 처리 | `policy.credits.negative_offset` | **`offset_next_grant`** (새 지급이 기존 음수를 먼저 상계하고 나머지만 사용 가능 — 예: 기존 -30, 신규 지급 100 → 70 만 즉시 소비 가능) / `never` (음수 잔액을 그대로 방치). `credits.grantForPeriod` / `credits.topup` 두 지급 경로 안에서 처리하며, 원장 산술 자체는 건드리지 않고 **별도의 `adjust` 원장 행**(`source` 는 grant 와 동일, 키 `offset:{grantIdempotencyKey}`)으로 상계를 남겨 타임라인에서 "100 지급, 30 은 기존 음수 잔액에 적용, 70 사용 가능" 처럼 보이게 한다 | credits | P0 |
+| B19 | 출처별 기본 만료 — 프로모션 | `policy.credits.expiry_days.promo` | **`null`** (무만료) / 일수. `grantPromo` 에 `policy` 를 넘기고 `expiresAt` 을 주지 않을 때 적용, 소진 순서는 그대로 만료 임박 순 | credits | P0 |
+| B19 | 출처별 기본 만료 — 트라이얼 직접 지급 | `policy.credits.expiry_days.trial` | **`null`** / 일수. `grantTrial` 직접 지급에만 적용(구독 트라이얼 크레딧은 기간 끝에 만료되는 기존 규칙 그대로) | credits | P0 |
+| B19 | 출처별 기본 만료 — 운영자 수동 지급 | `policy.credits.expiry_days.manual` | **`null`** / 일수. `manualGrant` 에 `policy` 를 넘길 때 적용 | credits | P0 |
+| B19 | 출처별 기본 만료 — CS 재지급 | `policy.credits.expiry_days.regrant` | **`null`** / 일수. 재지급 계획에 `expiresAt` 이 없으면 케이스의 정책 스냅샷 값으로 만료일을 정한다. 충전분은 기존 `topup_expiry_days`(B10), 구독 지급분은 주기 끝(롤오버 규칙) | cs · credits | P0 |
 | B18 | 차지백 증빙(evidence) 수집·제출 마감 (D9 보강) | `policy.dispute.evidence_due_days` | **`7`** (분쟁 오픈 후 N일 안에 체크리스트 수집·제출. 체크리스트는 결제 기록·원장 grant/consume 이력·이용량·환불 이력·CS 케이스 기록에서 도출, 없는 항목은 `available:false`+사유(약관 동의 이력은 kit 이 아예 안 갖고 있어 항상 이 상태). provider 가 프로그램적 제출을 지원하면(duck-typed `submitDisputeEvidence`, Stripe 有 / Toss·PortOne 無) 자동 제출, 아니면 `submitted:false, reason:'provider_unsupported'` + 체크리스트 첨부해 사람에게 에스컬레이션. 마감 24시간 전이고 체크리스트 미완이면 크론이 재에스컬레이션 | cs | P1 |
 
 ## C. 이용량(Usage)
@@ -260,7 +264,7 @@ kit 을 붙이기 전부터 결제 중인 고객이 있으면, 그 고객의 구
 2. 결제 모델: subscription / topup / usage
 3. 재화: credits / usage_quota
 4. 주기 · 타임존 (C3, G1, G2)
-5. 크레딧: B1 B2 B3 B4 B7 B10
+5. 크레딧: B1 B2 B3 B4 B7 B10 (B19 은 고급)
 6. 업그레이드: A1 A2
 7. 다운그레이드: A3 A4
 8. 취소: A5 A6

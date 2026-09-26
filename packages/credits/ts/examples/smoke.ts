@@ -110,6 +110,15 @@ async function main(): Promise<void> {
   const after = await expireDue({ ledger, clock, customerId: 'cust_1' });
   console.log(`11_expire_due_after_expiry: entries=${after.entries.length}`);
   await print('12_final');
+
+  // EC:B19 — per-source default expiry (policy passed, no expiresAt)
+  const exPolicy = resolvePolicy({ credits: { expiryDays: { promo: 30, manual: 90 } } });
+  const exLedger = new InMemoryLedger(new SequentialIdGen('ex_'), clock);
+  const pr = await grantPromo({ customerId: 'cust_x', amount: 10, ledger: exLedger, clock, idempotencyKey: 'x_p', policy: exPolicy });
+  const mg = await manualGrant({ customerId: 'cust_x', pool: 'promo', amount: 5, reason: 'goodwill', actor: 'ops', ledger: exLedger, clock, idempotencyKey: 'x_m', policy: exPolicy });
+  clock.advance(31 * 86_400_000);
+  const exBal = await exLedger.balance('cust_x', 'promo', clock.now());
+  console.log(`13_expiry_days: promo_expires=${pr.entry!.expiresAt!.toISOString()} manual_expires=${mg.entry!.expiresAt!.toISOString()} promo_available_after_31d=${exBal.available}`);
 }
 
 main().catch((err) => {

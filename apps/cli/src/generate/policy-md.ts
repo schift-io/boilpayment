@@ -26,7 +26,13 @@ export function generatePolicyMd(config: PaykitConfig): string {
   lines.push('---');
   lines.push('');
 
-  const applicability = { ...config, refundAdvanced: true, trialEnabled: config.plans.some((plan) => plan.trialDays > 0) };
+  const applicability = {
+    ...config,
+    refundAdvanced: true,
+    // EC:B19 — the per-source expiry rules are listed once any of them is set.
+    creditsAdvanced: Object.values(config.policy.credits.expiryDays ?? {}).some((v) => v !== null),
+    trialEnabled: config.plans.some((plan) => plan.trialDays > 0),
+  };
   let lastGroup = '';
   for (const q of QUESTIONS) {
     if (!q.policyPath) continue;

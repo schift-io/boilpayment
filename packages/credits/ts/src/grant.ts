@@ -270,6 +270,15 @@ export async function topup(input: TopupInput): Promise<GrantResult> {
   return result;
 }
 
+/**
+ * EC:B19 — default expiry for a grant source from policy.credits.expiryDays. null = never.
+ * Used only when the caller passes `policy` and no expiresAt; without `policy` nothing changes.
+ */
+export function defaultExpiry(policy: Policy, source: 'promo' | 'trial' | 'manual' | 'regrant', now: Date): Date | null {
+  const days = policy.credits.expiryDays[source];
+  return days === null ? null : new Date(now.getTime() + days * 86_400_000);
+}
+
 // grantPromo / grantTrial — automated promo/trial grants (distinct from EC:B9 manual adjustments)
 export interface GrantPoolInput {
   customerId: string;
@@ -281,10 +290,13 @@ export interface GrantPoolInput {
   reason?: string | null;
   actor?: string;
   reference?: LedgerReference;
+  /** EC:B19 — pass to apply policy.credits.expiryDays when expiresAt is not given. */
+  policy?: Policy;
 }
 
-async function grantPool(pool: Pool, source: LedgerSource, input: GrantPoolInput): Promise<GrantResult> {
-  const { customerId, amount, ledger, idempotencyKey, expiresAt = null, reason = null, actor = 'system', reference = {} } = input;
+async function grantPool(pool: Pool, source: 'promo' | 'trial', input: GrantPoolInput): Promise<GrantResult> {
+  const { customerId, amount, ledger, idempotencyKey, reason = null, actor = 'system', reference = {} } = input;
+  const expiresAt = input.expiresAt ?? (input.policy ? defaultExpiry(input.policy, source, input.clock.now()) : null);
   return writeGrant(ledger, {
     customerId,
     pool,
@@ -321,6 +333,8 @@ export interface ManualAdjustInput {
   idempotencyKey: string;
   expiresAt?: Date | null;
   reference?: LedgerReference;
+  /** EC:B19 — pass to apply policy.credits.expiryDays.manual when expiresAt is not given (grants only). */
+  policy?: Policy;
 }
 
 function requireReasonAndActor(input: { reason: string; actor: string }): void {
@@ -337,7 +351,7 @@ export async function manualGrant(input: ManualAdjustInput): Promise<GrantResult
     amount: Math.abs(input.amount),
     unitPriceMinor: null,
     currency: null,
-    expiresAt: input.expiresAt ?? null,
+    expiresAt: input.expiresAt ?? (input.policy ? defaultExpiry(input.policy, 'manual', input.clock.now()) : null),
     source: 'manual',
     reference: input.reference ?? {},
     idempotencyKey: input.idempotencyKey,

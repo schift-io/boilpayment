@@ -351,6 +351,15 @@ async def topup(input: TopupInput) -> GrantResult:
     return result.result
 
 
+def default_expiry(policy: Policy, source: str, now: datetime) -> datetime | None:
+    """EC:B19 -- default expiry for a grant source from policy.credits.expiry_days. None = never.
+
+    Used only when the caller passes `policy` and no expires_at; without `policy` nothing changes.
+    """
+    days = getattr(policy.credits.expiry_days, source)
+    return None if days is None else now + timedelta(days=days)
+
+
 @dataclass(kw_only=True, slots=True)
 class GrantPoolInput:
     customer_id: str
@@ -362,6 +371,8 @@ class GrantPoolInput:
     reason: str | None = None
     actor: str = "system"
     reference: LedgerReference = field(default_factory=LedgerReference)
+    # EC:B19 -- pass to apply policy.credits.expiry_days when expires_at is not given.
+    policy: Policy | None = None
 
 
 async def _grant_pool(
@@ -376,7 +387,9 @@ async def _grant_pool(
             amount=input.amount,
             unit_price_minor=None,
             currency=None,
-            expires_at=input.expires_at,
+            expires_at=input.expires_at
+            if input.expires_at is not None
+            else (default_expiry(input.policy, source, input.clock.now()) if input.policy else None),
             source=source,
             reference=input.reference,
             idempotency_key=input.idempotency_key,
@@ -407,6 +420,8 @@ class ManualAdjustInput:
     idempotency_key: str
     expires_at: datetime | None = None
     reference: LedgerReference = field(default_factory=LedgerReference)
+    # EC:B19 -- pass to apply policy.credits.expiry_days.manual when expires_at is not given (grants only).
+    policy: Policy | None = None
 
 
 def _require_reason_and_actor(reason: str, actor: str) -> None:
@@ -432,7 +447,9 @@ async def manual_grant(input: ManualAdjustInput) -> GrantResult:
             amount=abs(input.amount),
             unit_price_minor=None,
             currency=None,
-            expires_at=input.expires_at,
+            expires_at=input.expires_at
+            if input.expires_at is not None
+            else (default_expiry(input.policy, "manual", input.clock.now()) if input.policy else None),
             source="manual",
             reference=input.reference,
             idempotency_key=input.idempotency_key,

@@ -82,9 +82,12 @@ async function doRegrant(input: RegrantInput, idemKey: string): Promise<CsCase> 
   }
 
   // mode == 'auto', or manual_approve with approvedBy set
+  // EC:B19 — no expiresAt in the plan -> policy.credits.expiryDays.regrant (null = never)
+  const regrantDays = csCase.policySnapshot.credits.expiryDays?.regrant ?? null;
+  const expiresAt = plan.expiresAt ?? (regrantDays === null ? null : new Date(clock.now().getTime() + regrantDays * 86_400_000));
   const result = await ledger.append({
     customerId: plan.customerId ?? csCase.customerId, pool: plan.pool, kind: 'grant', amount: plan.amount,
-    unitPriceMinor: plan.unitPriceMinor ?? null, currency: plan.currency ?? null, expiresAt: plan.expiresAt ?? null,
+    unitPriceMinor: plan.unitPriceMinor ?? null, currency: plan.currency ?? null, expiresAt,
     source: 'regrant', reference: { caseId: csCase.id, ...(correlationId ? { correlationId } : {}) }, idempotencyKey: idemKey, actor: 'cs',
     reason: plan.reason ?? `regrant: case ${csCase.id}`,
   });

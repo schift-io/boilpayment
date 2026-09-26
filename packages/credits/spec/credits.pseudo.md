@@ -93,6 +93,21 @@ output: { offset: int, offsetEntries: LedgerEntry[] }
 idempotencyKey: offset:{grantIdempotencyKey} / offset:{grantIdempotencyKey}:settled
 ```
 
+## [EC:B19] 출처별 기본 만료 — grantPromo / grantTrial / manualGrant / cs.regrant
+
+```pseudo
+defaultExpiry(policy, source in promo|trial|manual|regrant, now):
+  days = policy.credits.expiryDays[source]          # default null for every source
+  return days is null ? null : now + days
+grantPromo / grantTrial / manualGrant(input):
+  expiresAt = input.expiresAt ?? (input.policy ? defaultExpiry(input.policy, source, clock.now()) : null)
+cs.regrant: expiresAt = plan.expiresAt ?? defaultExpiry(case.policySnapshot, 'regrant', clock.now())
+```
+
+Explicit `expiresAt` always wins. Without `policy` the grant helpers behave exactly as before.
+Consumption order is unchanged (`consumeOrder`, expiring first by default). Top-ups keep
+`topupExpiryDays` (B10); subscription period grants keep the rollover rule (period end).
+
 ## [EC:B16] notifyExpiring — 만료 예정 크레딧 알림
 
 ```pseudo

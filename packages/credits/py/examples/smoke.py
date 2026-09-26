@@ -221,6 +221,25 @@ async def main() -> None:
     print(f"11_expire_due_after_expiry: entries={len(after.entries)}")
     await show("12_final")
 
+    # EC:B19 -- per-source default expiry (policy passed, no expires_at)
+    ex_policy = resolve_policy({"credits": {"expiryDays": {"promo": 30, "manual": 90}}})
+    ex_ledger = InMemoryLedger(SequentialIdGen("ex_"), clock)
+    pr = await grant_promo(
+        GrantPoolInput(customer_id="cust_x", amount=10, ledger=ex_ledger, clock=clock, idempotency_key="x_p", policy=ex_policy)
+    )
+    mg = await manual_grant(
+        ManualAdjustInput(
+            customer_id="cust_x", pool="promo", amount=5, reason="goodwill", actor="ops", ledger=ex_ledger,
+            clock=clock, idempotency_key="x_m", policy=ex_policy,
+        )
+    )
+    clock.advance(31 * 86_400_000)
+    ex_bal = await ex_ledger.balance("cust_x", "promo", clock.now())
+    print(
+        f"13_expiry_days: promo_expires={pr.entry.expires_at.isoformat()} "
+        f"manual_expires={mg.entry.expires_at.isoformat()} promo_available_after_31d={ex_bal.available}"
+    )
+
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -9,6 +9,7 @@ from .grant import (  # noqa: F401
     GrantResult,
     ManualAdjustInput,
     TopupInput,
+    default_expiry,
     grant_for_period,
     grant_promo,
     grant_trial,

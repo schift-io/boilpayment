@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from boilpayment_core import (
@@ -148,6 +148,11 @@ async def _do_regrant(input: RegrantInput, idem_key: str) -> CsCase:
         )
     # mode == "auto", or manual_approve with approved_by set
     plan = input.plan
+    # EC:B19 -- no expires_at in the plan -> policy.credits.expiry_days.regrant (None = never)
+    regrant_days = input.case.policy_snapshot.credits.expiry_days.regrant
+    expires_at = plan.expires_at
+    if expires_at is None and regrant_days is not None:
+        expires_at = input.clock.now() + timedelta(days=regrant_days)
     result = await input.ledger.append(
         NewLedgerEntry(
             customer_id=plan.customer_id or input.case.customer_id,
@@ -156,7 +161,7 @@ async def _do_regrant(input: RegrantInput, idem_key: str) -> CsCase:
             amount=plan.amount,
             unit_price_minor=plan.unit_price_minor,
             currency=plan.currency,
-            expires_at=plan.expires_at,
+            expires_at=expires_at,
             source="regrant",
             reference=LedgerReference(
                 case_id=input.case.id, correlation_id=input.correlation_id
