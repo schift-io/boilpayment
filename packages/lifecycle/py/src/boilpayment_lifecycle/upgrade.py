@@ -22,6 +22,7 @@ from boilpayment_core import (
     Subscription,
     deserialize_ledger_entry,
     deserialize_subscription,
+    iso_z,
     proration_fraction,
     run_idempotent,
     scale_minor,
@@ -85,7 +86,7 @@ def _deserialize(v: dict) -> UpgradeResult:
 # re-charging/re-granting. See spec/lifecycle.pseudo.md [EC:A1 A2 A8] "멱등성" note.
 async def upgrade(input: UpgradeInput) -> UpgradeResult:
     key = input.idempotency_key or (
-        f"upgrade:{input.sub.id}:{input.new_plan.id}:{input.sub.current_period.start.isoformat()}"
+        f"upgrade:{input.sub.id}:{input.new_plan.id}:{iso_z(input.sub.current_period.start)}"
     )
 
     result = await run_idempotent(
@@ -96,7 +97,7 @@ async def upgrade(input: UpgradeInput) -> UpgradeResult:
         payload={
             "sub_id": input.sub.id,
             "new_plan_id": input.new_plan.id,
-            "period_start": input.sub.current_period.start.isoformat(),
+            "period_start": iso_z(input.sub.current_period.start),
         },
         serialize=_serialize,
         deserialize=_deserialize,
@@ -171,7 +172,7 @@ async def _do_upgrade(input: UpgradeInput) -> UpgradeResult:
         if prorated_money_delta > 0 and new_price is not None:
             # EC:J5 — deterministic (not clock.now()-derived): a retry of this same upgrade
             # operation must reuse the same provider-side charge idempotency key.
-            charge_key = f"charge:upgrade:{sub.id}:{new_plan.id}:{sub.current_period.start.isoformat()}"
+            charge_key = f"charge:upgrade:{sub.id}:{new_plan.id}:{iso_z(sub.current_period.start)}"
             payment = await scoped_provider.charge_billing_key(
                 billing_key=sub.billing_key,
                 amount=Money(
@@ -217,7 +218,7 @@ async def _do_upgrade(input: UpgradeInput) -> UpgradeResult:
     if delta > 0:
         # EC:J5 — deterministic ledger idempotency key (sub + target plan + *original* period
         # start, not clock.now()); see docs/EDGE_CASES.md §J J5.
-        idempotency_key = f"grant:upgrade:{sub.id}:{new_plan.id}:{sub.current_period.start.isoformat()}"
+        idempotency_key = f"grant:upgrade:{sub.id}:{new_plan.id}:{iso_z(sub.current_period.start)}"
         expires_at = None if policy.credits.rollover == "full" else current_period.end
         result = await ledger.append(
             NewLedgerEntry(

@@ -18,6 +18,7 @@ from boilpayment_core import (
     Repo,
     Subscription,
     deserialize_cs_case,
+    key_matches_instant,
     run_idempotent,
     serialize_cs_case,
 )
@@ -148,8 +149,23 @@ async def recover_missing_grant(input: RecoverMissingGrantInput) -> CsCase:
     async def complete() -> CsCase:
         entries = await input.ledger.entries(input.customer_id, kind="grant")
         existing = next(
-            (entry for entry in entries if entry.idempotency_key == grant_key), None
-        )
+            (
+                entry
+                for entry in entries
+                if entry.idempotency_key == grant_key
+                or (
+                    snapshot.plan.interval is not None
+                    and snapshot.subscription_id
+                    and snapshot.period
+                    and key_matches_instant(
+                        entry.idempotency_key,
+                        f"grant:{snapshot.subscription_id}:",
+                        datetime.fromisoformat(str(snapshot.period["start"])),
+                    )
+                )
+            ),
+            None,
+        )  # EC:J11
         if existing:
             return await resolve(
                 ResolveInput(

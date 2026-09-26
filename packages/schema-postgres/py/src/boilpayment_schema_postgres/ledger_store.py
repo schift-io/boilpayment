@@ -25,6 +25,7 @@ from boilpayment_core import (
     NewLedgerEntry,
     PaymentKitError,
     Pool,
+    iso_z,
 )
 
 from .mapping import jsonb
@@ -38,7 +39,7 @@ def _reference_to_json(ref: LedgerReference | None) -> dict[str, Any]:
     if ref.subscription_id is not None:
         out["subscriptionId"] = ref.subscription_id
     if ref.period_start is not None:
-        out["periodStart"] = ref.period_start.isoformat()
+        out["periodStart"] = iso_z(ref.period_start)
     if ref.payment_id is not None:
         out["paymentId"] = ref.payment_id
     if ref.case_id is not None:

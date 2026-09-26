@@ -1,4 +1,4 @@
-import { runIdempotent, serializeCsCase, deserializeCsCase } from 'boilpayment-core';
+import { runIdempotent, serializeCsCase, deserializeCsCase, keyMatchesInstant } from 'boilpayment-core';
 import type { CsCase, LedgerEntry, Payment, Period, Plan, Subscription } from 'boilpayment-core';
 import { escalate, reject, resolve } from './cases.js';
 import { getPurchaseSnapshot } from './purchaseSnapshot.js';
@@ -45,7 +45,9 @@ export async function recoverMissingGrant(input: RecoverMissingGrantInput): Prom
   const completed = await runIdempotent({ repo, clock, key: `support-recover-complete:${csCase.id}`, kind: 'cs.recoverMissingGrant',
     payload: { grantKey }, serialize: serializeCsCase, deserialize: deserializeCsCase,
     fn: async () => {
-      const existing = (await ledger.entries(input.customerId, { kind: 'grant' })).find((entry) => entry.idempotencyKey === grantKey);
+      const existing = (await ledger.entries(input.customerId, { kind: 'grant' })).find((entry) => entry.idempotencyKey === grantKey
+        || (snapshot.plan.interval !== null && snapshot.subscriptionId && snapshot.period
+          && keyMatchesInstant(entry.idempotencyKey, `grant:${snapshot.subscriptionId}:`, new Date(snapshot.period.start)))); // EC:J11
       if (existing) return resolve({ case: csCase, by: 'auto', decision: { granted: false, entryId: existing.id, paymentId: payment.id, idempotencyKey: grantKey }, repo, clock, onCaseEvent, reporter: input.reporter });
       const outcome = await applyPurchasedGrant(input);
       if (!outcome.entry || outcome.deferred) return hold('credit grant was deferred');

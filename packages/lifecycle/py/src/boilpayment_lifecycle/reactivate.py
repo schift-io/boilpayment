@@ -17,6 +17,7 @@ from boilpayment_core import (
     Subscription,
     SubscriptionStatus,
     deserialize_subscription,
+    iso_z,
     run_idempotent,
     serialize_subscription,
 )
@@ -90,7 +91,7 @@ def _deserialize(v: dict) -> ReactivateResult:
 async def _restore_canceled_credits(
     *, ledger: LedgerStore, customer_id: str, sub_id: str, period_start
 ) -> RestoredCredits:
-    revoke_key = f"revoke:cancel:{sub_id}:{period_start.isoformat()}"
+    revoke_key = f"revoke:cancel:{sub_id}:{iso_z(period_start)}"
     all_entries = await ledger.entries(customer_id, pool="paid")
     revoke_entry = next(
         (e for e in all_entries if e.idempotency_key == revoke_key), None
@@ -147,7 +148,7 @@ async def _restore_canceled_credits(
                 reference=LedgerReference(
                     subscription_id=sub_id, period_start=period_start, grant_id=grant.id
                 ),
-                idempotency_key=f"restore:reactivate:{sub_id}:{period_start.isoformat()}:{grant.id}",
+                idempotency_key=f"restore:reactivate:{sub_id}:{iso_z(period_start)}:{grant.id}",
                 actor="system",
                 reason="A23 reactivate — restoring credits revoked at cancel",
                 unit_price_minor=grant.unit_price_minor,
@@ -169,7 +170,7 @@ async def _restore_canceled_credits(
                 reference=LedgerReference(
                     subscription_id=sub_id, period_start=period_start
                 ),
-                idempotency_key=f"restore:reactivate:{sub_id}:{period_start.isoformat()}:remainder",
+                idempotency_key=f"restore:reactivate:{sub_id}:{iso_z(period_start)}:remainder",
                 actor="system",
                 reason="A23 reactivate — restoring credits revoked at cancel (unattributed remainder)",
                 unit_price_minor=None,
@@ -190,7 +191,7 @@ async def _restore_canceled_credits(
 async def reactivate(input: ReactivateInput) -> ReactivateResult:
     sub = input.sub
     key = input.idempotency_key or (
-        f"reactivate:{sub.id}:{sub.current_period.start.isoformat()}"
+        f"reactivate:{sub.id}:{iso_z(sub.current_period.start)}"
     )
 
     result = await run_idempotent(
@@ -200,7 +201,7 @@ async def reactivate(input: ReactivateInput) -> ReactivateResult:
         kind="lifecycle.reactivate",
         payload={
             "sub_id": sub.id,
-            "period_start": sub.current_period.start.isoformat(),
+            "period_start": iso_z(sub.current_period.start),
         },
         serialize=_serialize,
         deserialize=_deserialize,

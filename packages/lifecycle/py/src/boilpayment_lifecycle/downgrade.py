@@ -17,6 +17,7 @@ from boilpayment_core import (
     Subscription,
     deserialize_ledger_entry,
     deserialize_subscription,
+    iso_z,
     run_idempotent,
     serialize_ledger_entry,
     serialize_subscription,
@@ -89,7 +90,7 @@ def _deserialize(v: dict) -> DowngradeResult:
 # EC:J1-J5 — wrapped in run_idempotent so a retry replays the first result instead of re-clawing-back.
 async def downgrade(input: DowngradeInput) -> DowngradeResult:
     key = input.idempotency_key or (
-        f"downgrade:{input.sub.id}:{input.new_plan.id}:{input.sub.current_period.start.isoformat()}"
+        f"downgrade:{input.sub.id}:{input.new_plan.id}:{iso_z(input.sub.current_period.start)}"
     )
 
     result = await run_idempotent(
@@ -100,7 +101,7 @@ async def downgrade(input: DowngradeInput) -> DowngradeResult:
         payload={
             "sub_id": input.sub.id,
             "new_plan_id": input.new_plan.id,
-            "period_start": input.sub.current_period.start.isoformat(),
+            "period_start": iso_z(input.sub.current_period.start),
         },
         serialize=_serialize,
         deserialize=_deserialize,
@@ -148,7 +149,7 @@ async def _do_downgrade(input: DowngradeInput) -> DowngradeResult:
         delta = old_plan.credits_per_period - new_plan.credits_per_period
         if delta > 0:
             idempotency_key = (
-                f"revoke:downgrade:{sub.id}:{sub.current_period.start.isoformat()}"
+                f"revoke:downgrade:{sub.id}:{iso_z(sub.current_period.start)}"
             )
             clawback_result = await clawback(
                 ClawbackInput(

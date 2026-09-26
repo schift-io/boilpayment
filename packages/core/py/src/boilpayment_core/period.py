@@ -53,6 +53,8 @@ def _civil_to_utc(parts: _CivilParts, tz: str) -> datetime:
         parts.second,
         parts.microsecond,
     )
+    # EC:J12 -- fold=0: an overlapping wall time is the earlier instant; a gap uses the offset
+    # in force before the transition. The TS kit applies the same rule.
     local = naive.replace(tzinfo=ZoneInfo(tz))
     return local.astimezone(UTC)
 
@@ -100,7 +102,7 @@ def next_period(
         ),
         tz,
     )
-    return Period(start=period.end, end=new_end)
+    return Period(start=period.end.astimezone(UTC), end=new_end)
 
 
 def period_containing(

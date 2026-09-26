@@ -41,18 +41,23 @@ function civilPartsInTz(date: Date, tz: string): CivilParts {
   };
 }
 
-/** Civil-time -> UTC instant, resolved by iterative offset correction (handles DST, EC:G3). */
+/**
+ * Civil-time -> UTC instant (EC:G3, EC:J12). Same rule as Python `datetime.replace(tzinfo=ZoneInfo(tz))`
+ * with fold=0: a wall time that occurs twice (fall-back overlap) resolves to the EARLIER instant; a wall
+ * time that does not exist (spring-forward gap) is read with the offset in force BEFORE the transition.
+ */
+function offsetAt(ms: number, tz: string): number {
+  const p = civilPartsInTz(new Date(ms), tz);
+  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second, new Date(ms).getUTCMilliseconds()) - ms;
+}
+
 function civilToUtc(parts: CivilParts, tz: string): Date {
-  const target = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second, parts.ms);
-  let guess = target;
-  for (let i = 0; i < 3; i++) {
-    const got = civilPartsInTz(new Date(guess), tz);
-    const gotUtc = Date.UTC(got.year, got.month - 1, got.day, got.hour, got.minute, got.second, got.ms);
-    const diff = gotUtc - target;
-    if (diff === 0) break;
-    guess -= diff;
-  }
-  return new Date(guess);
+  const wall = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second, parts.ms);
+  const before = offsetAt(wall - DAY_MS, tz);
+  const after = offsetAt(wall + DAY_MS, tz);
+  const matches = [...new Set([wall - before, wall - after])].filter((c) => c + offsetAt(c, tz) === wall);
+  if (matches.length > 0) return new Date(Math.min(...matches));
+  return new Date(wall - before);
 }
 
 /** Number of days in `month` (1..12) of `year`, accounting for leap years (EC:G5). */

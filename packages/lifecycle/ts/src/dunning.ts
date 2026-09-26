@@ -12,6 +12,7 @@ import {
   Policy,
   Repo,
   Subscription,
+  keyMatchesInstant,
 } from 'boilpayment-core';
 import { grantForPeriod, GrantResult } from 'boilpayment-credits';
 import { retryOnVersionConflict } from './retry.js';
@@ -125,7 +126,7 @@ export async function onGraceExpired(input: OnGraceExpiredInput): Promise<OnGrac
   if (policy.dunning.onFinalFailure === 'revoke_unpaid_period') {
     const periodKey = `grant:${sub.id}:${sub.currentPeriod.start.toISOString()}`;
     const all = await ledger.entries(sub.customerId);
-    const grant = all.find((e) => e.kind === 'grant' && e.idempotencyKey === periodKey);
+    const grant = all.find((e) => e.kind === 'grant' && (e.idempotencyKey === periodKey || keyMatchesInstant(e.idempotencyKey, `grant:${sub.id}:`, sub.currentPeriod.start)));
     if (grant) {
       const used = all
         .filter((e) => (e.kind === 'consume' || e.kind === 'revoke') && e.reference.grantId === grant.id)

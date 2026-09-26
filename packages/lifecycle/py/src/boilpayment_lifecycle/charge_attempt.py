@@ -33,6 +33,7 @@ from boilpayment_core import (
     ProviderError,
     Repo,
     Subscription,
+    key_matches_instant,
 )
 
 from .internal import scope_provider
@@ -152,18 +153,17 @@ def is_decline(err: BaseException) -> bool:
 async def attempts_for(repo: Repo, sub: Subscription, period: Period) -> list[Payment]:
     """Every attempt row of one (subscription, period), oldest first. A row the previous release
     wrote used the attempt key itself as orderId/provider_ref (TS or Python date format)."""
-    legacy = {
-        renewal_attempt_key(sub, period),
-        f"charge:{sub.id}:{period.start.isoformat()}",
-    }
     rows = await repo.payments.list(subscription_id=sub.id)
+    prefix = f"charge:{sub.id}:"
     matched = [
         p
         for p in rows
         if p.kind == "subscription"
         and (
             (p.period is not None and p.period.start == period.start)
-            or p.provider_ref in legacy
+            or p.provider_ref == renewal_attempt_key(sub, period)
+            # EC:J11 -- any date form the previous release wrote (TS 'Z', Python '+00:00'/'+09:00').
+            or key_matches_instant(p.provider_ref, prefix, period.start)
         )
     ]
     return sorted(matched, key=lambda p: p.occurred_at)

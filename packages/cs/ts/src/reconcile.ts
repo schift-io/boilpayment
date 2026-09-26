@@ -1,5 +1,5 @@
 // spec/cs.pseudo.md — EC:E1 H4
-import { Clock, CsCase, IdGen, LedgerStore, PaymentProvider, Policy, ProviderName, Repo } from 'boilpayment-core';
+import { Clock, CsCase, IdGen, LedgerStore, PaymentProvider, Policy, ProviderName, Repo, keyMatchesInstant } from 'boilpayment-core';
 import { openCase, OnCaseEvent } from './cases.js';
 
 export interface ReconcileInput {
@@ -39,7 +39,8 @@ export async function reconcile(input: ReconcileInput): Promise<CsCase[]> {
           continue; // overage payments aren't grant-backed
         }
         const grantEntries = await ledger.entries(customer.id, { kind: 'grant' });
-        const found = grantEntries.some((e) => e.idempotencyKey === grantKey);
+        const found = grantEntries.some((e) => e.idempotencyKey === grantKey
+          || (payment.kind === 'subscription' && payment.period && keyMatchesInstant(e.idempotencyKey, `grant:${payment.subscriptionId}:`, payment.period.start)));
         if (!found) {
           const csCase = await openCase({ customerId: customer.id, kind: 'regrant', referenceId: grantKey, policy, repo, clock, ids, onCaseEvent });
           cases.push(csCase);

@@ -6,7 +6,8 @@
 // attempt, so every charge that may have moved money has a local row, and a retry of the same
 // attempt re-drives the same provider idempotency key instead of charging again.
 import { createHash } from 'node:crypto';
-import { Clock, Money, NoopNotifier, Notifier, Operation, Payment, PaymentProvider, PlanPrice, ProviderError, Repo, Subscription } from 'boilpayment-core';
+import { Clock, Money, NoopNotifier, Notifier, Operation, Payment, PaymentProvider, PlanPrice, ProviderError, Repo, Subscription, keyMatchesInstant
+} from 'boilpayment-core';
 import type { Period } from 'boilpayment-core';
 import { scopeProvider } from './internal.js';
 
@@ -119,7 +120,8 @@ export async function attemptsFor(repo: Repo, sub: Pick<Subscription, 'id'>, per
   return rows
     // A row the previous release wrote for this renewal used the attempt key itself as orderId/providerRef.
     .filter((p) => p.kind === 'subscription' &&
-      (p.period?.start.getTime() === period.start.getTime() || p.providerRef === renewalAttemptKey(sub, period)))
+      (p.period?.start.getTime() === period.start.getTime() || p.providerRef === renewalAttemptKey(sub, period)
+        || keyMatchesInstant(p.providerRef, `charge:${sub.id}:`, period.start))) // EC:J11 — Python '+00:00' forms
     .sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime());
 }
 

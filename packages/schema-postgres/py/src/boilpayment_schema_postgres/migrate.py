@@ -88,7 +88,7 @@ async def migrate(
     no-op. Wrapped in an advisory lock so two concurrent migrate() calls don't race."""
     owns_conn = conn is None
     connection = conn or await psycopg.AsyncConnection.connect(
-        conninfo, autocommit=False, row_factory=dict_row
+        conninfo, autocommit=False, row_factory=dict_row, options="-c TimeZone=UTC"
     )
     applied: list[str] = []
     try:
@@ -162,7 +162,7 @@ async def schema_status(
             await _read(cur)
     else:
         connection = await psycopg.AsyncConnection.connect(
-            conninfo, autocommit=True, row_factory=dict_row
+            conninfo, autocommit=True, row_factory=dict_row, options="-c TimeZone=UTC"
         )
         try:
             async with connection.cursor() as cur:

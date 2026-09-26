@@ -15,6 +15,8 @@ from .idempotent import (  # noqa: F401
     serialize_subscription,
     stable_stringify,
 )
+from .keys import iso_z as iso_z
+from .keys import key_matches_instant as key_matches_instant
 from .logger import (  # noqa: F401
     BaseLogger,
     CollectingLogger,

@@ -25,6 +25,7 @@ from boilpayment_core import (
     Payment,
     ProviderRef,
     SequentialIdGen,
+    iso_z,
     resolve_policy,
 )
 from boilpayment_cs import (
@@ -715,7 +716,7 @@ def test_e1_subscription_payment_grant_key_pattern():
             )
         )
         assert len(cases) == 1
-        assert cases[0].reference_id == f"grant:sub_1:{period_start.isoformat()}"
+        assert cases[0].reference_id == f"grant:sub_1:{iso_z(period_start)}"
 
     run(go())
 

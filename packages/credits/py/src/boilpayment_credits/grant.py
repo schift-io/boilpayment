@@ -22,6 +22,8 @@ from boilpayment_core import (
     Repo,
     Subscription,
     deserialize_ledger_entry,
+    iso_z,
+    key_matches_instant,
     run_idempotent,
     serialize_ledger_entry,
 )
@@ -160,7 +162,7 @@ async def grant_for_period(input: GrantForPeriodInput) -> GrantResult:
         return GrantResult(entry=None, duplicated=False, deferred=True)
 
     # EC:B12 — deterministic key means a re-delivered webhook's retry is a no-op (ledger.append dedupes).
-    idempotency_key = f"grant:{sub.id}:{period.start.isoformat()}"
+    idempotency_key = f"grant:{sub.id}:{iso_z(period.start)}"
     amount = plan.credits_per_period
     unit_price_minor, remainder_minor = _price_credits(
         payment.amount.amount_minor, amount
@@ -186,6 +188,13 @@ async def grant_for_period(input: GrantForPeriodInput) -> GrantResult:
         if policy.credits.negative_offset == "offset_next_grant"
         else 0
     )
+
+    # EC:J11 -- a grant written for this period under an older key form is the same grant.
+    for e in await ledger.entries(sub.customer_id, kind="grant", source="subscription"):
+        if e.idempotency_key != idempotency_key and key_matches_instant(
+            e.idempotency_key, f"grant:{sub.id}:", period.start
+        ):
+            return GrantResult(entry=e, duplicated=True, deferred=False)
 
     result = await _write_grant(
         ledger,

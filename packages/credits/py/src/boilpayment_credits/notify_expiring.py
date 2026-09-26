@@ -12,6 +12,7 @@ from boilpayment_core import (
     OutboxItem,
     Policy,
     Repo,
+    iso_z,
 )
 
 _DAY = timedelta(days=1)
@@ -83,7 +84,7 @@ async def notify_expiring(input: NotifyExpiringInput) -> NotifyExpiringResult:
                 continue
 
             dedup_id = (
-                f"credits-expiry-notice:{cid}:{bucket.expires_at.isoformat()}:{today}"
+                f"credits-expiry-notice:{cid}:{iso_z(bucket.expires_at)}:{today}"
             )
             already = await input.repo.outbox.get(dedup_id)
             if already is not None:

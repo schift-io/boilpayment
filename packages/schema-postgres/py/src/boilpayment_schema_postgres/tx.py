@@ -38,7 +38,8 @@ async def get_pool(dsn: str) -> AsyncConnectionPool:
             min_size=POOL_MIN,
             max_size=POOL_MAX,
             timeout=POOL_TIMEOUT,
-            kwargs={"row_factory": dict_row},
+            # EC:J11 -- UTC session: timestamps read back carry +00:00 whatever the server default.
+            kwargs={"row_factory": dict_row, "options": "-c TimeZone=UTC"},
             open=False,
         )
         await pool.open()

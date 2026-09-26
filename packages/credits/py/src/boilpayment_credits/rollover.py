@@ -13,6 +13,7 @@ from boilpayment_core import (
     Period,
     Policy,
     Subscription,
+    iso_z,
 )
 
 
@@ -119,7 +120,7 @@ async def rollover_on_renewal(input: RolloverInput) -> RolloverResult:
                 reference=LedgerReference(
                     subscription_id=sub.id, period_start=new_period.start
                 ),
-                idempotency_key=f"rollover:{sub.id}:{new_period.start.isoformat()}",
+                idempotency_key=f"rollover:{sub.id}:{iso_z(new_period.start)}",
                 actor="system",
                 reason=None,
             )

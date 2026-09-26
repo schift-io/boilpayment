@@ -17,6 +17,7 @@ from boilpayment_core import (
     Subscription,
     deserialize_ledger_entry,
     deserialize_subscription,
+    iso_z,
     run_idempotent,
     serialize_ledger_entry,
     serialize_subscription,
@@ -113,7 +114,7 @@ async def cancel(input: CancelInput) -> CancelResult:
             "cancel.credits=keep_forever is not supported by the append-only ledger", "unsupported"
         )
     key = input.idempotency_key or (
-        f"cancel:{input.sub.id}:{input.sub.current_period.start.isoformat()}"
+        f"cancel:{input.sub.id}:{iso_z(input.sub.current_period.start)}"
     )
 
     result = await run_idempotent(
@@ -123,7 +124,7 @@ async def cancel(input: CancelInput) -> CancelResult:
         kind="lifecycle.cancel",
         payload={
             "sub_id": input.sub.id,
-            "period_start": input.sub.current_period.start.isoformat(),
+            "period_start": iso_z(input.sub.current_period.start),
         },
         serialize=_serialize,
         deserialize=_deserialize,
@@ -171,7 +172,7 @@ async def _do_cancel(input: CancelInput) -> CancelResult:
                         subscription_id=sub.id, period_start=sub.current_period.start
                     ),
                     actor="system",
-                    idempotency_key=f"revoke:cancel:{sub.id}:{sub.current_period.start.isoformat()}",
+                    idempotency_key=f"revoke:cancel:{sub.id}:{iso_z(sub.current_period.start)}",
                     shortfall="clamp_to_zero",
                 )
             )

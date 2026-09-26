@@ -36,7 +36,7 @@ def test_hash_payload_sensitive_to_value_changes():
 def test_stable_stringify_converts_datetime_to_iso():
     assert (
         stable_stringify(datetime(2026, 1, 1, tzinfo=UTC))
-        == '"2026-01-01T00:00:00+00:00"'
+        == '"2026-01-01T00:00:00.000Z"'
     )
 
 

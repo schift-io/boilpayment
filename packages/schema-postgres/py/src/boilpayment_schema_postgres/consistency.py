@@ -23,7 +23,7 @@ async def consistency_check(
     owns_conn = isinstance(conninfo_or_conn, str)
     conn = (
         await psycopg.AsyncConnection.connect(
-            conninfo_or_conn, autocommit=True, row_factory=dict_row
+            conninfo_or_conn, autocommit=True, row_factory=dict_row, options="-c TimeZone=UTC"
         )
         if owns_conn
         else conninfo_or_conn

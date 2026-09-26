@@ -246,6 +246,8 @@
 | J8 | 결제사 응답·웹훅의 금액이 정수가 아니거나 2^53 을 넘음, Python 반올림이 TS 와 다른 경계값(0.49999999999999994, 2^52 근처), Python 비례 분모의 banker's rounding·마이크로초 | (구현 규칙) | 결제사 어댑터(Stripe, Polar, Toss, PortOne)의 금액은 core `money()` 를 거쳐 안전 정수가 아니면 거절한다(Py 가 1.5 를 1 로 자르던 것도 거절). Python `round_half_away_from_zero` 는 소수부를 정확히 비교하고, `proration_fraction` 은 TS 처럼 0 에서 먼 반올림과 epoch 밀리초 정수를 쓴다 | core + providers | P0 |
 | J9 | 환불 크레딧 환산의 .5 경계가 TS(`Math.round`, 3)와 Python(`round`, 2)에서 다름 | `policy.refund.rounding` | `round_credits` 와 외부 환불의 크레딧 환산은 두 언어 모두 0 에서 먼 쪽으로 반올림한다(core `roundHalfAwayFromZero`). 이전에는 감사 값 6003 개 중 1480 개가 1 크레딧씩 달랐다 | refund | P0 |
 | J10 | Python `money()` 가 JSON `50000.0` 같은 정수값 실수를 거부하고 TS 는 받음 | (구현 규칙) | 두 언어 모두 정수값인 숫자는 받고(Python 은 `int` 로 바꿈), 소수·NaN·무한대·bool·안전 정수 밖은 거부한다 | core | P0 |
+| J11 | 날짜로 만든 키(지급·시도·회수·기간)가 Python 에서 `isoformat()` 이라 PG 세션 시간대(`Asia/Seoul`)나 입력 tzinfo 에 따라 `+09:00`/`+00:00` 로 달라짐 → 같은 기간에 지급 2건, TS(`…000Z`)와 섞으면 UTC 에서도 2건 | (구현 규칙) | 모든 날짜 키는 UTC 밀리초 `…Z`(core `isoZ` / `iso_z`)로 두 언어가 같은 문자열을 만든다. Python PG 세션은 `TimeZone=UTC`, 멱등 payload 의 시각도 UTC 로 해시한다. 이전 형식으로 이미 쓰인 지급·시도 키는 같은 순간이면 같은 것으로 본다(`keyMatchesInstant`) — 업그레이드 뒤 두 번째 지급 없음 | core + credits + lifecycle + cs | P0 |
+| J12 | DST 겹침·공백 시각에서 TS 와 Python 의 기간 계산이 다름(감사 6,000건 중 63건) | `policy.period.timezone` | 두 언어가 같은 규칙을 쓴다: 두 번 있는 벽시계 시각은 앞선 순간, 없는 시각은 전환 전 오프셋으로 읽는다(Python `fold=0` 과 같음). 대조 테스트 6,000건 불일치 0 | core | P0 |
 
 ---
 

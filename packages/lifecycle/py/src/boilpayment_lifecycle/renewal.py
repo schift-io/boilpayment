@@ -12,6 +12,7 @@ from boilpayment_core import (
     Policy,
     Repo,
     Subscription,
+    key_matches_instant,
 )
 from boilpayment_credits import (
     GrantForPeriodInput,
@@ -66,14 +67,16 @@ async def on_renewal_paid(input: OnRenewalPaidInput) -> OnRenewalPaidResult:
     )
 
     period = payment.period or sub.current_period
-    period_key = f"grant:{sub.id}:{period.start.isoformat()}"
 
     # EC:A7 — same-period re-activation (or a re-delivered webhook for a period already granted)
     # must not regrant.
     all_entries = await ledger.entries(
         sub.customer_id, kind="grant", source="subscription"
     )
-    existing = next((e for e in all_entries if e.idempotency_key == period_key), None)
+    existing = next(
+        (e for e in all_entries if key_matches_instant(e.idempotency_key, f"grant:{sub.id}:", period.start)),
+        None,
+    )
     if existing is not None:
         # Finish a failed subscription write after the grant committed. Do not regrant,
         # roll back a newer period, or revive a subscription canceled in the meantime.

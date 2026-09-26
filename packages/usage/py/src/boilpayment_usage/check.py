@@ -16,6 +16,7 @@ from boilpayment_core import (
     Pool,
     Repo,
     Subscription,
+    iso_z,
 )
 
 _POOL_ORDER: Final[dict[ConsumeOrder, list[Pool]]] = {
@@ -85,7 +86,7 @@ async def check(
         credit_amount = quantity * conv.credits_per_unit
         key = (
             idempotency_key
-            or f"usage:check:{customer_id}:{meter}:{(ids.new_id() if ids else clock.now().isoformat())}"
+            or f"usage:check:{customer_id}:{meter}:{(ids.new_id() if ids else iso_z(clock.now()))}"
         )
         result = await ledger.consume(
             ConsumeInput(

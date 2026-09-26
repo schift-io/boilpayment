@@ -17,6 +17,7 @@ import {
   deserializeLedgerEntry,
   runIdempotent,
   serializeLedgerEntry,
+  keyMatchesInstant,
 } from 'boilpayment-core';
 
 export interface GrantResult {
@@ -150,6 +151,13 @@ export async function grantForPeriod(input: GrantForPeriodInput): Promise<GrantR
   // grant amount, hiding the very debt it's supposed to offset.
   const preGrantAvailable =
     policy.credits.negativeOffset === 'offset_next_grant' ? (await ledger.balance(sub.customerId, 'paid', clock.now())).available : 0;
+
+  // EC:J11 — a grant written for this period under an older key form (Python isoformat,
+  // `+09:00`) is the same grant; never write a second one.
+  const legacy = (await ledger.entries(sub.customerId, { kind: 'grant', source: 'subscription' })).find(
+    (e) => e.idempotencyKey !== idempotencyKey && keyMatchesInstant(e.idempotencyKey, `grant:${sub.id}:`, period.start),
+  );
+  if (legacy) return { entry: legacy, duplicated: true, deferred: false, offset: 0, offsetEntries: [] };
 
   const result = await writeGrant(ledger, {
     customerId: sub.customerId,

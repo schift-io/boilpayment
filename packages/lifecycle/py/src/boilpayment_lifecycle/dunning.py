@@ -22,6 +22,7 @@ from boilpayment_core import (
     Policy,
     Repo,
     Subscription,
+    key_matches_instant,
 )
 from boilpayment_credits import (
     GrantForPeriodInput,
@@ -179,13 +180,13 @@ async def on_grace_expired(input: OnGraceExpiredInput) -> OnGraceExpiredResult:
     revoked: list[LedgerEntry] = []
 
     if policy.dunning.on_final_failure == "revoke_unpaid_period":
-        period_key = f"grant:{sub.id}:{sub.current_period.start.isoformat()}"
         all_entries = await ledger.entries(sub.customer_id)
         grant = next(
             (
                 e
                 for e in all_entries
-                if e.kind == "grant" and e.idempotency_key == period_key
+                if e.kind == "grant"
+                and key_matches_instant(e.idempotency_key, f"grant:{sub.id}:", sub.current_period.start)
             ),
             None,
         )
@@ -212,7 +213,7 @@ async def on_grace_expired(input: OnGraceExpiredInput) -> OnGraceExpiredResult:
                             period_start=sub.current_period.start,
                             grant_id=grant.id,
                         ),
-                        idempotency_key=f"revoke:dunning:{sub.id}:{sub.current_period.start.isoformat()}",
+                        idempotency_key=f"revoke:dunning:{sub.id}:{iso_z(sub.current_period.start)}",
                         actor="system",
                         reason="grace_expired_unpaid",
                     )
@@ -232,7 +233,7 @@ async def on_grace_expired(input: OnGraceExpiredInput) -> OnGraceExpiredResult:
                     expires_at=None,
                     source="subscription",
                     reference=LedgerReference(subscription_id=sub.id),
-                    idempotency_key=f"revoke:dunning-all:{sub.id}:{sub.current_period.start.isoformat()}",
+                    idempotency_key=f"revoke:dunning-all:{sub.id}:{iso_z(sub.current_period.start)}",
                     actor="system",
                     reason="grace_expired_unpaid_all",
                 )

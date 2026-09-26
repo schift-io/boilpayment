@@ -13,6 +13,8 @@ from boilpayment_core import (
     PaymentProvider,
     Policy,
     Repo,
+    iso_z,
+    key_matches_instant,
 )
 
 from .cases import OnCaseEvent, OpenCaseInput, open_case
@@ -54,13 +56,23 @@ async def reconcile(input: ReconcileInput) -> list[CsCase]:
                 if payment.kind == "subscription":
                     if payment.period is None:
                         continue
-                    grant_key = f"grant:{payment.subscription_id}:{payment.period.start.isoformat()}"
+                    grant_key = f"grant:{payment.subscription_id}:{iso_z(payment.period.start)}"
                 elif payment.kind == "topup":
                     grant_key = f"topup:{payment.id}"
                 else:
                     continue  # overage payments aren't grant-backed
                 grant_entries = await input.ledger.entries(customer.id, kind="grant")
-                found = any(e.idempotency_key == grant_key for e in grant_entries)
+                found = any(
+                    e.idempotency_key == grant_key
+                    or (
+                        payment.kind == "subscription"
+                        and payment.period is not None
+                        and key_matches_instant(
+                            e.idempotency_key, f"grant:{payment.subscription_id}:", payment.period.start
+                        )
+                    )
+                    for e in grant_entries
+                )
                 if not found:
                     case = await open_case(
                         OpenCaseInput(

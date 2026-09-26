@@ -465,3 +465,24 @@ applyRounding(raw, round_credits) = roundHalfAwayFromZero(raw)          # TS Mat
 creditsForAmount(amountMinor, unitPrice) = unitPrice > 0 ? roundHalfAwayFromZero(amountMinor / unitPrice) : 0
 money(n): n 이 정수값 숫자(50000.0 포함)이고 |n| <= 2^53-1 이면 정수로 받고, 그 밖은 거부
 ```
+
+
+## [EC:J11] 날짜로 만든 키는 UTC 밀리초 한 형식
+
+```pseudo
+isoZ(t) = t in UTC as YYYY-MM-DDTHH:MM:SS.sssZ          # TS Date.toISOString(); Python iso_z
+every key "<kind>:<id>:<time>" uses isoZ(time)           # grant, charge attempt, revoke, rollover, cancel, ...
+keyMatchesInstant(key, prefix, t):                       # upgrade compatibility
+   key == prefix + isoZ(t)
+   or (key starts with prefix and the rest is an ISO-8601 timestamp with an offset for the same instant as t)
+Python Postgres sessions run with TimeZone=UTC; idempotency payloads hash datetimes as isoZ.
+```
+
+## [EC:J12] DST 경계의 벽시계 → 순간 규칙
+
+```pseudo
+civilToUtc(wall, tz):
+   candidates = { wall - offset_before, wall - offset_after } that really show `wall` in tz
+   if candidates: return the earliest                    # fall-back overlap -> first occurrence (fold=0)
+   return wall - offset_before                           # spring-forward gap -> offset in force before the gap
+```

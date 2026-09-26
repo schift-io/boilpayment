@@ -1,5 +1,5 @@
 // spec: packages/lifecycle/spec/lifecycle.pseudo.md — EC:A7 A15 A17 A25 A32 B12
-import { Clock, LedgerStore, PaymentKitError, Payment, Policy, Repo, Subscription } from 'boilpayment-core';
+import { Clock, LedgerStore, PaymentKitError, Payment, Policy, Repo, Subscription, keyMatchesInstant } from 'boilpayment-core';
 import { grantForPeriod, GrantResult, rolloverOnRenewal, RolloverResult } from 'boilpayment-credits';
 
 export interface OnRenewalPaidInput {
@@ -40,7 +40,7 @@ export async function onRenewalPaid(input: OnRenewalPaidInput): Promise<OnRenewa
   // EC:A7 — same-period re-activation (or a re-delivered webhook for a period already granted)
   // must not regrant.
   const existing = (await ledger.entries(sub.customerId, { kind: 'grant', source: 'subscription' })).find(
-    (e) => e.idempotencyKey === periodKey,
+    (e) => keyMatchesInstant(e.idempotencyKey, `grant:${sub.id}:`, period.start),
   );
   if (existing) {
     // A grant can commit before the subscription write fails. Finish that write on retry,

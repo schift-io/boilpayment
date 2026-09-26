@@ -18,6 +18,7 @@ from dataclasses import asdict, dataclass, is_dataclass, replace
 from datetime import datetime
 from typing import Any, Protocol, TypeVar
 
+from .keys import iso_z
 from .types import (
     CsCase,
     LedgerEntry,
@@ -41,7 +42,8 @@ class _ClockLike(Protocol):
 
 def _sort_for_hash(value: Any) -> Any:
     if isinstance(value, datetime):
-        return value.isoformat()
+        # EC:J11 -- the same instant hashes the same whatever tzinfo it arrived with.
+        return iso_z(value)
     if is_dataclass(value) and not isinstance(value, type):
         # Payload fields are often real dataclass instances (e.g. RefundDecision) passed straight
         # through by a caller, unlike TS where JSON.stringify duck-types plain objects for free.
