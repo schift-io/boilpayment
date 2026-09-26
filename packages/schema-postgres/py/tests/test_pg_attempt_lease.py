@@ -119,7 +119,7 @@ def test_ec_a48_stale_lease_taken_over_once_old_holder_cannot_release() -> None:
                 assert await ra.operations.compare_and_set(claimed, a_held) is True
                 state = {"inside": 0, "max": 0}
 
-                async def body() -> None:
+                async def body(state: dict[str, int] = state) -> None:
                     state["inside"] += 1
                     state["max"] = max(state["max"], state["inside"])
                     await asyncio.sleep(0.03)
