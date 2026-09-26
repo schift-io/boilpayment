@@ -89,9 +89,9 @@ const SUB_STATUS: Record<string, SubscriptionStatus> = {
   past_due: 'past_due',
   canceled: 'canceled',
   unpaid: 'expired',
-  incomplete: 'past_due',
+  incomplete: 'incomplete', // EC:A27 — never paid yet: no access, no dunning
   incomplete_expired: 'expired',
-  paused: 'active',
+  paused: 'paused', // EC:A27 — trial ended without a payment method: no access
 };
 
 // EC:F(Polar) — normalize Subscription (raw REST) (pure). See spec "계약 메모".

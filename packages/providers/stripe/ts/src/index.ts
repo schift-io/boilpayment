@@ -177,9 +177,9 @@ const SUB_STATUS: Record<string, SubscriptionStatus> = {
   past_due: 'past_due',
   canceled: 'canceled',
   unpaid: 'expired',
-  incomplete: 'past_due',
+  incomplete: 'incomplete', // EC:A27 — never paid yet: no access, no dunning
   incomplete_expired: 'expired',
-  paused: 'active',
+  paused: 'paused', // EC:A27 — trial ended without a payment method: no access
 };
 
 /** Invoice → PaymentIntent id. Legacy API: `invoice.payment_intent`; API >= 2025-03-31 (basil): `invoice.payments.data[].payment.payment_intent`. */

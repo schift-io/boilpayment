@@ -65,6 +65,9 @@ export interface OnPaymentFailedResult {
 // EC:A13 — start grace period.
 export async function onPaymentFailed(input: OnPaymentFailedInput): Promise<OnPaymentFailedResult> {
   const { sub, policy, repo, notifier, clock } = input;
+  // EC:A27 — an incomplete subscription never paid: a failed first payment has no access to keep,
+  // so no grace period, retries or notices.
+  if (sub.status === 'incomplete') return { sub };
   const now = clock.now();
   const graceDays = policy.dunning.graceDays;
   const graceUntil = graceDays > 0 ? new Date(now.getTime() + graceDays * DAY_MS) : now;

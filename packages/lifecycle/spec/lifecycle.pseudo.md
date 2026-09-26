@@ -540,3 +540,8 @@ tick(): payment = provider.chargeBillingKey(...)          # same idempotency key
 Toss sends no webhook for billing payments, so without this row the renewal could not be refunded
 through support.requestRefund and was missing from settlementReport, timeline and
 recoverMissingGrants.
+
+## [EC:A27] dunning.onPaymentFailed skips incomplete subscriptions
+
+A subscription that never paid (`incomplete`) has no access to keep: a failed first payment returns
+the subscription unchanged, with no grace period, retries or notices.

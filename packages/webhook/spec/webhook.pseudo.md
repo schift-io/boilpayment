@@ -432,3 +432,19 @@ transient DB errors) retries through processPending, often minutes or hours late
 freshness at `now` would turn each of them into a permanent failure. Python passes `received_at`
 only to adapters whose `verify_webhook` accepts it, so adapters written before this keep working
 (they check against now, as before).
+
+## [EC:A27] subscription.updated — sync entering and leaving paused / incomplete
+
+```pseudo
+handlers['subscription.updated'] = async (ctx):
+   if no subscriptionRef or provider has no native subscriptions: return
+   local = repo.subscriptions.list({ providerRef })[0]; if none: return   # unknown: no-op
+   remote = provider.getSubscription(providerRef)                          # EC:E3 re-fetch
+   entering = remote.status in (paused, incomplete) and remote.status != local.status
+   leaving  = local.status in (paused, incomplete) and remote.status in (active, trialing)
+   if entering or leaving:
+      retryOnVersionConflict: put { ...fresh, status: remote.status, currentPeriod, cancelAtPeriodEnd }
+```
+
+Other transitions (past_due via dunning, renewal, cancel) keep their own handlers, so local grace
+state is never overwritten here.

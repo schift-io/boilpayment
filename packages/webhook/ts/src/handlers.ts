@@ -15,6 +15,7 @@ import { authoritativeRefundEvent } from './refund.js';
 // 'unknown_provider_ref' and a 'reconcile.mismatch' notification is sent —
 // see markUnknownProviderRef() below.
 import {
+  INACTIVE_SUBSCRIPTION_STATUSES,
   PaymentKitError,
 } from 'boilpayment-core';
 import type {
@@ -251,6 +252,23 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
     }
   };
 
+  // EC:A27 — keep the local subscription in step with the provider for the non-entitled states:
+  // entering paused / incomplete, and leaving them (resume, first payment landed). Other transitions
+  // belong to dunning, renewal and cancel, so they are left alone here. Unknown subscription: no-op.
+  const onSubscriptionUpdated: Handler = async (ctx) => {
+    if (!ctx.event.subscriptionRef || !ctx.provider.capabilities().nativeSubscriptions) return;
+    const [local] = await repo.subscriptions.list({ providerRef: ctx.event.subscriptionRef } as Partial<Subscription>);
+    if (!local) return;
+    const remote = await ctx.provider.getSubscription(ctx.event.subscriptionRef); // EC:E3 re-fetch
+    const entering = INACTIVE_SUBSCRIPTION_STATUSES.includes(remote.status) && remote.status !== local.status;
+    const leaving = INACTIVE_SUBSCRIPTION_STATUSES.includes(local.status) && (remote.status === 'active' || remote.status === 'trialing');
+    if (!entering && !leaving) return;
+    await retryOnVersionConflict(async () => {
+      const fresh = (await repo.subscriptions.get(local.id)) ?? local;
+      await repo.subscriptions.put({ ...fresh, status: remote.status, currentPeriod: remote.currentPeriod, cancelAtPeriodEnd: remote.cancelAtPeriodEnd });
+    });
+  };
+
   const onRefundCreated: Handler = async (ctx) => {
     // EC:L5 — see onPaymentSucceeded above.
     if (refund) await refund.onExternalRefund({ event: await authoritativeRefundEvent(ctx, notifier), ledger: withCorrelationId(ledger, ctx.correlationId), repo, cs }); // EC:D8
@@ -267,6 +285,7 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
     'payment.succeeded': onPaymentSucceeded,
     'subscription.payment_failed': onSubscriptionPaymentFailed,
     'subscription.canceled': onSubscriptionCanceled,
+    'subscription.updated': onSubscriptionUpdated,
     'refund.created': onRefundCreated,
     'refund.failed': onRefundCreated,
     'refund.pending': onRefundCreated,

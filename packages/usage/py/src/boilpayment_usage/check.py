@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Final, Literal
 
 from boilpayment_core import (
+    INACTIVE_SUBSCRIPTION_STATUSES,
     Clock,
     ConsumeInput,
     ConsumeOrder,
@@ -32,6 +33,7 @@ CheckReason = Literal[
     "grace_block_overage",
     "credit_conversion",
     "credit_conversion_insufficient",
+    "subscription_inactive",
 ]
 
 
@@ -63,6 +65,10 @@ async def check(
         if included_quantity is not None
         else policy.usage.included_quantity
     )  # EC:C5
+
+    # EC:A27 -- paused / incomplete subscriptions hold no entitlement.
+    if sub.status in INACTIVE_SUBSCRIPTION_STATUSES:
+        return CheckResult(allow=False, overage=0, reason="subscription_inactive", remaining=0)
 
     # EC:A14 / EC:C6 — grace-period gating
     if sub.status == "past_due" and policy.dunning.usage_during_grace == "block":

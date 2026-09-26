@@ -96,6 +96,10 @@ async def on_payment_failed(input: OnPaymentFailedInput) -> OnPaymentFailedResul
         input.notifier,
         input.clock,
     )
+    # EC:A27 -- an incomplete subscription never paid: a failed first payment has no access to
+    # keep, so no grace period, retries or notices.
+    if sub.status == "incomplete":
+        return OnPaymentFailedResult(sub=sub)
     now = clock.now()
     grace_days = policy.dunning.grace_days
     grace_until = now + timedelta(days=grace_days) if grace_days > 0 else now

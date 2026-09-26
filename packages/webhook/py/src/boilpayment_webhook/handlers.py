@@ -19,6 +19,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
 from boilpayment_core import (
+    INACTIVE_SUBSCRIPTION_STATUSES,
     CashReceiptRef,
     Clock,
     IdGen,
@@ -394,6 +395,35 @@ def default_handlers(
 
             await _retry_on_version_conflict(_attempt)
 
+    # EC:A27 -- keep the local subscription in step with the provider for the non-entitled states:
+    # entering paused / incomplete, and leaving them (resume, first payment landed). Other
+    # transitions belong to dunning, renewal and cancel. Unknown subscription: no-op.
+    async def on_subscription_updated(ctx: HandlerCtx) -> None:
+        if not ctx.event.subscription_ref or not ctx.provider.capabilities().native_subscriptions:
+            return
+        found = await repo.subscriptions.list(provider_ref=ctx.event.subscription_ref)
+        if not found:
+            return
+        local = found[0]
+        remote = await ctx.provider.get_subscription(ctx.event.subscription_ref)  # EC:E3 re-fetch
+        entering = remote.status in INACTIVE_SUBSCRIPTION_STATUSES and remote.status != local.status
+        leaving = local.status in INACTIVE_SUBSCRIPTION_STATUSES and remote.status in ("active", "trialing")
+        if not entering and not leaving:
+            return
+
+        async def _attempt() -> None:
+            fresh = await repo.subscriptions.get(local.id) or local
+            await repo.subscriptions.put(
+                dataclasses.replace(
+                    fresh,
+                    status=remote.status,
+                    current_period=remote.current_period,
+                    cancel_at_period_end=remote.cancel_at_period_end,
+                )
+            )
+
+        await _retry_on_version_conflict(_attempt)
+
     async def on_refund_created(ctx: HandlerCtx) -> None:
         # EC:L5 -- see on_payment_succeeded above.
         if refund is not None:
@@ -422,6 +452,7 @@ def default_handlers(
         "payment.succeeded": on_payment_succeeded,
         "subscription.payment_failed": on_subscription_payment_failed,
         "subscription.canceled": on_subscription_canceled,
+        "subscription.updated": on_subscription_updated,
         "refund.created": on_refund_created,
         "refund.failed": on_refund_created,
         "refund.pending": on_refund_created,

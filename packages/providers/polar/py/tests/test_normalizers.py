@@ -141,9 +141,9 @@ SUB_STATUS_TABLE = [
     ("past_due", "past_due"),
     ("canceled", "canceled"),
     ("unpaid", "expired"),
-    ("incomplete", "past_due"),
+    ("incomplete", "incomplete"),  # EC:A27
     ("incomplete_expired", "expired"),
-    ("paused", "active"),
+    ("paused", "paused"),  # EC:A27
 ]
 
 

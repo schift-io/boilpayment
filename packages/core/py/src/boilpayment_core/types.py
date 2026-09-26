@@ -330,7 +330,12 @@ class Plan:
     prices: list[PlanPrice]
 
 
-SubscriptionStatus = Literal["trialing", "active", "past_due", "canceled", "expired"]
+# EC:A27 -- paused (trial ended without a payment method) and incomplete (first payment not made)
+# hold no entitlement: usage.check refuses them and dunning does not start for them.
+SubscriptionStatus = Literal[
+    "trialing", "active", "past_due", "canceled", "expired", "paused", "incomplete"
+]
+INACTIVE_SUBSCRIPTION_STATUSES: tuple[str, ...] = ("paused", "incomplete")
 
 
 @dataclass(kw_only=True, slots=True)

@@ -1,5 +1,6 @@
 // EC:C1 EC:C5 EC:C6 EC:A14 EC:C8 — see spec/usage.pseudo.md
 import type { Clock, ConsumeOrder, IdGen, LedgerStore, Policy, Pool, Repo, Subscription, UsageEvent } from 'boilpayment-core';
+import { INACTIVE_SUBSCRIPTION_STATUSES } from 'boilpayment-core';
 
 const POOL_ORDER: Record<ConsumeOrder, Pool[]> = {
   expiring_first: ['paid', 'promo', 'trial'],
@@ -25,7 +26,7 @@ export interface CheckInput {
 
 export type CheckReason =
   | 'grace_block' | 'within_included' | 'hard_block' | 'soft_cap_notify' | 'bill_overage'
-  | 'grace_block_overage' | 'credit_conversion' | 'credit_conversion_insufficient';
+  | 'grace_block_overage' | 'credit_conversion' | 'credit_conversion_insufficient' | 'subscription_inactive';
 
 export interface CheckResult {
   allow: boolean;
@@ -38,6 +39,11 @@ export interface CheckResult {
 export async function check(input: CheckInput): Promise<CheckResult> {
   const { customerId, meter, quantity, sub, policy, repo, ledger, clock, ids, includedQuantity, idempotencyKey } = input;
   const included = includedQuantity ?? policy.usage.includedQuantity; // EC:C5
+
+  // EC:A27 — paused / incomplete subscriptions hold no entitlement.
+  if (INACTIVE_SUBSCRIPTION_STATUSES.includes(sub.status)) {
+    return { allow: false, overage: 0, reason: 'subscription_inactive', remaining: 0, notify: null };
+  }
 
   // EC:A14 / EC:C6 — grace-period gating
   if (sub.status === 'past_due' && policy.dunning.usageDuringGrace === 'block') {

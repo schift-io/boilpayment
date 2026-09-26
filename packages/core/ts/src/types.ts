@@ -178,7 +178,14 @@ export interface Plan {
   prices: PlanPrice[];
 }
 
-export type SubscriptionStatus = 'trialing' | 'active' | 'past_due' | 'canceled' | 'expired';
+/**
+ * EC:A27 — `paused` (Stripe/Polar: trial ended without a payment method, no invoices) and
+ * `incomplete` (first payment not made yet) are not entitled: usage.check refuses them and dunning
+ * does not start for them.
+ */
+export type SubscriptionStatus = 'trialing' | 'active' | 'past_due' | 'canceled' | 'expired' | 'paused' | 'incomplete';
+/** EC:A27 — statuses that hold no entitlement and start no dunning. */
+export const INACTIVE_SUBSCRIPTION_STATUSES: readonly SubscriptionStatus[] = ['paused', 'incomplete'];
 export interface Subscription {
   id: string;
   customerId: string;

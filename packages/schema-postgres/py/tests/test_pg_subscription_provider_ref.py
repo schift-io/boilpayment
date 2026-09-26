@@ -19,7 +19,11 @@ FOLLOWUP = "0007_subscription_provider_ref_nullable.sql"
 
 
 def test_core_always_selects_provider_ref_followup():
-    assert [file.name for file in load_migrations(["core"])] == ["0001_core.sql", FOLLOWUP]
+    assert [file.name for file in load_migrations(["core"])] == [
+        "0001_core.sql",
+        FOLLOWUP,
+        "0011_subscription_status_paused_incomplete.sql",
+    ]
     assert FOLLOWUP in [file.name for file in load_migrations(["credits"])]
 
 

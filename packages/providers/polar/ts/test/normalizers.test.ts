@@ -101,9 +101,9 @@ describe('[EC:F(Polar)] normalizeSubscription — status mapping and metadata co
     ['past_due', 'past_due'],
     ['canceled', 'canceled'],
     ['unpaid', 'expired'],
-    ['incomplete', 'past_due'],
+    ['incomplete', 'incomplete'], // EC:A27 — first payment not made yet: not entitled, no dunning
     ['incomplete_expired', 'expired'],
-    ['paused', 'active'],
+    ['paused', 'paused'], // EC:A27 — trial ended without a payment method: not entitled
   ];
   for (const [raw, expected] of statusTable) {
     it(`[EC:F(Polar)] status ${raw} -> ${expected}`, () => {
