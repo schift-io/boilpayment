@@ -35,7 +35,14 @@ def test_ec_b23_consume_key_equal_to_grant_key_is_separate_operation() -> None:
     import asyncio
     from datetime import UTC, datetime
 
-    from boilpayment_core import ConsumeInput, FixedClock, InMemoryLedger, LedgerReference, NewLedgerEntry, UuidIdGen
+    from boilpayment_core import (
+        ConsumeInput,
+        FixedClock,
+        InMemoryLedger,
+        LedgerReference,
+        NewLedgerEntry,
+        UuidIdGen,
+    )
 
     async def run():
         clock = FixedClock(datetime(2026, 1, 1, tzinfo=UTC))

@@ -178,22 +178,17 @@ async def main() -> None:
         idempotency_key="charge:1",
     )
     out("chargeBillingKey first", {"status": charge1.status, "id": charge1.id})
-    try:
-        await provider.charge_billing_key(
-            billing_key=issued["billing_key"],
-            amount=Money(amount_minor=9900, currency="KRW"),
-            order_id=order_id,
-            customer_ref="cus_1",
-            idempotency_key="charge:1-retry",
-        )
-        raise AssertionError("Expected chargeBillingKey idempotent repeat rejection")
-    except ProviderError as e:
-        assert e.failure.provider_code == 'ALREADY_PAID'
-        failure = getattr(e, "failure", None)
-        out(
-            "chargeBillingKey idempotent repeat",
-            asdict(failure) if failure else str(e),
-        )
+    # EC:A34 -- real PortOne answers ALREADY_PAID for a paid paymentId (never a second charge); the
+    # adapter turns that into the paid payment, so a retried charge is idempotent.
+    charge2 = await provider.charge_billing_key(
+        billing_key=issued["billing_key"],
+        amount=Money(amount_minor=9900, currency="KRW"),
+        order_id=order_id,
+        customer_ref="cus_1",
+        idempotency_key="charge:1-retry",
+    )
+    assert charge2.status == "succeeded" and charge2.provider_ref == charge1.provider_ref
+    out("chargeBillingKey idempotent repeat", {"status": charge2.status, "id": charge2.id})
 
     # -- schedulePayment + cancelSchedules -- EC:F, scheduling='provider' --
     schedule_result = await provider.schedule_payment(

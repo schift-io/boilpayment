@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from boilpayment_core import (
     DEFAULT_POLICY,
-    INACTIVE_SUBSCRIPTION_STATUSES,
     AppendResult,
     Balance,
     BaseLogger,
@@ -144,7 +143,6 @@ from boilpayment_core import (
 
 __all__ = [
     "DEFAULT_POLICY",
-    "INACTIVE_SUBSCRIPTION_STATUSES",
     "AppendResult",
     "Balance",
     "BaseLogger",

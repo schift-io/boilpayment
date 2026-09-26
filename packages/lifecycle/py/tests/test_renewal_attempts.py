@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from datetime import UTC, datetime
+from datetime import datetime
 
 from boilpayment_core import (
     CollectingNotifier,
@@ -29,7 +29,7 @@ from test_scheduler import PLAN, mk_sub
 
 
 def _at(s: str) -> datetime:
-    return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    return datetime.fromisoformat(s)
 
 
 class _Env:

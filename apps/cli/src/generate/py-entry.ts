@@ -63,7 +63,7 @@ export function generateIndexPy(config: PaykitConfig): string {
   l.push('');
   l.push(`from typing import Any`);
   l.push('');
-  l.push(`from boilpayment.core import ${hasSubscription && hasCredits ? 'INACTIVE_SUBSCRIPTION_STATUSES, ' : ''}Clock, ConsoleLogger, Deps, LedgerStore, Logger, Money, NoopLogger, Notifier, Payment, ${hasSubscription && hasCredits ? 'PaymentKitError, ' : ''}PaymentProvider, Period, Plan, PlanPrice, Policy, Repo, Subscription, resolve_policy`);
+  l.push(`from boilpayment.core import Clock, ConsoleLogger, Deps, LedgerStore, Logger, Money, NoopLogger, Notifier, Payment, ${hasSubscription && hasCredits ? 'PaymentKitError, ' : ''}PaymentProvider, Period, Plan, PlanPrice, Policy, Repo, Subscription, resolve_policy`);
   l.push(`from boilpayment.postgres import verify_schema`);
   if (config.infra.logging === 'postgres') {
     l.push(`from boilpayment.postgres import PostgresLogger`);
@@ -338,7 +338,7 @@ export function generateIndexPy(config: PaykitConfig): string {
     if (hasSubscription) {
       l.push(`        # EC:C11 — an unpaid subscription (paused, incomplete) spends nothing; canceled/expired keep bought credits.`);
       l.push(`        sub = await current_subscription(kwargs["customer_id"])`);
-      l.push(`        if sub is not None and sub.status in INACTIVE_SUBSCRIPTION_STATUSES:`);
+      l.push(`        if sub is not None and sub.status in ("paused", "incomplete"):  # INACTIVE_SUBSCRIPTION_STATUSES`);
       l.push(`            raise PaymentKitError(f"subscription {sub.id} is {sub.status}", "subscription_inactive")`);
     }
     l.push(`        return await consume_credits(ConsumeCreditsInput(policy=policy, ledger=ledger, clock=clock, **kwargs))`);

@@ -89,7 +89,7 @@ def test_ec_d19_same_provider_refund_twice_at_once() -> None:
                                                    currency="USD", source="topup", reference=LedgerReference(payment_id=payment.id),
                                                    idempotency_key=f"topup:{payment.id}", actor="t"))
 
-                def event(eid: str) -> NormalizedEvent:
+                def event(eid: str, payment=payment, rnd=rnd) -> NormalizedEvent:
                     return NormalizedEvent(id=eid, provider="stripe", type="refund.created", occurred_at=datetime.now(UTC), customer_ref=None,
                                            subscription_ref=None, payment_ref=payment.provider_ref, refund_ref=f"re_same_{rnd}",
                                            amount=Money(amount_minor=500, currency="USD"), raw={})

@@ -71,14 +71,11 @@ async function main() {
   const orderId = 'order_charge_1';
   const charge1 = await p.chargeBillingKey({ billingKey: issued.billingKey, amount: { amountMinor: 9900, currency: 'KRW' }, orderId, customerRef: 'cus_1', idempotencyKey: 'charge:1' });
   out('chargeBillingKey first', { status: charge1.status, id: charge1.id });
-  try {
-    await p.chargeBillingKey({ billingKey: issued.billingKey, amount: { amountMinor: 9900, currency: 'KRW' }, orderId, customerRef: 'cus_1', idempotencyKey: 'charge:1-retry' });
-    throw new Error('Expected chargeBillingKey idempotent repeat rejection');
-  } catch (e) {
-    if (!(e instanceof ProviderError) || !(e.failure.providerCode === 'ALREADY_PAID')) throw e;
-    // real PortOne semantics: same paymentId already PAID -> ALREADY_PAID, not a double charge.
-    out('chargeBillingKey idempotent repeat', (e as Error & { code?: string; failure?: unknown }).failure ?? (e as Error).message);
-  }
+  // EC:A34 — real PortOne answers ALREADY_PAID for a paid paymentId (never a second charge); the
+  // adapter turns that into the paid payment, so a retried charge is idempotent.
+  const charge2 = await p.chargeBillingKey({ billingKey: issued.billingKey, amount: { amountMinor: 9900, currency: 'KRW' }, orderId, customerRef: 'cus_1', idempotencyKey: 'charge:1-retry' });
+  if (charge2.status !== 'succeeded' || charge2.providerRef !== charge1.providerRef) throw new Error('Expected the same paid payment on repeat');
+  out('chargeBillingKey idempotent repeat', { status: charge2.status, id: charge2.id });
 
   // ── schedulePayment + cancelSchedules — EC:F, scheduling='provider' ──
   const scheduleResult: any = await p.schedulePayment({ billingKey: issued.billingKey, amount: { amountMinor: 9900, currency: 'KRW' }, orderId: 'order_sched_1', customerRef: 'cus_1', timeToPay: new Date('2026-10-01T00:00:00.000Z') });
