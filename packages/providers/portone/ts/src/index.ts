@@ -308,7 +308,7 @@ export class PortoneProvider implements PaymentProvider {
           durationMs: Date.now() - startedAt, correlationId: this.correlationIdOverride ?? null,
           providerErrorCode: failure.code, requestBody: body, responseBody: json,
         });
-        throw new ProviderError(json.message ?? `portone api error (${res.status})`, failure, json);
+        throw new ProviderError(json.message ?? `portone api error (${res.status})`, failure, json, res.status);
       }
       await this.logger.log({
         level: 'info', event: 'provider.request', provider: 'portone', method, path, status,
@@ -371,14 +371,24 @@ export class PortoneProvider implements PaymentProvider {
   async chargeBillingKey(input: { billingKey: string; amount: Money; orderId: string; customerRef: string; idempotencyKey: string }): Promise<Payment> {
     // orderId is used as PortOne's {paymentId} path segment — PortOne's idempotency model
     // is "caller supplies a unique paymentId per attempt" rather than an Idempotency-Key header.
-    const raw = await this.request('POST', `/payments/${encodeURIComponent(input.orderId)}/billing-key`, {
-      storeId: this.storeId,
-      billingKey: input.billingKey,
-      orderName: 'Subscription charge',
-      amount: { total: input.amount.amountMinor },
-      currency: input.amount.currency,
-      customer: { id: input.customerRef },
-    });
+    let raw: any;
+    try {
+      raw = await this.request('POST', `/payments/${encodeURIComponent(input.orderId)}/billing-key`, {
+        storeId: this.storeId,
+        billingKey: input.billingKey,
+        orderName: 'Subscription charge',
+        amount: { total: input.amount.amountMinor },
+        currency: input.amount.currency,
+        customer: { id: input.customerRef },
+      });
+    } catch (err) {
+      // EC:A34 — a retried charge whose paymentId was already paid: PortOne answers ALREADY_PAID. The
+      // charge is idempotent per paymentId, so the answer is that payment, not an error or a decline.
+      if (err instanceof ProviderError && (err.details as { type?: string } | undefined)?.type === 'ALREADY_PAID') {
+        return this.getPayment(input.orderId);
+      }
+      throw err;
+    }
     // Confirmed against the real V2 OpenAPI spec: PayWithBillingKeyResponse is
     // `{ payment: BillingKeyPaymentSummary }` where BillingKeyPaymentSummary is only
     // `{ pgTxId, paidAt }` — NOT a full Payment object as an earlier draft assumed

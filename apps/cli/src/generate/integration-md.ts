@@ -255,8 +255,8 @@ export function generateIntegrationMd(config: PaykitConfig): string {
   if (self.length > 0) {
     l.push(`> \`${self.join('`, `')}\` 는 provider 쪽에 구독이라는 개념이 없어, **우리가 빌링키로 직접 청구**합니다.`);
     l.push('> `schedulerTick` 이 그 청구를 겁니다. 이것만은 빠뜨리면 안 됩니다.');
-    l.push('> 구독 하나가 실패해도 나머지는 계속 갱신되고, 실패는 결과의 `errors` 에 구독별로 담깁니다.');
-    l.push('> `errors` 가 비어 있지 않으면 로그나 알림으로 남기세요(미확정 결제는 dunning 을 시작하지 않습니다).');
+    l.push('> 구독 하나가 실패해도 나머지는 계속 갱신되고, 실패는 반환값의 `errors` 에 구독별로 담기며 로거에도 `scheduler.error` 로 남습니다.');
+    l.push('> 같은 호출이 기한이 된 dunning 재시도도 처리합니다. 결과를 모르는 청구는 구독을 유예(past_due)로 한 번 옮기고 담당자 알림을 한 번 보낸 뒤, 다음 호출마다 같은 키로 다시 확인합니다(새로 청구하지 않습니다).');
     l.push('');
   }
 

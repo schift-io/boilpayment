@@ -365,6 +365,7 @@ class PortoneProvider:
                     data.get("message") or f"portone api error ({res.status_code})",
                     failure,
                     data,
+                    http_status=res.status_code,
                 )
             await self._logger.log(
                 {
@@ -475,18 +476,25 @@ class PortoneProvider:
     ) -> Payment:
         # order_id is used as PortOne's {paymentId} path segment — PortOne's idempotency model
         # is "caller supplies a unique paymentId per attempt" rather than an Idempotency-Key header.
-        raw = await self._request(
-            "POST",
-            f"/payments/{order_id}/billing-key",
-            {
-                "storeId": self._store_id,
-                "billingKey": billing_key,
-                "orderName": "Subscription charge",
-                "amount": {"total": amount.amount_minor},
-                "currency": amount.currency,
-                "customer": {"id": customer_ref},
-            },
-        )
+        try:
+            raw = await self._request(
+                "POST",
+                f"/payments/{order_id}/billing-key",
+                {
+                    "storeId": self._store_id,
+                    "billingKey": billing_key,
+                    "orderName": "Subscription charge",
+                    "amount": {"total": amount.amount_minor},
+                    "currency": amount.currency,
+                    "customer": {"id": customer_ref},
+                },
+            )
+        except ProviderError as err:
+            # EC:A34 -- a retried charge whose paymentId was already paid: PortOne answers
+            # ALREADY_PAID. The charge is idempotent per paymentId, so the answer is that payment.
+            if isinstance(err.details, dict) and err.details.get("type") == "ALREADY_PAID":
+                return await self.get_payment(order_id)
+            raise
         # Confirmed against the real V2 OpenAPI spec: PayWithBillingKeyResponse is
         # `{ payment: BillingKeyPaymentSummary }` where BillingKeyPaymentSummary is only
         # `{ pgTxId, paidAt }` — NOT a full Payment object as an earlier draft assumed

@@ -616,3 +616,29 @@ def test_ec_a23_uncancel_subscription_raises_unsupported() -> None:
         asyncio.run(run())
     assert exc_info.value.code == "unsupported"
     assert transport.calls == []
+
+
+def test_ec_a34_already_paid_retry_returns_the_payment() -> None:
+    transport = RecordingTransport()
+    transport.script("POST", "/payments/ord_again/billing-key",
+                     httpx.Response(409, json={"type": "ALREADY_PAID", "message": "payment already paid: ord_again"}))
+    transport.script("GET", "/payments/ord_again", httpx.Response(200, json={
+        "id": "ord_again", "status": "PAID", "amount": {"total": 9900, "paid": 9900}, "currency": "KRW",
+        "customer": {"id": "cus_abc"}, "paidAt": "2026-09-01T00:00:05.000Z", "requestedAt": "2026-09-01T00:00:00.000Z",
+        "method": {"type": "PaymentMethodCard"}}))
+    p = asyncio.run(make_provider(transport).charge_billing_key(
+        billing_key="bk", amount=Money(amount_minor=9900, currency="KRW"), order_id="ord_again",
+        customer_ref="cus_abc", idempotency_key="k"))
+    assert (p.status, p.provider_ref, [f"{c.method} {c.url.path}" for c in transport.calls]) == (
+        "succeeded", "ord_again", ["POST /payments/ord_again/billing-key", "GET /payments/ord_again"])
+
+
+def test_ec_a34_decline_carries_http_status() -> None:
+    transport = RecordingTransport()
+    transport.script("POST", "/payments/ord_again/billing-key",
+                     httpx.Response(400, json={"type": "PG_PROVIDER", "message": "card declined", "pgCode": "X", "pgMessage": "declined"}))
+    with pytest.raises(ProviderError) as err:
+        asyncio.run(make_provider(transport).charge_billing_key(
+            billing_key="bk", amount=Money(amount_minor=9900, currency="KRW"), order_id="ord_again",
+            customer_ref="cus_abc", idempotency_key="k"))
+    assert err.value.http_status == 400

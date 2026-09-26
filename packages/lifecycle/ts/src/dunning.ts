@@ -16,6 +16,9 @@ import {
 import { grantForPeriod, GrantResult } from 'boilpayment-credits';
 import { retryOnVersionConflict } from './retry.js';
 import { priceForSubscription, renewalPlanId } from './internal.js';
+import { attemptKeyOf, attemptsFor, chargeAttempt, dunningAttemptKey } from './charge-attempt.js';
+import { nextPeriod } from './period.js';
+import { onRenewalPaid } from './renewal.js';
 
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
@@ -241,7 +244,7 @@ export interface RunRetryInput {
   ids?: IdGen;
 }
 
-export type RunRetryOutcome = 'recovered' | 'failed' | 'skipped' | 'deferred_to_provider';
+export type RunRetryOutcome = 'recovered' | 'failed' | 'unresolved' | 'skipped' | 'deferred_to_provider';
 export interface RunRetryResult {
   outcome: RunRetryOutcome;
   sub: Subscription | null;
@@ -296,31 +299,39 @@ export async function runRetry(input: RunRetryInput): Promise<RunRetryResult> {
       }
       return { outcome: 'failed' as const, sub, grants: [] };
     }
-    // Deterministic per (sub, attempt) — a version-conflict retry of this whole function
-    // re-issues the same idempotencyKey, safe even if the first attempt already reached the
-    // provider (same pattern as scheduler.tick's charge:{sub.id}:{period.end} key).
-    const idempotencyKey = `dunning-retry:${sub.id}:${payload.attempt}`;
+
+    // EC:A34 — the retry pays for the renewal that failed: the period after the current one. The
+    // attempt is a recorded payment like the scheduler's; a succeeded attempt (any, this one or an
+    // earlier one whose local steps failed) completes the renewal through onRenewalPaid, which grants
+    // THAT period (usable, not already expired) and advances the subscription — so the next tick has
+    // nothing left to charge for it (EC:A34 N1).
+    const chargedPeriod = nextPeriod(sub.currentPeriod, plan.interval ?? 'month', sub.anchorDay, policy.period.timezone, policy.period.monthEndAnchor);
+    const attempts = await attemptsFor(repo, sub, chargedPeriod);
+    const earlier = attempts.find((p) => p.status === 'succeeded');
+    const open = attempts.find((p) => p.status !== 'failed' && p.status !== 'succeeded');
+    const attemptKey = (open && attemptKeyOf(open)) || dunningAttemptKey(sub, chargedPeriod, payload.attempt);
+    const charge = earlier
+      ? { kind: 'succeeded' as const, payment: earlier }
+      : await chargeAttempt({ provider, repo, clock, sub, price, period: chargedPeriod, attemptKey });
     item.attempts += 1;
 
-    let payment: Payment | null;
-    try {
-      payment = await provider.chargeBillingKey({
-        billingKey: sub.billingKey as string,
-        amount: { amountMinor: price.amountMinor, currency: price.currency },
-        orderId: idempotencyKey,
-        customerRef: sub.customerId,
-        idempotencyKey,
-      });
-    } catch (err) {
-      if (err instanceof PaymentKitError && err.code === 'subscription_version_conflict') throw err;
-      payment = null; // any other provider failure is treated as a failed charge attempt
-    }
-
-    if (payment && payment.status === 'succeeded') {
+    if (charge.kind === 'succeeded') {
       item.status = 'sent';
       await repo.outbox.put(item);
-      const result = await onRecovered({ sub, payment, policy, ledger, repo, clock });
-      return { outcome: 'recovered' as const, sub: result.sub, grants: result.grants };
+      const result = await onRenewalPaid({ sub, payment: charge.payment, policy, ledger, repo, clock });
+      return { outcome: 'recovered' as const, sub: result.sub, grants: [result.grant] };
+    }
+
+    if (charge.kind === 'unresolved') {
+      // EC:A34 A36 (N11) — no answer is not a decline: the same attempt is re-driven later with the
+      // same key (never a new charge while this one may have moved money). A person is told once.
+      item.nextAttemptAt = new Date(clock.now().getTime() + Math.max(1, retryGapHours(payload.attempt, policy.dunning.retryIntervalHours)) * HOUR_MS);
+      await repo.outbox.put(item);
+      if (charge.first) {
+        await notifier.send({ type: 'cs.needs_human', customerId: sub.customerId, payload: {
+          kind: 'renewal_charge_unresolved', subscriptionId: sub.id, paymentId: charge.payment.id, reason: charge.reason } });
+      }
+      return { outcome: 'unresolved' as const, sub, grants: [] };
     }
 
     item.status = 'sent';

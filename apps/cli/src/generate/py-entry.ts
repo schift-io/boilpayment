@@ -419,6 +419,7 @@ export function generateIndexPy(config: PaykitConfig): string {
     l.push(`        self_scheduling_providers = [${selfSchedulingProviders.map((p) => `"${p}"`).join(', ')}]`);
     l.push(`        charged = []`);
     l.push(`        failed = []`);
+    l.push(`        errors = []`);
     l.push(`        for name in self_scheduling_providers:`);
     l.push(`            provider = providers.get(name)`);
     l.push(`            if provider is None:`);
@@ -426,9 +427,24 @@ export function generateIndexPy(config: PaykitConfig): string {
     l.push(`            result = await scheduler.tick(scheduler.SchedulerTickInput(provider=provider, repo=repo, policy=policy, ledger=ledger, clock=clock, ids=ids, notifier=notifier))`);
     l.push(`            charged.extend(result.charged)`);
     l.push(`            failed.extend(result.failed)`);
-    l.push(`        return {"charged": charged, "failed": failed}`);
+    l.push(`            errors.extend({"subscription_id": e.subscription_id, "code": e.code, "message": e.message} for e in result.errors)`);
+    l.push(`            # EC:A34 -- due dunning retries charge through the same per-period attempt records as the tick.`);
+    l.push(`            for item in await dunning.retry_due(dunning.RetryDueInput(repo=repo, clock=clock)):`);
+    l.push(`                sub = await repo.subscriptions.get(item.payload["subscription_id"])`);
+    l.push(`                if sub is None or sub.provider != name:`);
+    l.push(`                    continue`);
+    l.push(`                try:`);
+    l.push(`                    retry = await dunning.run_retry(dunning.RunRetryInput(item=item, provider=provider, repo=repo, ledger=ledger, policy=policy, notifier=notifier, clock=clock))`);
+    l.push(`                    if retry.outcome == "recovered" and retry.sub is not None:`);
+    l.push(`                        charged.append(retry.sub)`);
+    l.push(`                except Exception as err:  # noqa: BLE001 -- reported, never dropped (EC:A36)`);
+    l.push(`                    errors.append({"subscription_id": sub.id, "code": getattr(err, "code", "dunning_retry_error"), "message": str(err)})`);
+    l.push(`        # EC:A36 -- never dropped: every unresolved or failed renewal is logged and returned.`);
+    l.push(`        for e in errors:`);
+    l.push(`            await logger.log({"level": "error", "event": "scheduler.error", **e})`);
+    l.push(`        return {"charged": charged, "failed": failed, "errors": errors}`);
   } else {
-    l.push(`        return {"charged": [], "failed": []}`);
+    l.push(`        return {"charged": [], "failed": [], "errors": []}`);
   }
   l.push('');
   l.push(`    async def _cron_reconcile(since):`);

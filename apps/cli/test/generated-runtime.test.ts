@@ -202,7 +202,7 @@ import config from './paykit.config.json' with { type: 'json' };
 const clock = new FixedClock(new Date('2026-03-01T00:00:00Z'));
 const ids = new SequentialIdGen('test');
 const kit = createPaymentKit(config, { clock, ids, repo: new InMemoryRepo(), ledger: new InMemoryLedger(ids, clock), logger: new NoopLogger(), env: ${JSON.stringify(env)} });
-assert.deepEqual(await kit.cron.schedulerTick(), { charged: [], failed: [] });
+assert.deepEqual(await kit.cron.schedulerTick(), { charged: [], failed: [], errors: [] });
 await assert.rejects(kit.verifySchema, (error) => error instanceof TypeError && error.code === 'ERR_INVALID_URL');
 console.log('OK');
 `;
@@ -221,7 +221,7 @@ async def main():
     config = json.load(open(${JSON.stringify(path.join(dir, 'paykit.config.json'))}))
     env = json.loads(${JSON.stringify(JSON.stringify(env))})
     kit = mod.create_payment_kit(config, deps, env)
-    assert await kit['cron']['scheduler_tick']() == {'charged': [], 'failed': []}
+    assert await kit['cron']['scheduler_tick']() == {'charged': [], 'failed': [], 'errors': []}
     import psycopg
     try:
         await kit['verify_schema']()

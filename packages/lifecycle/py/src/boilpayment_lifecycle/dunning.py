@@ -11,7 +11,6 @@ from boilpayment_core import (
     LedgerEntry,
     LedgerReference,
     LedgerStore,
-    Money,
     NewLedgerEntry,
     Notification,
     Notifier,
@@ -29,7 +28,17 @@ from boilpayment_credits import (
     grant_for_period,
 )
 
+from .charge_attempt import (
+    ChargeAttemptInput,
+    ChargeAttemptOutcome,
+    attempt_key_of,
+    attempts_for,
+    charge_attempt,
+    dunning_attempt_key,
+)
 from .internal import price_for_subscription, renewal_plan_id, replace_sub
+from .period import next_period
+from .renewal import OnRenewalPaidInput, on_renewal_paid
 from .retry import retry_on_version_conflict
 
 _HOUR = timedelta(hours=1)
@@ -334,7 +343,7 @@ class RunRetryInput:
 
 @dataclass(kw_only=True, slots=True)
 class RunRetryResult:
-    outcome: str  # 'recovered' | 'failed' | 'skipped' | 'deferred_to_provider'
+    outcome: str  # 'recovered' | 'failed' | 'unresolved' | 'skipped' | 'deferred_to_provider'
     sub: Subscription | None
     grants: list[GrantResult] = field(default_factory=list)
 
@@ -401,44 +410,46 @@ async def run_retry(input: RunRetryInput) -> RunRetryResult:
             if attempt < policy.dunning.retry_attempts:
                 await _schedule_retry(repo, sub.id, attempt + 1, clock.now(), policy.dunning.retry_interval_hours)
             return RunRetryResult(outcome="failed", sub=sub, grants=[])
-        # Deterministic per (sub, attempt) — a version-conflict retry of this whole function
-        # re-issues the same idempotency_key, safe even if the first attempt already reached the
-        # provider (same pattern as scheduler.tick's charge:{sub.id}:{period.end} key).
-        idempotency_key = f"dunning-retry:{sub.id}:{attempt}"
+        # EC:A34 -- the retry pays for the renewal that failed: the period after the current one. A
+        # succeeded attempt (this one, or an earlier one whose local steps failed) completes the
+        # renewal through on_renewal_paid, which grants THAT period (usable) and advances the
+        # subscription, so the next tick has nothing left to charge for it.
+        charged_period = next_period(
+            sub.current_period, plan.interval or "month", sub.anchor_day,
+            policy.period.timezone, policy.period.month_end_anchor,
+        )
+        attempts = await attempts_for(repo, sub, charged_period)
+        earlier = next((p for p in attempts if p.status == "succeeded"), None)
+        open_row = next((p for p in attempts if p.status not in ("failed", "succeeded")), None)
+        attempt_key = (attempt_key_of(open_row) if open_row else None) or dunning_attempt_key(sub, charged_period, attempt)
+        charge = (
+            ChargeAttemptOutcome(kind="succeeded", payment=earlier)
+            if earlier is not None
+            else await charge_attempt(ChargeAttemptInput(
+                provider=provider, repo=repo, clock=clock, sub=sub, price=price,
+                period=charged_period, attempt_key=attempt_key,
+            ))
+        )
         item.attempts += 1
 
-        payment: Payment | None
-        try:
-            payment = await provider.charge_billing_key(
-                billing_key=sub.billing_key,
-                amount=Money(amount_minor=price.amount_minor, currency=price.currency),
-                order_id=idempotency_key,
-                customer_ref=sub.customer_id,
-                idempotency_key=idempotency_key,
-            )
-        except PaymentKitError as err:
-            if err.code == "subscription_version_conflict":
-                raise
-            payment = None  # any other provider failure is a failed charge attempt
-        except Exception:  # noqa: BLE001 — any other provider failure is a failed charge attempt
-            payment = None
-
-        if payment is not None and payment.status == "succeeded":
+        if charge.kind == "succeeded":
             item.status = "sent"
             await repo.outbox.put(item)
-            result = await on_recovered(
-                OnRecoveredInput(
-                    sub=sub,
-                    payment=payment,
-                    policy=policy,
-                    ledger=ledger,
-                    repo=repo,
-                    clock=clock,
-                )
-            )
-            return RunRetryResult(
-                outcome="recovered", sub=result.sub, grants=result.grants
-            )
+            renewed = await on_renewal_paid(OnRenewalPaidInput(
+                sub=sub, payment=charge.payment, policy=policy, ledger=ledger, repo=repo, clock=clock,
+            ))
+            return RunRetryResult(outcome="recovered", sub=renewed.sub, grants=[renewed.grant])
+
+        if charge.kind == "unresolved":
+            # EC:A34 A36 (N11) -- no answer is not a decline: the same attempt is re-driven later with
+            # the same key (never a new charge while this one may have moved money). One notice.
+            item.next_attempt_at = clock.now() + max(1, _retry_gap_hours(attempt, policy.dunning.retry_interval_hours)) * _HOUR
+            await repo.outbox.put(item)
+            if charge.first:
+                await notifier.send(Notification(type="cs.needs_human", customer_id=sub.customer_id, payload={
+                    "kind": "renewal_charge_unresolved", "subscription_id": sub.id,
+                    "payment_id": charge.payment.id, "reason": charge.reason}))
+            return RunRetryResult(outcome="unresolved", sub=sub, grants=[])
 
         item.status = "sent"
         await repo.outbox.put(item)

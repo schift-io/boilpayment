@@ -1,11 +1,11 @@
 // spec: packages/lifecycle/spec/lifecycle.pseudo.md — EC:F (Toss/Portone self-scheduling)
 import { Clock, IdGen, NoopNotifier, Notifier, PaymentKitError, PaymentProvider, Policy, Repo, LedgerStore, Subscription } from 'boilpayment-core';
-import type { Payment, Period } from 'boilpayment-core';
 import { onRenewalPaid } from './renewal.js';
 import { onPaymentFailed } from './dunning.js';
 import { nextPeriod } from './period.js';
 import { retryOnVersionConflict } from './retry.js';
-import { priceForSubscription, renewalPlanId, scopeProvider } from './internal.js';
+import { priceForSubscription, renewalPlanId } from './internal.js';
+import { attemptKeyOf, attemptsFor, chargeAttempt, markUnresolved, renewalAttemptKey } from './charge-attempt.js';
 
 export interface DueSubscriptionsInput {
   repo: Repo;
@@ -18,7 +18,8 @@ export async function dueSubscriptions(input: DueSubscriptionsInput): Promise<Su
   const { repo, clock } = input;
   const now = clock.now();
   const all = await repo.subscriptions.list();
-  return all.filter((s) => s.status === 'active' && !s.cancelAtPeriodEnd && s.billingKey !== null && s.currentPeriod.end <= now);
+  // EC:A34 A36 — past_due rows too: an attempt of theirs whose outcome is unknown is re-driven here.
+  return all.filter((s) => (s.status === 'active' || s.status === 'past_due') && !s.cancelAtPeriodEnd && s.billingKey !== null && s.currentPeriod.end <= now);
 }
 
 export interface SchedulerTickInput {
@@ -98,95 +99,61 @@ export async function tick(input: SchedulerTickInput): Promise<SchedulerTickResu
 
 async function renewOne(input: SchedulerTickInput, dueSub: Subscription, notifier: Notifier) {
   const { provider, repo, policy, ledger, clock } = input;
-  // Reuse the original period key after a version conflict; never charge a newer period
-  // or a subscription canceled/removed by another writer while this tick was running.
-  const idempotencyKey = `charge:${dueSub.id}:${dueSub.currentPeriod.end.toISOString()}`;
   const correlationId = `corr_sched_${dueSub.id}_${dueSub.currentPeriod.end.toISOString()}`;
   const outcome = await retryOnVersionConflict(async () => {
     const sub = await repo.subscriptions.get(dueSub.id);
-    if (!sub || sub.status !== 'active' || sub.cancelAtPeriodEnd ||
+    // Never charge a newer period, or a subscription canceled/removed by another writer meanwhile.
+    if (!sub || (sub.status !== 'active' && sub.status !== 'past_due') || sub.cancelAtPeriodEnd ||
         sub.provider !== provider.name || !sub.billingKey ||
         sub.currentPeriod.end > clock.now() ||
         sub.currentPeriod.end.getTime() !== dueSub.currentPeriod.end.getTime()) {
       return null;
     }
-    // EC:A29 — charge the plan the subscription renews INTO (a scheduled downgrade/change applies at
-    // this renewal), the same plan onRenewalPaid grants.
+    // EC:A29 — charge the plan the subscription renews INTO; EC:A28 — in the subscription's currency.
     const plan = await repo.plans.get(renewalPlanId(sub));
-    // EC:A28 — the price in the subscription's currency; none means no charge (never another currency).
     const price = plan ? priceForSubscription(plan, sub) : null;
     if (!plan || !price) {
-      // EC:A31 — a missing plan or price is a configuration fault: no charge, the subscription goes
-      // through dunning (past_due, grace) and a person is told, instead of staying active unpaid.
+      if (sub.status !== 'active') return null; // already in dunning; its retries tell a person
+      // EC:A31 — a missing plan or price is a configuration fault: no charge, dunning, a person is told.
       await notifier.send({ type: 'cs.needs_human', customerId: sub.customerId, payload: {
         kind: 'plan_price_missing', subscriptionId: sub.id, planId: renewalPlanId(sub), currency: sub.currency ?? null } });
       const result = await onPaymentFailed({ sub, policy, repo, notifier, clock });
       return { kind: 'failed' as const, sub: result.sub };
     }
-    const interval = plan.interval ?? 'month';
-    const chargedPeriod = nextPeriod(sub.currentPeriod, interval, sub.anchorDay, policy.period.timezone, policy.period.monthEndAnchor);
-    // EC:A30 — a charge that already succeeded for this period (its local steps failed on an
-    // earlier tick) is resumed from the stored payment, never charged again.
-    const paid = (await repo.payments.list({ subscriptionId: sub.id } as Partial<Payment>)).find((p) =>
-      p.kind === 'subscription' && p.status === 'succeeded' && p.period?.start.getTime() === chargedPeriod.start.getTime());
+    const chargedPeriod = nextPeriod(sub.currentPeriod, plan.interval ?? 'month', sub.anchorDay, policy.period.timezone, policy.period.monthEndAnchor);
+
+    // EC:A34 — one (subscription, period) is charged at most once. A succeeded attempt (the
+    // scheduler's or a dunning retry's) finishes the renewal; an attempt whose outcome is unknown is
+    // re-driven with its own key; a new charge is started only for an active subscription.
+    const attempts = await attemptsFor(repo, sub, chargedPeriod);
+    const paid = attempts.find((p) => p.status === 'succeeded');
     if (paid) {
       const result = await onRenewalPaid({ sub, payment: paid, policy, ledger, repo, clock });
       return { kind: 'charged' as const, sub: result.sub };
     }
-    // Transport exceptions do not prove a declined charge. Propagate for reconciliation;
-    // local renewal/ledger failures must likewise never trigger another payment or dunning.
-    const payment = await scopeProvider(provider, correlationId).chargeBillingKey({
-      billingKey: sub.billingKey,
-      amount: { amountMinor: price.amountMinor, currency: price.currency },
-      orderId: idempotencyKey,
-      customerRef: sub.customerId,
-      idempotencyKey,
-    });
-    switch (payment.status) {
+    const open = attempts.find((p) => p.status !== 'failed');
+    if (!open && sub.status !== 'active') return null; // every attempt answered: dunning owns the next charge
+    const attemptKey = (open && attemptKeyOf(open)) || renewalAttemptKey(sub, chargedPeriod);
+    const charge = await chargeAttempt({ provider, repo, clock, sub, price, period: chargedPeriod, attemptKey, correlationId });
+    switch (charge.kind) {
       case 'succeeded': {
-        const stored = await recordRenewalPayment({ repo, ids: input.ids, sub, payment, period: chargedPeriod });
-        const result = await onRenewalPaid({ sub, payment: stored, policy, ledger, repo, clock });
+        const result = await onRenewalPaid({ sub, payment: charge.payment, policy, ledger, repo, clock });
         return { kind: 'charged' as const, sub: result.sub };
       }
-      case 'failed': {
+      case 'declined': {
+        if (sub.status !== 'active') return { kind: 'failed' as const, sub };
         const result = await onPaymentFailed({ sub, policy, repo, notifier, clock });
         return { kind: 'failed' as const, sub: result.sub };
       }
-      case 'pending':
-      case 'requires_action':
-      case 'refunded':
-      case 'partially_refunded':
-      case 'disputed':
-        throw new PaymentKitError('Renewal charge requires reconciliation', 'scheduler_charge_unresolved', {
-          subscriptionId: sub.id, paymentId: payment.id, status: payment.status, idempotencyKey,
+      case 'unresolved': {
+        // EC:A36 — past the period end with no answer: grace instead of indefinite access, one notice,
+        // and the error is reported every tick until the provider answers.
+        await markUnresolved({ sub, repo, notifier, clock, graceDays: policy.dunning.graceDays, payment: charge.payment, reason: charge.reason });
+        throw new PaymentKitError(`Renewal charge requires reconciliation: ${charge.reason}`, 'scheduler_charge_unresolved', {
+          subscriptionId: sub.id, paymentId: charge.payment.id, status: charge.payment.status, attemptKey, reason: charge.reason,
         });
-      default: {
-        const unreachable: never = payment.status;
-        throw new PaymentKitError('Unknown payment status', 'scheduler_charge_unresolved', unreachable);
       }
     }
   });
   return outcome;
-}
-
-
-/**
- * EC:A26 — a self-scheduled renewal has no webhook to create its payment row (Toss sends none for
- * billing payments), so store it here: refunds, settlement, timeline and missing-grant recovery all
- * start from local payments. A retried charge returns the same provider payment (same idempotency
- * key), so an existing (provider, providerRef) row is reused rather than duplicated.
- */
-async function recordRenewalPayment(input: { repo: Repo; ids: IdGen; sub: Subscription; payment: Payment; period: Period }): Promise<Payment> {
-  const { repo, ids, sub, payment, period } = input;
-  const [existing] = await repo.payments.list({ provider: payment.provider, providerRef: payment.providerRef } as Partial<Payment>);
-  const row: Payment = {
-    ...payment,
-    id: existing?.id ?? ids.newId(),
-    customerId: sub.customerId,
-    subscriptionId: sub.id,
-    kind: 'subscription',
-    period,
-  };
-  await repo.payments.put(row);
-  return row;
 }

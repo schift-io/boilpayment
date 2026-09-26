@@ -319,3 +319,21 @@ describe('[EC:A23] getSubscription / changeSubscription / cancelSubscription / u
     await expect(provider.uncancelSubscription()).rejects.toMatchObject({ code: 'unsupported' });
   });
 });
+
+describe('[EC:A34] PortoneProvider.chargeBillingKey is idempotent per paymentId', () => {
+  const PAID = { id: 'ord_again', status: 'PAID', amount: { total: 9900, paid: 9900 }, currency: 'KRW', customer: { id: 'cus_abc' },
+    paidAt: '2026-09-01T00:00:05.000Z', requestedAt: '2026-09-01T00:00:00.000Z', method: { type: 'PaymentMethodCard' } };
+  const input = { billingKey: 'bk', amount: { amountMinor: 9900, currency: 'KRW' }, orderId: 'ord_again', customerRef: 'cus_abc', idempotencyKey: 'k' };
+  it('[EC:A34] a retry answered ALREADY_PAID returns the paid payment instead of an error', async () => {
+    const cap = makeCapturingFetch((call) => call.method === 'POST'
+      ? { status: 409, body: { type: 'ALREADY_PAID', message: 'payment already paid: ord_again' } }
+      : { status: 200, body: PAID });
+    const p = await makeProvider(cap.fetchStub).chargeBillingKey(input);
+    expect([p.status, p.providerRef, cap.calls.map((c) => `${c.method} ${c.path}`)]).toEqual(['succeeded', 'ord_again',
+      ['POST /payments/ord_again/billing-key', 'GET /payments/ord_again']]);
+  });
+  it('[EC:A34] a decline carries the HTTP status (4xx is a decline, not an unknown outcome)', async () => {
+    const cap = makeCapturingFetch(() => ({ status: 400, body: { type: 'PG_PROVIDER', message: 'card declined', pgCode: 'X', pgMessage: 'declined' } }));
+    await expect(makeProvider(cap.fetchStub).chargeBillingKey(input)).rejects.toMatchObject({ httpStatus: 400 });
+  });
+});

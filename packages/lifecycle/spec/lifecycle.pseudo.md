@@ -610,3 +610,31 @@ resolvePriceRef(plan, provider, currency):
 
 upgrade (self-scheduled): oldPrice = requirePriceForSubscription(oldPlan, sub)   # 없으면 거절, 0 으로 보지 않는다
 ```
+
+## [EC:A34] [EC:A35] [EC:A36] 자체 스케줄 갱신 청구: (구독, 기간)당 한 번
+
+```pseudo
+attempt key: renewal = "charge:<sub>:<period.start ISO>", dunning n = "dunning-retry:<sub>:<period.start ISO>:<n>"
+orderId(key) = "ord_" + sha256(key)[0:40]; payment row id = "pay_rn_" + sha256(key)[0:32]
+
+chargeAttempt(key):
+   row = payments.get(id(key))
+   if row.status == succeeded: return succeeded(row)
+   if row.status == failed:    return declined(row, fresh=false)
+   if no row: payments.put(pending row: period, amount, providerRef = orderId, raw.attemptKey = key)   # 호출 전에
+   try answer = provider.chargeBillingKey(orderId, idempotencyKey = key)
+   except ProviderError with 4xx (not 408/409/429): row.status = failed -> declined(fresh)
+   except anything else: unresolved (row stays pending)
+   row <- answer; succeeded / failed / unresolved
+
+tick (active or past_due, period ended):
+   attempts = rows of (sub, nextPeriod)
+   succeeded attempt -> onRenewalPaid (no charge)
+   pending attempt -> re-drive its key
+   no open attempt and past_due -> nothing (dunning owns the next charge)
+   else new renewal attempt
+   declined (active) -> onPaymentFailed; unresolved -> markUnresolved (past_due + grace once, cs.needs_human once), report error
+
+runRetry (past_due): same attempts; succeeded -> onRenewalPaid (grants nextPeriod, advances); pending -> re-drive;
+   else dunning attempt n; unresolved -> item stays pending, later, same key, no failure notice
+```

@@ -414,7 +414,7 @@ export class TossProvider implements PaymentProvider {
           durationMs: Date.now() - startedAt, correlationId: this.correlationIdOverride ?? opts?.idempotencyKey ?? null,
           providerErrorCode: failure.code, requestBody: body, responseBody: json,
         });
-        throw new ProviderError(json.message ?? `toss api error (${res.status})`, failure, json);
+        throw new ProviderError(json.message ?? `toss api error (${res.status})`, failure, json, res.status);
       }
       await this.logger.log({
         level: 'info', event: 'provider.request', provider: 'toss', method, path, status,

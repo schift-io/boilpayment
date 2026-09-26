@@ -363,17 +363,32 @@ export function generateIndexTs(config: PaykitConfig): string {
     l.push(`      const selfSchedulingProviders: ProviderName[] = [${selfSchedulingProviders.map((p) => `'${p}'`).join(', ')}];`);
     l.push(`      const charged: Subscription[] = [];`);
     l.push(`      const failed: Subscription[] = [];`);
+    l.push(`      const errors: Array<{ subscriptionId: string; code: string; message: string }> = [];`);
     l.push(`      for (const name of selfSchedulingProviders) {`);
     l.push(`        const provider = providers[name];`);
     l.push(`        if (!provider) continue;`);
     l.push(`        const result = await scheduler.tick({ provider, repo: full.repo, policy, ledger: full.ledger, clock: full.clock, ids: full.ids, notifier });`);
     l.push(`        charged.push(...result.charged);`);
     l.push(`        failed.push(...result.failed);`);
+    l.push(`        errors.push(...result.errors);`);
+    l.push(`        // EC:A34 — due dunning retries charge through the same per-period attempt records as the tick.`);
+    l.push(`        for (const item of await dunning.retryDue({ repo: full.repo, clock: full.clock })) {`);
+    l.push(`          const sub = await full.repo.subscriptions.get((item.payload as { subscriptionId: string }).subscriptionId);`);
+    l.push(`          if (!sub || sub.provider !== name) continue;`);
+    l.push(`          try {`);
+    l.push(`            const retry = await dunning.runRetry({ item, provider, repo: full.repo, ledger: full.ledger, policy, notifier, clock: full.clock });`);
+    l.push(`            if (retry.outcome === 'recovered' && retry.sub) charged.push(retry.sub);`);
+    l.push(`          } catch (err) {`);
+    l.push(`            errors.push({ subscriptionId: sub.id, code: (err as { code?: string }).code ?? 'dunning_retry_error', message: err instanceof Error ? err.message : String(err) });`);
+    l.push(`          }`);
+    l.push(`        }`);
     l.push(`      }`);
-    l.push(`      return { charged, failed };`);
+    l.push(`      // EC:A36 — never dropped: every unresolved or failed renewal is logged and returned.`);
+    l.push(`      for (const e of errors) await logger.log({ level: 'error', event: 'scheduler.error', ...e });`);
+    l.push(`      return { charged, failed, errors };`);
     l.push(`    },`);
   } else {
-    l.push(`    schedulerTick: async () => ({ charged: [] as Subscription[], failed: [] as Subscription[] }),`);
+    l.push(`    schedulerTick: async () => ({ charged: [] as Subscription[], failed: [] as Subscription[], errors: [] as Array<{ subscriptionId: string; code: string; message: string }> }),`);
   }
   if (hasReservations) l.push(`    sweepReservations: () => sweepReservations({ repo: full.repo, ledger: full.ledger, clock: full.clock }),`);
   l.push(`    reconcile: (since: Date) => ${hasCredits ? 'recoverMissingGrants({ ...supportDeps, grants: { topup, grantForPeriod }, since })' : 'Promise.resolve([])'},`);

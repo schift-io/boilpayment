@@ -51,7 +51,7 @@ describe('[EC:A26] scheduler.tick records the renewal payment', () => {
     expect(rows.map((p) => p.id)).toEqual(['pay_local_earlier']);
   });
 
-  it('[EC:A26] a failed charge stores no payment row (dunning handles it)', async () => {
+  it('[EC:A34] a declined charge is recorded as a failed attempt (dunning handles the retries)', async () => {
     const clock = new FixedClock(new Date('2024-02-01T00:00:00.000Z'));
     const ledger = new InMemoryLedger(new SequentialIdGen('led_'));
     const repo = new InMemoryRepo();
@@ -60,6 +60,7 @@ describe('[EC:A26] scheduler.tick records the renewal payment', () => {
     const provider = new FakeSelfSchedulingProvider();
     provider.nextChargeStatus = 'failed';
     await scheduler.tick({ provider, repo, policy: resolvePolicy(), ledger, clock, ids: new SequentialIdGen('id_') });
-    expect(await repo.payments.list()).toEqual([]);
+    expect((await repo.payments.list()).map((p) => [p.status, p.period?.start.toISOString()])).toEqual([['failed', '2024-02-01T00:00:00.000Z']]);
+    expect((await repo.subscriptions.get('sub_1'))?.status).toBe('past_due');
   });
 });

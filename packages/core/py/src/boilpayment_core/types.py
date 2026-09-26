@@ -700,9 +700,13 @@ class InsufficientBalanceError(PaymentKitError):
 class ProviderError(PaymentKitError):
     code = "provider"
 
-    def __init__(self, message: str, failure: PaymentFailure, details: Any = None):
+    def __init__(self, message: str, failure: PaymentFailure, details: Any = None, http_status: int | None = None):
         super().__init__(message, self.code, details)
         self.failure = failure
+        # EC:A34 -- the provider's HTTP status when it answered. A 4xx (other than 408/409/429) is the
+        # provider refusing the request (a decline); a 5xx, timeout or no answer proves nothing about
+        # whether the money moved. None for adapters that do not report it.
+        self.http_status = http_status
 
 
 # ── Interfaces (DI) ──────────────────────────────────────────────────────────

@@ -446,6 +446,7 @@ class TossProvider:
                     data.get("message") or f"toss api error ({res.status_code})",
                     failure,
                     data,
+                    http_status=res.status_code,
                 )
             await self._logger.log(
                 {

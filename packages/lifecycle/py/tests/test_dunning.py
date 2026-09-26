@@ -527,7 +527,7 @@ def test_ec_a24_failed_charge_notifies_and_schedules_next():
             )
         )
         assert result.outcome == "failed"
-        assert provider.last_charge["idempotency_key"] == f"dunning-retry:{sub.id}:1"
+        assert provider.last_charge["idempotency_key"] == f"dunning-retry:{sub.id}:2024-02-01T00:00:00.000Z:1"  # EC:A35 period in the key
         assert "payment.failed" in [n.type for n in notifier.sent]
         assert "grace.ending" not in [
             n.type for n in notifier.sent

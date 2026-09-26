@@ -13,6 +13,7 @@ import {
   PaymentStatus,
   ProviderCapabilities,
   Refund,
+  ProviderError,
   Subscription,
 } from 'boilpayment-core';
 
@@ -195,9 +196,38 @@ export class FakeSelfSchedulingProvider implements PaymentProvider {
   async uncancelSubscription(): Promise<Subscription> {
     throw new PaymentKitError('unsupported', 'unsupported');
   }
+  /** Every orderId sent (EC:A35 format checks). */
+  readonly orderIds: string[] = [];
+  /** Idempotency like Toss (a repeated Idempotency-Key replays the stored answer). */
+  private readonly answers = new Map<string, Payment>();
+  /** Keys whose charge actually moved money (succeeded), counted once per key. */
+  readonly moneyMoved = new Set<string>();
+  /** Test hook: the provider later settles an earlier answer (e.g. pending -> succeeded). */
+  settle(idempotencyKey: string, status: PaymentStatus): void {
+    const prev = this.answers.get(idempotencyKey);
+    if (prev) this.answers.set(idempotencyKey, { ...prev, status });
+    if (status === 'succeeded') this.moneyMoved.add(idempotencyKey);
+  }
+  /** Test hook: answer the next call with an HTTP error (a decline is a 4xx). */
+  nextChargeHttpError: number | null = null;
+
   async chargeBillingKey(input: { billingKey: string; amount: Money; orderId: string; customerRef: string; idempotencyKey: string }): Promise<Payment> {
     this.lastCharge = { amountMinor: input.amount.amountMinor, currency: input.amount.currency, idempotencyKey: input.idempotencyKey };
+    this.orderIds.push(input.orderId);
     if (this.nextChargeThrows) throw new Error('provider unavailable');
+    if (this.nextChargeHttpError !== null) {
+      const status = this.nextChargeHttpError;
+      throw new ProviderError(`toss api error (${status})`, { code: status >= 500 ? 'provider_unavailable' : 'card_declined', providerCode: null, retryable: status >= 500, userMessage: 'x' }, {}, status);
+    }
+    const replay = this.answers.get(input.idempotencyKey);
+    if (replay) return replay;
+    const answer = this.answerFor(input);
+    this.answers.set(input.idempotencyKey, answer);
+    if (answer.status === 'succeeded') this.moneyMoved.add(input.idempotencyKey);
+    return answer;
+  }
+
+  private answerFor(input: { amount: Money; orderId: string; customerRef: string; idempotencyKey: string }): Payment {
     return {
       id: `pay_${input.idempotencyKey}`,
       customerId: input.customerRef,

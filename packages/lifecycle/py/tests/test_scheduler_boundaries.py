@@ -83,7 +83,7 @@ def test_pending_charge_does_not_start_dunning():
         input.provider.next_charge_status = "pending"
         res = await tick(input)
         assert [(e.subscription_id, e.code) for e in res.errors] == [("sub_1", "scheduler_charge_unresolved")]
-        assert (await input.repo.subscriptions.get("sub_1")).status == "active"
+        assert (await input.repo.subscriptions.get("sub_1")).status == "past_due"  # EC:A36 grace
         assert await input.repo.outbox.list() == []
 
     run(scenario())

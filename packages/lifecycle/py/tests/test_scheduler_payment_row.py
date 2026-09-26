@@ -56,7 +56,7 @@ def test_ec_a26_retried_charge_reuses_stored_row() -> None:
     assert asyncio.run(run()) == ["pay_local_earlier"]
 
 
-def test_ec_a26_failed_charge_stores_no_row() -> None:
+def test_ec_a34_declined_charge_is_recorded_as_failed_attempt() -> None:
     async def run():
         repo, ledger = InMemoryRepo(), InMemoryLedger(SequentialIdGen("led_"))
         await repo.plans.put(PLAN)
@@ -64,6 +64,7 @@ def test_ec_a26_failed_charge_stores_no_row() -> None:
         provider = FakeSelfSchedulingProvider()
         provider.next_charge_status = "failed"
         await _tick(repo, ledger, provider)
-        return await repo.payments.list()
+        return ([(p.status, p.period.start.isoformat() if p.period else None) for p in await repo.payments.list()],
+                (await repo.subscriptions.get("sub_1")).status)
 
-    assert asyncio.run(run()) == []
+    assert asyncio.run(run()) == ([("failed", "2024-02-01T00:00:00+00:00")], "past_due")

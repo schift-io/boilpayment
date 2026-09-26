@@ -84,7 +84,7 @@ describe("EC:F scheduler.tick — only runs for provider.capabilities().scheduli
     expect(bal.available).toBe(0);
   });
 
-  it("preserves unknown provider outcomes without starting dunning", async () => {
+  it("[EC:A36] an unknown provider outcome enters grace once, schedules no new charge and is reported", async () => {
     const clock = new FixedClock(new Date('2024-02-01T00:00:00.000Z'));
     const ledger = new InMemoryLedger(new SequentialIdGen('led_'));
     const repo = new InMemoryRepo();
@@ -98,8 +98,10 @@ describe("EC:F scheduler.tick — only runs for provider.capabilities().scheduli
     // EC:A30 — reported per subscription, not thrown out of the whole tick.
     const res = await scheduler.tick({ provider, repo, policy, ledger, clock, ids });
     expect(res.errors.map((e) => [e.subscriptionId, e.message])).toEqual([['sub_1', expect.stringContaining('provider unavailable')]]);
-    expect((await repo.subscriptions.get('sub_1'))?.status).toBe('active');
-    expect(await repo.outbox.list()).toEqual([]);
+    const sub = await repo.subscriptions.get('sub_1');
+    expect([sub?.status, sub?.graceUntil?.toISOString()]).toEqual(['past_due', expect.any(String)]);
+    expect(await repo.outbox.list()).toEqual([]); // no dunning retry: this attempt may still have moved money
+    expect((await repo.payments.list()).map((p) => p.status)).toEqual(['pending']);
   });
 });
 
@@ -146,7 +148,7 @@ describe('scheduler bad-case boundaries', () => {
     const input = await setup();
     input.provider.nextChargeStatus = 'pending';
     expect((await scheduler.tick(input)).errors).toMatchObject([{ subscriptionId: 'sub_1', code: 'scheduler_charge_unresolved' }]);
-    expect((await input.repo.subscriptions.get('sub_1'))?.status).toBe('active');
+    expect((await input.repo.subscriptions.get('sub_1'))?.status).toBe('past_due'); // EC:A36 grace, not indefinite access
     expect(await input.repo.outbox.list()).toEqual([]);
   });
 

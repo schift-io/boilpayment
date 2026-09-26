@@ -4,27 +4,32 @@ from __future__ import annotations
 
 import dataclasses
 from dataclasses import dataclass, field
-from typing import assert_never
 
 from boilpayment_core import (
     Clock,
     IdGen,
     LedgerStore,
-    Money,
     NoopNotifier,
     Notification,
     Notifier,
-    Payment,
     PaymentKitError,
     PaymentProvider,
-    Period,
     Policy,
     Repo,
     Subscription,
 )
 
+from .charge_attempt import (
+    ChargeAttemptInput,
+    attempt_key_of,
+    attempts_for,
+    charge_attempt,
+    iso_z,
+    mark_unresolved,
+    renewal_attempt_key,
+)
 from .dunning import OnPaymentFailedInput, on_payment_failed
-from .internal import price_for_subscription, renewal_plan_id, scope_provider
+from .internal import price_for_subscription, renewal_plan_id
 from .period import next_period
 from .renewal import OnRenewalPaidInput, on_renewal_paid
 from .retry import retry_on_version_conflict
@@ -44,7 +49,8 @@ async def due_subscriptions(input: DueSubscriptionsInput) -> list[Subscription]:
     return [
         s
         for s in all_subs
-        if s.status == "active"
+        # EC:A34 A36 -- past_due rows too: an attempt of theirs with no answer is re-driven here.
+        if s.status in ("active", "past_due")
         and not s.cancel_at_period_end
         and s.billing_key is not None
         and s.current_period.end <= now
@@ -125,12 +131,12 @@ async def tick(input: SchedulerTickInput) -> SchedulerTickResult:
     for due_sub in due:
         # Keep the original period key across retries and revalidate cancellation/period changes.
         async def _attempt(due_sub: Subscription = due_sub) -> tuple[str, Subscription] | None:
-            idempotency_key = f"charge:{due_sub.id}:{due_sub.current_period.end.isoformat()}"
-            correlation_id = f"corr_sched_{due_sub.id}_{due_sub.current_period.end.isoformat()}"
+            correlation_id = f"corr_sched_{due_sub.id}_{iso_z(due_sub.current_period.end)}"
             sub = await repo.subscriptions.get(due_sub.id)
+            # Never charge a newer period, or a subscription canceled/removed by another writer.
             if (
                 sub is None
-                or sub.status != "active"
+                or sub.status not in ("active", "past_due")
                 or sub.cancel_at_period_end
                 or sub.provider != provider.name
                 or not sub.billing_key
@@ -138,12 +144,12 @@ async def tick(input: SchedulerTickInput) -> SchedulerTickResult:
                 or sub.current_period.end != due_sub.current_period.end
             ):
                 return None
-            # EC:A29 -- charge the plan the subscription renews INTO (a scheduled change applies at
-            # this renewal), the same plan on_renewal_paid grants.
+            # EC:A29 -- the plan the subscription renews INTO; EC:A28 -- in its currency.
             plan = await repo.plans.get(renewal_plan_id(sub))
-            # EC:A28 -- the price in the subscription's currency; none means no charge.
             price = price_for_subscription(plan, sub) if plan is not None else None
             if plan is None or price is None:
+                if sub.status != "active":
+                    return None  # already in dunning; its retries tell a person
                 # EC:A31 -- a configuration fault: no charge; dunning (past_due, grace) and a person told.
                 await notifier.send(Notification(type="cs.needs_human", customer_id=sub.customer_id, payload={
                     "kind": "plan_price_missing", "subscription_id": sub.id,
@@ -159,48 +165,44 @@ async def tick(input: SchedulerTickInput) -> SchedulerTickResult:
                 policy.period.timezone,
                 policy.period.month_end_anchor,
             )
-            # EC:A30 -- a charge that already succeeded for this period (its local steps failed on an
-            # earlier tick) is resumed from the stored payment, never charged again.
-            paid = next((p for p in await repo.payments.list(subscription_id=sub.id)
-                         if p.kind == "subscription" and p.status == "succeeded"
-                         and p.period is not None and p.period.start == charged_period.start), None)
+            # EC:A34 -- one (subscription, period) is charged at most once: a succeeded attempt
+            # finishes the renewal, an attempt with no answer is re-driven with its own key, and a new
+            # charge is started only for an active subscription.
+            attempts = await attempts_for(repo, sub, charged_period)
+            paid = next((p for p in attempts if p.status == "succeeded"), None)
             if paid is not None:
                 resumed = await on_renewal_paid(OnRenewalPaidInput(
                     sub=sub, payment=paid, policy=policy, ledger=ledger, repo=repo, clock=clock,
                 ))
                 return ("charged", resumed.sub)
-            # Transport errors and local persistence errors do not prove a declined charge.
-            # Propagate them for reconciliation instead of starting customer dunning.
-            payment = await scope_provider(provider, correlation_id).charge_billing_key(
-                billing_key=sub.billing_key,
-                amount=Money(amount_minor=price.amount_minor, currency=price.currency),
-                order_id=idempotency_key,
-                customer_ref=sub.customer_id,
-                idempotency_key=idempotency_key,
+            open_row = next((p for p in attempts if p.status != "failed"), None)
+            if open_row is None and sub.status != "active":
+                return None  # every attempt answered: dunning owns the next charge
+            attempt_key = (attempt_key_of(open_row) if open_row else None) or renewal_attempt_key(sub, charged_period)
+            charge = await charge_attempt(ChargeAttemptInput(
+                provider=provider, repo=repo, clock=clock, sub=sub, price=price,
+                period=charged_period, attempt_key=attempt_key, correlation_id=correlation_id,
+            ))
+            if charge.kind == "succeeded":
+                result = await on_renewal_paid(OnRenewalPaidInput(
+                    sub=sub, payment=charge.payment, policy=policy, ledger=ledger, repo=repo, clock=clock,
+                ))
+                return ("charged", result.sub)
+            if charge.kind == "declined":
+                if sub.status != "active":
+                    return ("failed", sub)
+                failed_result = await on_payment_failed(OnPaymentFailedInput(
+                    sub=sub, policy=policy, repo=repo, notifier=notifier, clock=clock,
+                ))
+                return ("failed", failed_result.sub)
+            # EC:A36 -- past the period end with no answer: grace, one notice, reported every tick.
+            await mark_unresolved(sub=sub, repo=repo, notifier=notifier, clock=clock,
+                                  grace_days=policy.dunning.grace_days, payment=charge.payment, reason=charge.reason)
+            raise PaymentKitError(
+                f"Renewal charge requires reconciliation: {charge.reason}", "scheduler_charge_unresolved",
+                {"subscription_id": sub.id, "payment_id": charge.payment.id, "status": charge.payment.status,
+                 "attempt_key": attempt_key, "reason": charge.reason},
             )
-            match payment.status:
-                case "succeeded":
-                    stored = await _record_renewal_payment(
-                        repo=repo, ids=input.ids, sub=sub, payment=payment, period=charged_period
-                    )
-                    result = await on_renewal_paid(OnRenewalPaidInput(
-                        sub=sub, payment=stored,
-                        policy=policy, ledger=ledger, repo=repo, clock=clock,
-                    ))
-                    return ("charged", result.sub)
-                case "failed":
-                    failed_result = await on_payment_failed(OnPaymentFailedInput(
-                        sub=sub, policy=policy, repo=repo, notifier=notifier, clock=clock,
-                    ))
-                    return ("failed", failed_result.sub)
-                case "pending" | "requires_action" | "refunded" | "partially_refunded" | "disputed":
-                    raise PaymentKitError(
-                        "Renewal charge requires reconciliation", "scheduler_charge_unresolved",
-                        {"subscription_id": sub.id, "payment_id": payment.id,
-                         "status": payment.status, "idempotency_key": idempotency_key},
-                    )
-                case unreachable:
-                    assert_never(unreachable)
 
         # EC:A30 -- isolate each subscription: an unresolved charge or a local failure is reported
         # and the loop moves on, so one row can never stall every renewal after it.
@@ -223,21 +225,3 @@ async def tick(input: SchedulerTickInput) -> SchedulerTickResult:
 
     return SchedulerTickResult(charged=charged, failed=failed, errors=errors)
 
-
-async def _record_renewal_payment(
-    *, repo: Repo, ids: IdGen, sub: Subscription, payment: Payment, period: Period
-) -> Payment:
-    """EC:A26 -- a self-scheduled renewal has no webhook to create its payment row (Toss sends none
-    for billing payments), so store it here. A retried charge returns the same provider payment,
-    so an existing (provider, provider_ref) row is reused rather than duplicated."""
-    existing = await repo.payments.list(provider=payment.provider, provider_ref=payment.provider_ref)
-    row = dataclasses.replace(
-        payment,
-        id=existing[0].id if existing else ids.new_id(),
-        customer_id=sub.customer_id,
-        subscription_id=sub.id,
-        kind="subscription",
-        period=period,
-    )
-    await repo.payments.put(row)
-    return row

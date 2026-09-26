@@ -454,7 +454,12 @@ export class InsufficientBalanceError extends PaymentKitError {
   constructor(public readonly shortfall: number, details?: unknown) { super(`insufficient balance (shortfall ${shortfall})`, 'insufficient_balance', details); this.name = 'InsufficientBalanceError'; }
 }
 export class ProviderError extends PaymentKitError {
-  constructor(message: string, public readonly failure: PaymentFailure, details?: unknown) { super(message, 'provider', details); this.name = 'ProviderError'; }
+  /**
+   * EC:A34 — the provider's HTTP status when it answered. A 4xx (other than 408/409/429) is the
+   * provider refusing the request (a decline); a 5xx, timeout or no answer proves nothing about
+   * whether the money moved. Undefined for adapters that do not report it.
+   */
+  constructor(message: string, public readonly failure: PaymentFailure, details?: unknown, public readonly httpStatus?: number) { super(message, 'provider', details); this.name = 'ProviderError'; }
 }
 
 // ── Interfaces (DI) ──────────────────────────────────────────────────────────

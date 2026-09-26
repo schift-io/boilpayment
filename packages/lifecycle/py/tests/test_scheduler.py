@@ -194,7 +194,9 @@ def test_ec_f_tick_preserves_unknown_provider_outcome_without_dunning():
             clock=clock, ids=ids,
         ))
         assert [(e.subscription_id, "provider unavailable" in e.message) for e in res.errors] == [("sub_1", True)]
-        assert (await repo.subscriptions.get("sub_1")).status == "active"
-        assert await repo.outbox.list() == []
+        sub = await repo.subscriptions.get("sub_1")
+        assert (sub.status, sub.grace_until is not None) == ("past_due", True)  # EC:A36 grace, not indefinite access
+        assert await repo.outbox.list() == []  # no dunning retry: this attempt may still have moved money
+        assert [p.status for p in await repo.payments.list()] == ["pending"]
 
     run(scenario())

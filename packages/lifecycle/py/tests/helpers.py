@@ -201,6 +201,20 @@ class FakeSelfSchedulingProvider:
         self.last_charge: dict[str, Any] | None = None
         self.next_charge_status: str = "succeeded"
         self.next_charge_throws = False
+        self.next_charge_http_error: int | None = None
+        self.order_ids: list[str] = []
+        # Idempotency like Toss: a repeated Idempotency-Key replays the stored answer.
+        self._answers: dict[str, Payment] = {}
+        self.money_moved: set[str] = set()
+
+    def settle(self, idempotency_key: str, status: str) -> None:
+        """Test hook: the provider later settles an earlier answer (e.g. pending -> succeeded)."""
+        import dataclasses
+        prev = self._answers.get(idempotency_key)
+        if prev is not None:
+            self._answers[idempotency_key] = dataclasses.replace(prev, status=status)
+        if status == "succeeded":
+            self.money_moved.add(idempotency_key)
 
     def capabilities(self) -> ProviderCapabilities:
         return ProviderCapabilities(
@@ -246,8 +260,25 @@ class FakeSelfSchedulingProvider:
             "currency": amount.currency,
             "idempotency_key": kwargs["idempotency_key"],
         }
+        self.order_ids.append(kwargs["order_id"])
         if self.next_charge_throws:
             raise RuntimeError("provider unavailable")
+        if self.next_charge_http_error is not None:
+            from boilpayment_core import PaymentFailure, ProviderError
+            status = self.next_charge_http_error
+            raise ProviderError(f"toss api error ({status})", PaymentFailure(
+                code="provider_unavailable" if status >= 500 else "card_declined", provider_code=None,
+                retryable=status >= 500, user_message="x"), {}, http_status=status)
+        key = kwargs["idempotency_key"]
+        if key in self._answers:
+            return self._answers[key]
+        answer = self._answer_for(kwargs, amount)
+        self._answers[key] = answer
+        if answer.status == "succeeded":
+            self.money_moved.add(key)
+        return answer
+
+    def _answer_for(self, kwargs: dict[str, Any], amount: Money) -> Payment:
         return Payment(
             id=f"pay_{kwargs['idempotency_key']}",
             customer_id=kwargs["customer_ref"],

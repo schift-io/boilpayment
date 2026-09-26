@@ -268,7 +268,7 @@ describe('EC:A24 dunning.runRetry — self-scheduling provider charges the billi
 
     const result = await dunning.runRetry({ item, provider, repo, ledger, policy, notifier, clock: retryClock });
     expect(result.outcome).toBe('failed');
-    expect(provider.lastCharge?.idempotencyKey).toBe(`dunning-retry:${sub.id}:1`);
+    expect(provider.lastCharge?.idempotencyKey).toMatch(new RegExp(`^dunning-retry:${sub.id}:\\d{4}-\\d{2}-\\d{2}T[^:]+:[^:]+:[^:]+:1$`)); // EC:A35 — the period is part of the key
     expect(notifier.sent.map((n) => n.type)).toContain('payment.failed');
     expect(notifier.sent.some((n) => n.type === 'grace.ending')).toBe(false); // not the last attempt yet
 
