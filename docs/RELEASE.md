@@ -112,15 +112,22 @@ INTERNAL = {
     "boilpayment-stripe", "boilpayment-polar", "boilpayment-toss",
     "boilpayment-portone",
 }
+def pin(block):
+    for name in INTERNAL:
+        block = re.sub(rf'"{name}"(?!>=)', f'"{name}>={version},<{next_minor}"', block)
+    return block
 for path in pathlib.Path(".").glob("packages/**/py/pyproject.toml"):
     text = path.read_text()
-    for name in INTERNAL:
-        # only touch a bare, unconstrained occurrence inside dependencies = [...]
-        text = re.sub(rf'"{name}"(?!>=)', f'"{name}>={version},<{next_minor}"', text)
-    path.write_text(text)
-    print("pinned deps in", path)
+    # Only inside `dependencies = [...]`: the bare pattern also matches `name = "<pkg>"`,
+    # which turns the project name into an invalid requirement string and breaks `uv build`.
+    new = re.sub(r'(?ms)^dependencies\s*=\s*\[.*?\]', lambda m: pin(m.group(0)), text)
+    if new != text:
+        path.write_text(new)
+        print("pinned deps in", path)
 PYEOF
 ```
+
+Tip: run steps 2 and 3 on a `git archive HEAD | tar -x -C <tmp>` copy instead of the working tree; then there is nothing to put back afterward.
 
 Build and publish (step 3/4) using these pinned files. **Keep a copy of each `pyproject.toml`
 before running this script** (e.g. `cp packages/core/py/pyproject.toml /tmp/pyproject-core.bak`
