@@ -21,7 +21,9 @@ from boilpayment_core import (
     Money,
     Notification,
     Notifier,
+    Operation,
     Payment,
+    PaymentFailure,
     PaymentProvider,
     Period,
     PlanPrice,
@@ -99,10 +101,63 @@ def attempt_key_of(row: Payment) -> str | None:
     return key if isinstance(key, str) else None
 
 
+# EC:A37 -- one caller at a time per attempt (see charge-attempt.ts withAttemptLease).
+ATTEMPT_LEASE = timedelta(minutes=10)
+_LEASE_HASH = "charge-attempt-lease"
+
+
+def _lease_key(attempt_key: str) -> str:
+    return f"charge-lease:{attempt_key}"
+
+
+def _iso(dt: datetime) -> str:
+    return iso_z(dt)
+
+
+def _parse(value: str) -> datetime:
+    return datetime.fromisoformat(value)
+
+
+def _lease_is_stale(current: Operation, now: datetime) -> bool:
+    info = current.result if isinstance(current.result, dict) else {}
+    if info.get("leaseUntil"):
+        return _parse(info["leaseUntil"]) <= now
+    if info.get("unleasedSince"):
+        return _parse(info["unleasedSince"]) + ATTEMPT_LEASE <= now
+    return False
+
+
+async def with_attempt_lease(repo: Repo, clock: Clock, attempt_key: str, fn):  # type: ignore[no-untyped-def]
+    """Run fn() holding the attempt's lease. Returns (True, value) or (False, None) when another
+    caller holds it. Mirrors withAttemptLease in charge-attempt.ts."""
+    key = _lease_key(attempt_key)
+    now = clock.now()
+    row = Operation(id=key, key=key, kind="lifecycle.charge_attempt", payload_hash=_LEASE_HASH,
+                    status="in_progress", created_at=now, result=None, error=None, completed_at=None, attempts=0)
+    claimed = await repo.operations.claim(row)
+    if claimed is None:
+        current = await repo.operations.get(key)
+        info = current.result if current is not None and isinstance(current.result, dict) else {}
+        if current is not None and current.status == "in_progress" and _lease_is_stale(current, now):
+            await repo.operations.put(dataclasses.replace(current, status="failed", error="lease_expired", completed_at=now))
+            claimed = await repo.operations.claim(row)
+        elif current is not None and current.status == "in_progress" and not info.get("leaseUntil") and not info.get("unleasedSince"):
+            await repo.operations.put(dataclasses.replace(current, result={"unleasedSince": _iso(now)}))
+    if claimed is None:
+        return False, None
+    await repo.operations.put(dataclasses.replace(claimed, result={"leaseUntil": _iso(now + ATTEMPT_LEASE)}))
+    try:
+        return True, await fn()
+    finally:
+        mine = await repo.operations.get(key)
+        if mine is not None:
+            await repo.operations.put(dataclasses.replace(mine, status="failed", error=None, result=None, completed_at=clock.now()))
+
+
 @dataclass(kw_only=True, slots=True)
 class ChargeAttemptOutcome:
-    kind: Literal["succeeded", "declined", "unresolved"]
-    payment: Payment
+    kind: Literal["succeeded", "declined", "unresolved", "in_flight"]
+    payment: Payment | None
     fresh: bool = (
         True  # declined: False when this is the stored answer of an earlier call
     )
@@ -123,8 +178,14 @@ class ChargeAttemptInput:
 
 
 async def charge_attempt(input: ChargeAttemptInput) -> ChargeAttemptOutcome:
-    """EC:A34 -- run (or re-drive) one attempt. A succeeded or failed row is the final answer; a
-    pending row, or none, calls the provider with the attempt's idempotency key and order id."""
+    """EC:A34 A37 -- run (or re-drive) one attempt under its lease. A succeeded or failed row is
+    the final answer; a pending row, or none, calls the provider with the attempt's idempotency key
+    and order id. Another caller holding the attempt -> kind='in_flight', nothing done."""
+    held, value = await with_attempt_lease(input.repo, input.clock, input.attempt_key, lambda: _charge_attempt_held(input))
+    return value if held else ChargeAttemptOutcome(kind="in_flight", payment=None)
+
+
+async def _charge_attempt_held(input: ChargeAttemptInput) -> ChargeAttemptOutcome:
     repo, sub, price = input.repo, input.sub, input.price
     row_id = attempt_payment_id(input.attempt_key)
     order_id = provider_order_id(input.attempt_key)
@@ -225,3 +286,45 @@ async def mark_unresolved(
         )
     )
     return updated
+
+
+def order_id_of(row: Payment) -> str:
+    """The orderId an attempt row was sent with (rows of earlier releases used the key itself)."""
+    raw = row.raw if isinstance(row.raw, dict) else {}
+    legacy = raw.get("boilpaymentLegacyOrderId")
+    if isinstance(legacy, str):
+        return legacy
+    key = attempt_key_of(row)
+    return provider_order_id(key) if key else row.provider_ref
+
+
+async def settle_attempt_by_lookup(*, provider: PaymentProvider, repo: Repo, clock: Clock, row: Payment) -> Payment | None:
+    """EC:A38 -- settle a pending attempt WITHOUT charging, by asking the provider for its orderId."""
+    key = attempt_key_of(row) or row.id
+
+    async def run() -> Payment | None:
+        fresh = await repo.payments.get(row.id) or row
+        if fresh.status in ("succeeded", "failed"):
+            return fresh
+        lookup = getattr(provider, "get_payment_by_order_id", None)
+        if lookup is None:
+            return None
+        try:
+            found = await lookup(order_id_of(fresh))
+        except Exception:  # noqa: BLE001 -- no answer yet; retried on a later tick
+            return None
+        raw = dict(fresh.raw) if isinstance(fresh.raw, dict) else {}
+        if found is not None:
+            raw["provider"] = found.raw
+            settled = dataclasses.replace(fresh, provider_ref=found.provider_ref or fresh.provider_ref,
+                                          amount=found.amount or fresh.amount, status=found.status, failure=found.failure, raw=raw)
+        else:
+            settled = dataclasses.replace(fresh, status="failed", failure=PaymentFailure(
+                code="order_not_found", provider_code=None, retryable=False, user_message="The provider has no order for this attempt."))
+        if settled.status == "pending":
+            return None
+        await repo.payments.put(settled)
+        return settled
+
+    held, value = await with_attempt_lease(repo, clock, key, run)
+    return value if held else None

@@ -30,6 +30,7 @@ from .charge_attempt import (
 )
 from .dunning import OnPaymentFailedInput, on_payment_failed
 from .internal import price_for_subscription, renewal_plan_id
+from .legacy_attempts import check_legacy_dunning, settle_orphan_attempts
 from .period import next_period
 from .renewal import OnRenewalPaidInput, on_renewal_paid
 from .retry import retry_on_version_conflict
@@ -106,19 +107,20 @@ async def tick(input: SchedulerTickInput) -> SchedulerTickResult:
     # No provider termination webhook exists for locally scheduled cancellations.
     cancellations = [
         sub for sub in await repo.subscriptions.list()
-        if sub.provider == provider.name and sub.status == "active"
+        if sub.provider == provider.name and sub.status in ("active", "past_due")
         and sub.cancel_at_period_end and sub.current_period.end <= clock.now()
     ]
     for pending_cancel in cancellations:
         async def _finish_cancel(pending_cancel: Subscription = pending_cancel) -> None:
             sub = await repo.subscriptions.get(pending_cancel.id)
             if (
-                sub is None or sub.provider != provider.name or sub.status != "active"
+                sub is None or sub.provider != provider.name or sub.status not in ("active", "past_due")
                 or not sub.cancel_at_period_end or sub.current_period.end > clock.now()
             ):
                 return
+            # EC:A40 -- a past_due subscription canceled at period end ends too; dunning stops.
             await repo.subscriptions.put(dataclasses.replace(
-                sub, status="canceled", cancel_at_period_end=False,
+                sub, status="canceled", cancel_at_period_end=False, grace_until=None,
             ))
 
         await retry_on_version_conflict(_finish_cancel)
@@ -178,11 +180,25 @@ async def tick(input: SchedulerTickInput) -> SchedulerTickResult:
             open_row = next((p for p in attempts if p.status != "failed"), None)
             if open_row is None and sub.status != "active":
                 return None  # every attempt answered: dunning owns the next charge
+            if open_row is None:
+                # EC:A39 -- a dunning charge of an earlier release (no row) may already have paid this period.
+                legacy = await check_legacy_dunning(provider=provider, repo=repo, clock=clock, sub=sub, period=charged_period)
+                if legacy.kind == "paid" and legacy.payment is not None:
+                    resumed = await on_renewal_paid(OnRenewalPaidInput(
+                        sub=sub, payment=legacy.payment, policy=policy, ledger=ledger, repo=repo, clock=clock,
+                    ))
+                    return ("charged", resumed.sub)
+                if legacy.kind == "unverified":
+                    raise PaymentKitError(
+                        "An earlier release may already have charged this period; not charging until the provider confirms",
+                        "legacy_dunning_unverified", {"subscription_id": sub.id, "order_ids": legacy.order_ids})
             attempt_key = (attempt_key_of(open_row) if open_row else None) or renewal_attempt_key(sub, charged_period)
             charge = await charge_attempt(ChargeAttemptInput(
                 provider=provider, repo=repo, clock=clock, sub=sub, price=price,
                 period=charged_period, attempt_key=attempt_key, correlation_id=correlation_id,
             ))
+            if charge.kind == "in_flight":
+                return None  # EC:A37 -- another worker is charging this attempt right now
             if charge.kind == "succeeded":
                 result = await on_renewal_paid(OnRenewalPaidInput(
                     sub=sub, payment=charge.payment, policy=policy, ledger=ledger, repo=repo, clock=clock,
@@ -190,7 +206,13 @@ async def tick(input: SchedulerTickInput) -> SchedulerTickResult:
                 return ("charged", result.sub)
             if charge.kind == "declined":
                 if sub.status != "active":
-                    return ("failed", sub)
+                    # EC:A41 -- the scheduler's own attempt, unresolved until now, declined: dunning takes over once.
+                    if not charge.fresh or attempt_key_of(charge.payment) != renewal_attempt_key(sub, charged_period):
+                        return ("failed", sub)
+                    started = await on_payment_failed(OnPaymentFailedInput(
+                        sub=sub, policy=policy, repo=repo, notifier=notifier, clock=clock,
+                    ))
+                    return ("failed", started.sub)
                 failed_result = await on_payment_failed(OnPaymentFailedInput(
                     sub=sub, policy=policy, repo=repo, notifier=notifier, clock=clock,
                 ))
@@ -222,6 +244,16 @@ async def tick(input: SchedulerTickInput) -> SchedulerTickResult:
             charged.append(result_sub)
         else:
             failed.append(result_sub)
+
+    # EC:A38 -- attempts left pending by subscriptions that ended meanwhile are settled by lookup.
+    _settled, unresolved = await settle_orphan_attempts(
+        provider=provider, repo=repo, ledger=ledger, policy=policy, clock=clock, notifier=notifier,
+    )
+    for u in unresolved:
+        errors.append(SchedulerTickError(
+            subscription_id=u.subscription_id, code="renewal_charge_unresolved",
+            message=f"attempt {u.payment_id} still has no answer from the provider",
+        ))
 
     return SchedulerTickResult(charged=charged, failed=failed, errors=errors)
 

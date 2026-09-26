@@ -515,6 +515,17 @@ export class TossProvider implements PaymentProvider {
     return normalizeTossPayment(raw);
   }
 
+  // EC:A38 — look an order up by the orderId the kit sent, without charging. 404 = no such order.
+  async getPaymentByOrderId(orderId: string): Promise<Payment | null> {
+    try {
+      const raw = await this.request('GET', `/v1/payments/orders/${encodeURIComponent(orderId)}`);
+      return normalizeTossPayment(raw);
+    } catch (err) {
+      if (err instanceof ProviderError && err.httpStatus === 404) return null;
+      throw err;
+    }
+  }
+
   async listPayments(input: { customerRef: string; since: Date }): Promise<Payment[]> {
     // EC:H4 — Toss has no list-by-customer API. Best-effort via /v1/transactions;
     // matches only when the transaction row happens to carry customerKey. See spec.

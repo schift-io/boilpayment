@@ -227,6 +227,20 @@ export class FakeSelfSchedulingProvider implements PaymentProvider {
     return answer;
   }
 
+  /** EC:A38 — lookups by orderId (never charges). `lookupThrows` simulates an unreachable provider. */
+  readonly lookups: string[] = [];
+  lookupThrows = false;
+  async getPaymentByOrderId(orderId: string): Promise<Payment | null> {
+    this.lookups.push(orderId);
+    if (this.lookupThrows) throw new Error('provider unavailable');
+    return [...this.answers.values()].find((a) => a.providerRef === orderId) ?? null;
+  }
+  /** Test hook: an order an earlier release charged (its orderId was the key itself). */
+  seedOrder(orderId: string, status: PaymentStatus, amountMinor = 5000): void {
+    this.answers.set(orderId, { ...this.answerFor({ amount: { amountMinor, currency: 'KRW' }, orderId, customerRef: 'c1', idempotencyKey: orderId }), status });
+    if (status === 'succeeded') this.moneyMoved.add(orderId);
+  }
+
   private answerFor(input: { amount: Money; orderId: string; customerRef: string; idempotencyKey: string }): Payment {
     return {
       id: `pay_${input.idempotencyKey}`,

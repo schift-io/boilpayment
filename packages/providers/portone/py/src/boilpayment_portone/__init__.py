@@ -577,6 +577,15 @@ class PortoneProvider:
         raw = await self._request("GET", f"/payments/{provider_ref}")
         return normalize_portone_payment(raw)
 
+    async def get_payment_by_order_id(self, order_id: str) -> Payment | None:
+        """EC:A38 -- the orderId the kit sends is the PortOne paymentId. 404 = none."""
+        try:
+            return await self.get_payment(order_id)
+        except ProviderError as err:
+            if getattr(err, "http_status", None) == 404:
+                return None
+            raise
+
     async def list_payments(
         self, *, customer_ref: str, since: datetime
     ) -> list[Payment]:

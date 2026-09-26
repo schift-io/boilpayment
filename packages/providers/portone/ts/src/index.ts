@@ -453,6 +453,16 @@ export class PortoneProvider implements PaymentProvider {
     return normalizePortonePayment(raw);
   }
 
+  // EC:A38 — the orderId the kit sends is the PortOne paymentId. 404 = no such payment.
+  async getPaymentByOrderId(orderId: string): Promise<Payment | null> {
+    try {
+      return await this.getPayment(orderId);
+    } catch (err) {
+      if (err instanceof ProviderError && err.httpStatus === 404) return null;
+      throw err;
+    }
+  }
+
   async listPayments(input: { customerRef: string; since: Date }): Promise<Payment[]> {
     // Confirmed against the real V2 OpenAPI spec: GET /payments takes ONE query parameter
     // named `requestBody` whose value is the URL-encoded JSON body (GetPaymentsBody =

@@ -6,6 +6,7 @@ import { nextPeriod } from './period.js';
 import { retryOnVersionConflict } from './retry.js';
 import { priceForSubscription, renewalPlanId } from './internal.js';
 import { attemptKeyOf, attemptsFor, chargeAttempt, markUnresolved, renewalAttemptKey } from './charge-attempt.js';
+import { checkLegacyDunning, settleOrphanAttempts } from './legacy-attempts.js';
 
 export interface DueSubscriptionsInput {
   repo: Repo;
@@ -60,15 +61,17 @@ export async function tick(input: SchedulerTickInput): Promise<SchedulerTickResu
 
   // Self-scheduled providers emit no termination webhook for a locally scheduled cancel.
   // Finish elapsed cancellations before selecting renewals, including rows without billing keys.
+  // EC:A40 — a past_due subscription canceled at period end ends too: its period already ended, so
+  // dunning stops and nothing more is charged.
   const cancellations = (await repo.subscriptions.list()).filter((sub) =>
-    sub.provider === provider.name && sub.status === 'active' && sub.cancelAtPeriodEnd &&
+    sub.provider === provider.name && (sub.status === 'active' || sub.status === 'past_due') && sub.cancelAtPeriodEnd &&
     sub.currentPeriod.end <= clock.now());
   for (const pendingCancel of cancellations) {
     await retryOnVersionConflict(async () => {
       const sub = await repo.subscriptions.get(pendingCancel.id);
-      if (!sub || sub.provider !== provider.name || sub.status !== 'active' ||
+      if (!sub || sub.provider !== provider.name || (sub.status !== 'active' && sub.status !== 'past_due') ||
           !sub.cancelAtPeriodEnd || sub.currentPeriod.end > clock.now()) return;
-      await repo.subscriptions.put({ ...sub, status: 'canceled', cancelAtPeriodEnd: false });
+      await repo.subscriptions.put({ ...sub, status: 'canceled', cancelAtPeriodEnd: false, graceUntil: null });
     });
   }
 
@@ -92,6 +95,12 @@ export async function tick(input: SchedulerTickInput): Promise<SchedulerTickResu
         message: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  // EC:A38 — attempts left pending by subscriptions that ended meanwhile are settled by lookup.
+  const orphans = await settleOrphanAttempts({ provider, repo, ledger, policy, clock, notifier });
+  for (const u of orphans.unresolved) {
+    errors.push({ subscriptionId: u.subscriptionId, code: 'renewal_charge_unresolved', message: `attempt ${u.paymentId} still has no answer from the provider` });
   }
 
   return { charged, failed, errors };
@@ -133,15 +142,35 @@ async function renewOne(input: SchedulerTickInput, dueSub: Subscription, notifie
     }
     const open = attempts.find((p) => p.status !== 'failed');
     if (!open && sub.status !== 'active') return null; // every attempt answered: dunning owns the next charge
+    if (!open) {
+      // EC:A39 — a dunning charge of an earlier release (no row) may already have paid this period.
+      const legacy = await checkLegacyDunning({ provider, repo, clock, sub, period: chargedPeriod });
+      if (legacy.kind === 'paid') {
+        const result = await onRenewalPaid({ sub, payment: legacy.payment, policy, ledger, repo, clock });
+        return { kind: 'charged' as const, sub: result.sub };
+      }
+      if (legacy.kind === 'unverified') {
+        throw new PaymentKitError('An earlier release may already have charged this period; not charging until the provider confirms', 'legacy_dunning_unverified', {
+          subscriptionId: sub.id, orderIds: legacy.orderIds });
+      }
+    }
     const attemptKey = (open && attemptKeyOf(open)) || renewalAttemptKey(sub, chargedPeriod);
     const charge = await chargeAttempt({ provider, repo, clock, sub, price, period: chargedPeriod, attemptKey, correlationId });
     switch (charge.kind) {
+      case 'in_flight':
+        return null; // EC:A37 — another worker is charging this attempt right now
       case 'succeeded': {
         const result = await onRenewalPaid({ sub, payment: charge.payment, policy, ledger, repo, clock });
         return { kind: 'charged' as const, sub: result.sub };
       }
       case 'declined': {
-        if (sub.status !== 'active') return { kind: 'failed' as const, sub };
+        if (sub.status !== 'active') {
+          // EC:A36 A41 — the scheduler's own attempt, unresolved until now, turned out declined: dunning
+          // takes over (grace restarts from today, smart retries are scheduled), exactly once.
+          if (!charge.fresh || attemptKeyOf(charge.payment) !== renewalAttemptKey(sub, chargedPeriod)) return { kind: 'failed' as const, sub };
+          const result = await onPaymentFailed({ sub, policy, repo, notifier, clock });
+          return { kind: 'failed' as const, sub: result.sub };
+        }
         const result = await onPaymentFailed({ sub, policy, repo, notifier, clock });
         return { kind: 'failed' as const, sub: result.sub };
       }

@@ -367,7 +367,7 @@ def test_ec_a24_on_payment_failed_schedules_attempt_1():
             )
         )
         assert len(due) == 1
-        assert due[0].payload["subscription_id"] == sub.id
+        assert due[0].payload["subscriptionId"] == sub.id
         assert due[0].payload["attempt"] == 1
         assert due[0].next_attempt_at == datetime(2024, 1, 17, tzinfo=UTC)  # +24h
 
@@ -430,7 +430,7 @@ def test_ec_a24_retry_due_orders_earliest_first():
                 repo=repo, clock=FixedClock(datetime(2024, 1, 12, tzinfo=UTC))
             )
         )
-        assert [d.payload["subscription_id"] for d in due] == ["sub_b", "sub_a"]
+        assert [d.payload["subscriptionId"] for d in due] == ["sub_b", "sub_a"]
 
     run(scenario())
 

@@ -278,6 +278,27 @@ class FakeSelfSchedulingProvider:
             self.money_moved.add(key)
         return answer
 
+    # EC:A38 -- lookups by orderId (never charges); lookup_throws simulates an unreachable provider.
+    lookups: list[str]
+    lookup_throws: bool = False
+
+    async def get_payment_by_order_id(self, order_id: str) -> Payment | None:
+        if not hasattr(self, "lookups"):
+            self.lookups = []
+        self.lookups.append(order_id)
+        if self.lookup_throws:
+            raise RuntimeError("provider unavailable")
+        return next((a for a in self._answers.values() if a.provider_ref == order_id), None)
+
+    def seed_order(self, order_id: str, status: str, amount_minor: int = 5000) -> None:
+        """Test hook: an order an earlier release charged (its orderId was the key itself)."""
+        import dataclasses
+        base = self._answer_for({"idempotency_key": order_id, "customer_ref": "c1", "order_id": order_id},
+                                Money(amount_minor=amount_minor, currency="KRW"))
+        self._answers[order_id] = dataclasses.replace(base, status=status)
+        if status == "succeeded":
+            self.money_moved.add(order_id)
+
     def _answer_for(self, kwargs: dict[str, Any], amount: Money) -> Payment:
         return Payment(
             id=f"pay_{kwargs['idempotency_key']}",

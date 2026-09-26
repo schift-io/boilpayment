@@ -269,6 +269,17 @@ export async function runRetry(input: RunRetryInput): Promise<RunRetryResult> {
       return { outcome: 'skipped' as const, sub: sub ?? null, grants: [] };
     }
 
+    // EC:A40 — canceled (at period end) while past_due: the period it would pay for is never started,
+    // so dunning stops here and the subscription ends; nothing more is charged.
+    if (sub.cancelAtPeriodEnd) {
+      item.status = 'sent';
+      item.attempts += 1;
+      await repo.outbox.put(item);
+      const ended: Subscription = { ...sub, status: 'canceled', cancelAtPeriodEnd: false, graceUntil: null };
+      await repo.subscriptions.put(ended);
+      return { outcome: 'skipped' as const, sub: ended, grants: [] };
+    }
+
     const canCharge = provider.capabilities().scheduling === 'self' && sub.billingKey !== null;
     if (!canCharge) {
       // Provider-scheduled dunning (Stripe/Polar/PortOne's own schedule) drives the actual
@@ -313,6 +324,12 @@ export async function runRetry(input: RunRetryInput): Promise<RunRetryResult> {
     const charge = earlier
       ? { kind: 'succeeded' as const, payment: earlier }
       : await chargeAttempt({ provider, repo, clock, sub, price, period: chargedPeriod, attemptKey });
+    if (charge.kind === 'in_flight') {
+      // EC:A37 — another worker holds this attempt: look again shortly, without counting an attempt.
+      item.nextAttemptAt = new Date(clock.now().getTime() + HOUR_MS);
+      await repo.outbox.put(item);
+      return { outcome: 'skipped' as const, sub, grants: [] };
+    }
     item.attempts += 1;
 
     if (charge.kind === 'succeeded') {

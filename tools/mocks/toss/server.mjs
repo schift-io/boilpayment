@@ -8,6 +8,7 @@
 // Endpoints implemented (see packages/providers/toss/spec/toss.pseudo.md):
 //   POST /v1/payments/confirm
 //   GET  /v1/payments/{paymentKey}
+//   GET  /v1/payments/orders/{orderId}
 //   POST /v1/billing/authorizations/issue
 //   POST /v1/billing/{billingKey}
 //   POST /v1/payments/{paymentKey}/cancel
@@ -434,6 +435,13 @@ const server = createServer(async (req, res) => {
     if (method === 'POST' && path === '/v1/payments/confirm') return await handleConfirm(req, res);
 
     let m;
+    // GET /v1/payments/orders/{orderId} — look a payment up by the merchant's orderId (EC:A38).
+    if (method === 'GET' && (m = path.match(/^\/v1\/payments\/orders\/([^/]+)$/))) {
+      const orderId = decodeURIComponent(m[1]);
+      const found = [...payments.values()].find((p) => p.orderId === orderId);
+      if (!found) return sendJson(res, 404, errorBody('NOT_FOUND_PAYMENT', '존재하지 않는 결제 정보 입니다.'));
+      return sendJson(res, 200, found);
+    }
     if (method === 'GET' && (m = path.match(/^\/v1\/payments\/([^/]+)$/))) {
       return await handleGetPayment(req, res, decodeURIComponent(m[1]));
     }

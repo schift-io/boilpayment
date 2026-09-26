@@ -608,6 +608,16 @@ class TossProvider:
         raw = await self._request("GET", f"/v1/payments/{provider_ref}")
         return normalize_toss_payment(raw)
 
+    async def get_payment_by_order_id(self, order_id: str) -> Payment | None:
+        """EC:A38 -- look an order up by the orderId the kit sent, without charging. 404 = none."""
+        try:
+            raw = await self._request("GET", f"/v1/payments/orders/{quote(order_id, safe='')}")
+        except ProviderError as err:
+            if getattr(err, "http_status", None) == 404:
+                return None
+            raise
+        return normalize_toss_payment(raw)
+
     async def list_payments(
         self, *, customer_ref: str, since: datetime
     ) -> list[Payment]:

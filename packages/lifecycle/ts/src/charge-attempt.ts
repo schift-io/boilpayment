@@ -6,7 +6,7 @@
 // attempt, so every charge that may have moved money has a local row, and a retry of the same
 // attempt re-drives the same provider idempotency key instead of charging again.
 import { createHash } from 'node:crypto';
-import { Clock, Notifier, Payment, PaymentProvider, PlanPrice, ProviderError, Repo, Subscription } from 'boilpayment-core';
+import { Clock, Notifier, Operation, Payment, PaymentProvider, PlanPrice, ProviderError, Repo, Subscription } from 'boilpayment-core';
 import type { Period } from 'boilpayment-core';
 import { scopeProvider } from './internal.js';
 
@@ -68,13 +68,70 @@ export function attemptKeyOf(row: Payment): string | null {
   return typeof raw?.boilpaymentAttemptKey === 'string' ? raw.boilpaymentAttemptKey : null;
 }
 
+/**
+ * EC:A37 — one caller at a time per attempt. Two workers (two scheduler ticks, a tick and a dunning
+ * retry, a webhook) must not both call the provider for the same attempt or write its row from a
+ * stale read: the row is only read, created, charged and finalised under this lease. The lease is an
+ * `operations` row claimed atomically (insert, or re-claim of a released one); a holder that crashed
+ * leaves a stale lease that the next caller takes over after LEASE_MS.
+ */
+export const ATTEMPT_LEASE_MS = 10 * 60_000;
+const LEASE_HASH = 'charge-attempt-lease';
+
+function leaseKey(attemptKey: string): string {
+  return `charge-lease:${attemptKey}`;
+}
+
+interface LeaseInfo { leaseUntil?: string; unleasedSince?: string }
+
+function leaseIsStale(current: Operation, now: Date): boolean {
+  const info = (current.result as LeaseInfo | null) ?? {};
+  if (info.leaseUntil) return new Date(info.leaseUntil).getTime() <= now.getTime();
+  if (info.unleasedSince) return new Date(info.unleasedSince).getTime() + ATTEMPT_LEASE_MS <= now.getTime();
+  return false;
+}
+
+export async function withAttemptLease<T>(repo: Repo, clock: Clock, attemptKey: string, fn: () => Promise<T>): Promise<{ held: true; value: T } | { held: false }> {
+  const key = leaseKey(attemptKey);
+  const now = clock.now();
+  const row: Operation = {
+    id: key, key, kind: 'lifecycle.charge_attempt', payloadHash: LEASE_HASH, status: 'in_progress',
+    result: null, error: null, createdAt: now, completedAt: null, attempts: 0,
+  };
+  let claimed = await repo.operations.claim(row);
+  if (!claimed) {
+    const current = await repo.operations.get(key);
+    if (current && current.status === 'in_progress' && leaseIsStale(current, now)) {
+      // A stale lease (its holder died mid-call): release it, then compete for it like everyone else.
+      await repo.operations.put({ ...current, status: 'failed', error: 'lease_expired', completedAt: now });
+      claimed = await repo.operations.claim(row);
+    } else if (current && current.status === 'in_progress' && !(current.result as LeaseInfo | null)?.leaseUntil &&
+        !(current.result as LeaseInfo | null)?.unleasedSince) {
+      // Claimed but its lease time not written yet (the holder is between two statements, or died
+      // there): remember when this was first seen; it is only taken over LEASE_MS later.
+      await repo.operations.put({ ...current, result: { unleasedSince: now.toISOString() } });
+    }
+  }
+  if (!claimed) return { held: false };
+  await repo.operations.put({ ...claimed, result: { leaseUntil: new Date(now.getTime() + ATTEMPT_LEASE_MS).toISOString() } });
+  try {
+    return { held: true, value: await fn() };
+  } finally {
+    // Released (status 'failed' is the re-claimable state of an operations row).
+    const mine = await repo.operations.get(key);
+    if (mine) await repo.operations.put({ ...mine, status: 'failed', error: null, result: null, completedAt: clock.now() });
+  }
+}
+
 export type ChargeAttemptOutcome =
   /** The provider took the money; the row is stored as succeeded with the paid period. */
   | { kind: 'succeeded'; payment: Payment }
   /** The provider refused. `fresh` is false when this is the stored answer of an earlier call. */
   | { kind: 'declined'; payment: Payment; fresh: boolean }
   /** Nobody knows yet (pending, requires_action, transport error). The row stays pending. */
-  | { kind: 'unresolved'; payment: Payment; reason: string; first: boolean };
+  | { kind: 'unresolved'; payment: Payment; reason: string; first: boolean }
+  /** EC:A37 — another caller holds this attempt right now; nothing was read, charged or written. */
+  | { kind: 'in_flight' };
 
 export interface ChargeAttemptInput {
   provider: PaymentProvider;
@@ -95,6 +152,11 @@ export interface ChargeAttemptInput {
  * re-drive never charges twice.
  */
 export async function chargeAttempt(input: ChargeAttemptInput): Promise<ChargeAttemptOutcome> {
+  const leased = await withAttemptLease(input.repo, input.clock, input.attemptKey, () => chargeAttemptHeld(input));
+  return leased.held ? leased.value : { kind: 'in_flight' };
+}
+
+async function chargeAttemptHeld(input: ChargeAttemptInput): Promise<ChargeAttemptOutcome> {
   const { provider, repo, clock, sub, price, period, attemptKey } = input;
   const id = attemptPaymentId(attemptKey);
   const orderId = providerOrderId(attemptKey);
@@ -177,4 +239,46 @@ export async function markUnresolved(input: {
     payload: { kind: 'renewal_charge_unresolved', subscriptionId: sub.id, paymentId: payment.id, providerRef: payment.providerRef, reason },
   });
   return updated;
+}
+
+/**
+ * EC:A38 — settle an attempt row whose outcome was unknown, WITHOUT charging: ask the provider for the
+ * order by its orderId (`getPaymentByOrderId`). Used for attempts the scheduler/dunning no longer
+ * re-drive (the subscription expired or was canceled while the answer was pending) and for charges a
+ * previous release made without a row. Returns the settled row, or null when the provider cannot say
+ * yet (no lookup support, transport error). A provider that does not know the order (null) means the
+ * request never arrived: the row is closed as failed, so it is never charged by anyone later.
+ */
+export async function settleAttemptByLookup(input: {
+  provider: PaymentProvider; repo: Repo; clock: Clock; row: Payment;
+}): Promise<Payment | null> {
+  const { provider, repo, clock, row } = input;
+  const key = attemptKeyOf(row) ?? row.id;
+  const leased = await withAttemptLease(repo, clock, key, async () => {
+    const fresh = (await repo.payments.get(row.id)) ?? row;
+    if (fresh.status === 'succeeded' || fresh.status === 'failed') return fresh;
+    if (typeof provider.getPaymentByOrderId !== 'function') return null;
+    let found: Payment | null;
+    try {
+      found = await provider.getPaymentByOrderId(orderIdOf(fresh));
+    } catch {
+      return null;
+    }
+    const settled: Payment = found
+      ? { ...fresh, providerRef: found.providerRef || fresh.providerRef, amount: found.amount ?? fresh.amount, status: found.status,
+          failure: found.failure, raw: { ...(fresh.raw as object | undefined ?? {}), provider: found.raw ?? null } }
+      : { ...fresh, status: 'failed', failure: { code: 'order_not_found', providerCode: null, retryable: false, userMessage: 'The provider has no order for this attempt.' } };
+    if (settled.status === 'pending') return null;
+    await repo.payments.put(settled);
+    return settled;
+  });
+  return leased.held ? leased.value : null;
+}
+
+/** The orderId an attempt row was sent with (rows of earlier releases used the attempt key itself). */
+export function orderIdOf(row: Payment): string {
+  const key = attemptKeyOf(row);
+  const legacy = (row.raw as { boilpaymentLegacyOrderId?: unknown } | undefined)?.boilpaymentLegacyOrderId;
+  if (typeof legacy === 'string') return legacy;
+  return key ? providerOrderId(key) : row.providerRef;
 }

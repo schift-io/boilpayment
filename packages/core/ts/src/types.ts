@@ -498,6 +498,13 @@ export interface PaymentProvider {
   createCustomer(input: { email: string; name?: string; metadata?: Record<string, string> }): Promise<{ ref: string }>;
   createCheckout(input: CreateCheckoutInput): Promise<Checkout>;
   getPayment(providerRef: string): Promise<Payment>;
+  /**
+   * EC:A38 — optional: the payment for an orderId the kit sent (self-scheduled renewals), or null when
+   * the provider has no such order (the request never arrived). Lets an attempt whose outcome was
+   * unknown be settled without charging again. Toss: GET /v1/payments/orders/{orderId}; PortOne: the
+   * orderId is the paymentId.
+   */
+  getPaymentByOrderId?(orderId: string): Promise<Payment | null>;
   listPayments(input: { customerRef: string; since: Date }): Promise<Payment[]>;
   getSubscription(providerRef: string): Promise<Subscription>;
   changeSubscription(providerRef: string, input: { newPriceRef: string; proration: 'immediate' | 'none'; resetAnchor: boolean }): Promise<Subscription>;

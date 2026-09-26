@@ -638,3 +638,40 @@ tick (active or past_due, period ended):
 runRetry (past_due): same attempts; succeeded -> onRenewalPaid (grants nextPeriod, advances); pending -> re-drive;
    else dunning attempt n; unresolved -> item stays pending, later, same key, no failure notice
 ```
+
+
+## [EC:A37] [EC:A38] [EC:A39] [EC:A40] [EC:A41] [EC:A42] 시도 리스, 끝난 구독의 늦은 결과, 이전 릴리스 dunning, 연체 중 취소
+
+```pseudo
+withAttemptLease(repo, clock, attemptKey, fn):           # EC:A37 — charge-attempt.ts / charge_attempt.py
+   op = operations.claim({ key: 'charge-lease:' + attemptKey, payloadHash: 'charge-attempt-lease' })
+   if op is null:
+      cur = operations.get(key)
+      if cur.status == 'in_progress' and stale(cur): operations.put(cur as failed); op = operations.claim(...)
+      elif cur has no leaseUntil/unleasedSince: operations.put(cur with result.unleasedSince = now)
+   if op is null: return not held                        # caller: chargeAttempt -> { kind: 'in_flight' }
+   operations.put(op with result.leaseUntil = now + 10 min)
+   try fn() finally operations.put(op as failed)          # 'failed' = released, re-claimable
+stale(cur) = leaseUntil <= now, or unleasedSince + 10 min <= now
+
+chargeAttempt = withAttemptLease(key, read row -> create pending -> provider -> write result)
+
+settleAttemptByLookup(provider, row):                     # EC:A38 — never charges
+   under the attempt's lease: fresh = payments.get(row.id); if final: return it
+   found = provider.getPaymentByOrderId(orderIdOf(fresh))  # Toss GET /v1/payments/orders/{orderId}; PortOne GET /payments/{id}
+   found is null -> fresh as failed('order_not_found'); found pending -> null; else fresh with found.status
+settleOrphanAttempts (end of every tick): pending attempt rows of ended subs -> settle; succeeded -> onRenewalPaid
+   (grants the paid period, sub stays ended, EC:A32) + cs.needs_human 'renewal_settled_after_end' once;
+   no answer -> tick error 'renewal_charge_unresolved'
+
+checkLegacyDunning(sub, period) before a NEW charge:      # EC:A39
+   for sent retry items 'dunning-retry-item:<sub>:<n>' created at/after sub.currentPeriod.end:
+      key = 'dunning-retry:<sub>:<n>' (the orderId a pre-A34 release used); ensure a pending row for it
+      settle by lookup: succeeded -> pay `period` with it (no new charge); no answer -> refuse to charge
+      ('legacy_dunning_unverified' each tick)
+
+runRetry: sub past_due and cancelAtPeriodEnd -> sub canceled, item sent, no charge   # EC:A40
+tick: past_due + cancelAtPeriodEnd + period over -> canceled                         # EC:A40
+tick: scheduler's own attempt (renewal key) declines on a past_due sub (fresh) -> onPaymentFailed once  # EC:A41
+dunning outbox payload = { subscriptionId, attempt, dueAt } in both kits; Python reads subscription_id too  # EC:A42
+```

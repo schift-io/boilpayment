@@ -35,6 +35,7 @@ from .charge_attempt import (
     attempts_for,
     charge_attempt,
     dunning_attempt_key,
+    iso_z,
 )
 from .internal import price_for_subscription, renewal_plan_id, replace_sub
 from .period import next_period
@@ -69,10 +70,11 @@ async def _schedule_retry(
     item = OutboxItem(
         id=_retry_outbox_id(sub_id, attempt),
         kind=_RETRY_KIND,
+        # EC:A42 -- the same payload keys as the TS kit, so either can run the other's items.
         payload={
-            "subscription_id": sub_id,
+            "subscriptionId": sub_id,
             "attempt": attempt,
-            "due_at": due_at.isoformat(),
+            "dueAt": iso_z(due_at),
         },
         status="pending",
         attempts=0,
@@ -360,7 +362,9 @@ async def run_retry(input: RunRetryInput) -> RunRetryResult:
         input.clock,
     )
     payload = item.payload
-    sub_id = payload["subscription_id"]
+    # EC:A42 -- the TS key (subscriptionId) is what both kits write; snake_case from earlier Python
+    # releases is still read so a shared database keeps working.
+    sub_id = payload.get("subscriptionId", payload.get("subscription_id"))
     attempt = payload["attempt"]
 
     async def _attempt() -> RunRetryResult:
@@ -374,6 +378,15 @@ async def run_retry(input: RunRetryInput) -> RunRetryResult:
             item.attempts += 1
             await repo.outbox.put(item)
             return RunRetryResult(outcome="skipped", sub=sub, grants=[])
+
+        # EC:A40 -- canceled (at period end) while past_due: dunning stops, the subscription ends.
+        if sub.cancel_at_period_end:
+            item.status = "sent"
+            item.attempts += 1
+            await repo.outbox.put(item)
+            ended = replace_sub(sub, status="canceled", cancel_at_period_end=False, grace_until=None)
+            await repo.subscriptions.put(ended)
+            return RunRetryResult(outcome="skipped", sub=ended, grants=[])
 
         can_charge = (
             provider.capabilities().scheduling == "self" and sub.billing_key is not None
@@ -430,6 +443,11 @@ async def run_retry(input: RunRetryInput) -> RunRetryResult:
                 period=charged_period, attempt_key=attempt_key,
             ))
         )
+        if charge.kind == "in_flight":
+            # EC:A37 -- another worker holds this attempt: look again shortly, not counted.
+            item.next_attempt_at = clock.now() + timedelta(hours=1)
+            await repo.outbox.put(item)
+            return RunRetryResult(outcome="skipped", sub=sub, grants=[])
         item.attempts += 1
 
         if charge.kind == "succeeded":
