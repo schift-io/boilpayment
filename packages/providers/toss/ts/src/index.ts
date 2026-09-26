@@ -1,6 +1,7 @@
 // boilpayment — Toss Payments provider.
 // See spec/toss.pseudo.md for the full contract. Endpoints/enums verified against
 // docs.tosspayments.com/reference and docs.tosspayments.com/reference/using-api/webhook-events (2026-09).
+import { BlockList, isIP } from 'node:net';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import type {
   PaymentProvider,
@@ -28,6 +29,35 @@ function sha256(input: string): string {
 // ── pure normalizers (exported for smoke/unit use) ──────────────────────────
 
 /** EC:E8 — WAITING_FOR_DEPOSIT must map to pending; grants only happen on DONE. */
+
+// EC:E22 — the allowlist holds addresses or CIDR blocks (IPv4/IPv6). A dual-stack socket reports an
+// IPv4 peer as ::ffff:a.b.c.d, which is matched as the IPv4 address it is. An entry that is neither
+// is refused at construction rather than silently never matching.
+function buildAllowlist(entries: string[]): BlockList {
+  const list = new BlockList();
+  for (const raw of entries) {
+    const entry = raw.trim();
+    const [addr, bits, extra] = entry.split('/');
+    const family = isIP(addr ?? '');
+    if (!family || extra !== undefined) throw new Error(`toss allowedWebhookIps: not an IP address or CIDR block: ${raw}`);
+    const type = family === 4 ? 'ipv4' : 'ipv6';
+    if (bits === undefined) { list.addAddress(addr, type); continue; }
+    const prefix = Number(bits);
+    if (!/^\d+$/.test(bits) || prefix > (family === 4 ? 32 : 128)) throw new Error(`toss allowedWebhookIps: bad prefix length: ${raw}`);
+    list.addSubnet(addr, prefix, type);
+  }
+  return list;
+}
+
+function ipAllowed(list: BlockList | undefined, remote: string): boolean {
+  if (!list) return false;
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(remote);
+  const addr = mapped ? mapped[1] : remote;
+  const family = isIP(addr);
+  if (!family) return false;
+  return list.check(addr, family === 4 ? 'ipv4' : 'ipv6');
+}
+
 export function normalizeTossStatus(status: string): PaymentStatus {
   switch (status) {
     case 'READY':
@@ -317,6 +347,7 @@ export class TossProvider implements PaymentProvider {
   private readonly secretKey: string;
   readonly clientKey?: string;
   private readonly allowedWebhookIps?: string[];
+  private readonly allowedWebhookBlock?: BlockList;
   private readonly baseUrl: string;
   private readonly fetchImpl: FetchLike;
   private readonly testCode?: string;
@@ -329,6 +360,7 @@ export class TossProvider implements PaymentProvider {
     this.secretKey = config.secretKey;
     this.clientKey = config.clientKey;
     this.allowedWebhookIps = config.allowedWebhookIps;
+    this.allowedWebhookBlock = config.allowedWebhookIps?.length ? buildAllowlist(config.allowedWebhookIps) : undefined;
     this.baseUrl = config.apiBase ?? BASE_URL;
     this.fetchImpl = fetchImpl;
     if (config.testCode && !config.secretKey.startsWith('test_sk_')) {
@@ -631,7 +663,7 @@ export class TossProvider implements PaymentProvider {
       // The peer address the app read from its socket. A request header (x-paykit-remote-ip,
       // x-forwarded-for) is client-controlled and is never used.
       const remoteIp = input.remoteAddress;
-      if (!remoteIp || !this.allowedWebhookIps.includes(remoteIp)) {
+      if (!remoteIp || !ipAllowed(this.allowedWebhookBlock, remoteIp)) {
         throw new WebhookSignatureError(`toss webhook ip not allowed: ${remoteIp ?? 'unknown'}`);
       }
     }

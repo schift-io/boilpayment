@@ -46,3 +46,11 @@ describe('[EC:E20] PortoneProvider webhook secret rotation', () => {
     await expect(rotated().verifyWebhook({ headers, rawBody: BODY, receivedAt: new Date(t * 1000) })).rejects.toBeInstanceOf(WebhookSignatureError);
   });
 });
+
+describe('[EC:E21] a rotated-out secret re-verifies stored rows only', () => {
+  it('[EC:E21] a fresh webhook signed with the rotated-out secret is refused at receipt', async () => {
+    const now = String(Math.floor(Date.now() / 1000));
+    const headers = { 'webhook-id': 'msg_e21', 'webhook-timestamp': now, 'webhook-signature': sign('msg_e21', now, BODY) };
+    await expect(new PortoneProvider({ apiSecret: 'test_sk_dummy', storeId: 'store_dummy', webhookSecret: 'whsec_bmV3c2VjcmV0a2V5Zm9ydGVzdA==', previousWebhookSecrets: [SECRET] }, (async () => { throw new Error('no fetch'); }) as typeof fetch).verifyWebhook({ headers, rawBody: BODY })).rejects.toBeInstanceOf(WebhookSignatureError);
+  });
+});

@@ -57,3 +57,12 @@ def test_ec_e20_rotation_previous_secret_reverifies() -> None:
     bare = StripeProvider(secret_key="sk_test_dummy", webhook_secret="whsec_rotated_new")
     with pytest.raises(WebhookSignatureError):
         asyncio.run(bare.verify_webhook(headers=HEADERS, raw_body=RAW, received_at=AT))
+
+
+def test_ec_e21_rotated_out_secret_refused_at_receipt() -> None:
+    now = int(time.time())
+    raw = _body(now)
+    headers = {"stripe-signature": sign_stripe_payload(raw, SECRET, now)}
+    new = StripeProvider(secret_key="sk_test_dummy", webhook_secret="whsec_rotated_new", previous_webhook_secrets=[SECRET])
+    with pytest.raises(WebhookSignatureError):
+        asyncio.run(new.verify_webhook(headers=headers, raw_body=raw))

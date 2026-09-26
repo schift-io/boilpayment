@@ -12,6 +12,7 @@ import base64
 import copy
 import hashlib
 import hmac
+import ipaddress
 import json
 import time
 from dataclasses import dataclass
@@ -154,6 +155,29 @@ def _normalize_toss_refund(
 CashReceiptType = Literal["personal", "business"]
 CashReceiptStatus = Literal["in_progress", "issued", "canceled", "failed"]
 
+
+
+def _build_allowlist(entries: list[str]) -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
+    """EC:E22 -- addresses or CIDR blocks (IPv4/IPv6); anything else is refused at construction."""
+    networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+    for raw in entries:
+        entry = raw.strip()
+        try:
+            networks.append(ipaddress.ip_network(entry, strict=False))
+        except ValueError as exc:
+            raise ValueError(f"toss allowed_webhook_ips: not an IP address or CIDR block: {raw}") from exc
+    return networks
+
+
+def _ip_allowed(networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network], remote: str) -> bool:
+    """EC:E22 -- a dual-stack socket reports an IPv4 peer as ::ffff:a.b.c.d; match it as IPv4."""
+    try:
+        addr: ipaddress.IPv4Address | ipaddress.IPv6Address = ipaddress.ip_address(remote)
+    except ValueError:
+        return False
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
+        addr = addr.ipv4_mapped
+    return any(addr.version == n.version and addr in n for n in networks)
 
 @dataclass(kw_only=True, slots=True)
 class CashReceiptFailure:
@@ -336,6 +360,7 @@ class TossProvider:
         self._secret_key = config.secret_key
         self.client_key = config.client_key
         self._allowed_webhook_ips = config.allowed_webhook_ips
+        self._allowed_webhook_networks = _build_allowlist(config.allowed_webhook_ips or [])
         self._test_code = config.test_code
         self._logger: Logger = config.logger or NoopLogger()
         self._correlation_id_override = config.correlation_id
@@ -806,7 +831,7 @@ class TossProvider:
         if (
             at_receipt
             and self._allowed_webhook_ips
-            and (not remote_address or remote_address not in self._allowed_webhook_ips)
+            and (not remote_address or not _ip_allowed(self._allowed_webhook_networks, remote_address))
         ):
             raise WebhookSignatureError(
                 f"toss webhook ip not allowed: {remote_address or 'unknown'}"

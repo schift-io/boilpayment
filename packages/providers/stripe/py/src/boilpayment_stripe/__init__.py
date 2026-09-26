@@ -305,6 +305,20 @@ def _failure_from_last_error(err: Any) -> PaymentFailure | None:
     return normalize_failure(code=code, decline_code=decline_code, message=message)
 
 
+# EC:E23 — a PaymentIntent stays 'succeeded' after its charge is refunded or disputed; the charge
+# says what happened to the money. Only an expanded charge object is read (a bare id says nothing).
+def _charge_adjusted_status(status: str, charge: Any) -> str:
+    if status != "succeeded" or charge is None or isinstance(charge, str):
+        return status
+    if _get(charge, "disputed"):
+        return "disputed"
+    refunded = _get(charge, "amount_refunded") or 0
+    if refunded <= 0:
+        return status
+    captured = _get(charge, "amount_captured") or _get(charge, "amount") or 0
+    return "refunded" if _get(charge, "refunded") or refunded >= captured else "partially_refunded"
+
+
 # EC:E7 E12 — normalize PaymentIntent -> Payment (pure)
 def normalize_payment_intent(pi: Any, invoice: Any | None = None) -> Payment:
     kind = "subscription" if invoice is not None else "topup"
@@ -318,7 +332,7 @@ def normalize_payment_intent(pi: Any, invoice: Any | None = None) -> Payment:
         provider_ref=pi.id,
         subscription_id=subscription_id,
         amount=_money(pi.amount, pi.currency),
-        status=_map_intent_status(pi.status),
+        status=_charge_adjusted_status(_map_intent_status(pi.status), _get(pi, "latest_charge")),
         kind=kind,
         period=_invoice_period(invoice) if invoice is not None else None,
         occurred_at=_dt(pi.created),
@@ -772,7 +786,7 @@ class StripeProvider:
             )
             return normalize_invoice_as_payment(invoice, pi)
         pi = await self._client.v1.payment_intents.retrieve_async(
-            provider_ref, {"expand": ["invoice"]}
+            provider_ref, {"expand": ["invoice", "latest_charge"]}  # EC:E23
         )
         # `invoice` was removed from PaymentIntent in newer Stripe API versions -> guard the attribute.
         _inv = getattr(pi, "invoice", None)
@@ -948,7 +962,9 @@ class StripeProvider:
         # stored row (received_at set) checks the signature only.
         # EC:E20 -- the current secret first, then secrets being rotated out.
         last_error: Exception | None = None
-        for secret in [self._webhook_secret, *self._previous_webhook_secrets]:
+        # EC:E21 -- rotated-out secrets only re-verify stored rows (received_at set), never new events.
+        secrets = [self._webhook_secret, *self._previous_webhook_secrets] if received_at is not None else [self._webhook_secret]
+        for secret in secrets:
             try:
                 event = stripe.Webhook.construct_event(
                     raw_body, sig, secret, tolerance=None if received_at else 300

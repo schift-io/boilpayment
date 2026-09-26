@@ -449,7 +449,8 @@ export class PolarProvider implements PaymentProvider {
   async verifyWebhook(input: { headers: Record<string, string>; rawBody: string; receivedAt?: Date }): Promise<NormalizedEvent> {
     // EC:E20 — the current secret first, then secrets being rotated out.
     let verified = false; let lastError: unknown;
-    for (const secret of [this.webhookSecret, ...this.previousWebhookSecrets]) {
+    // EC:E21 — rotated-out secrets only re-verify stored rows (receivedAt set), never new events.
+    for (const secret of input.receivedAt ? [this.webhookSecret, ...this.previousWebhookSecrets] : [this.webhookSecret]) {
       try { verifyStandardWebhookSignature({ headers: input.headers, rawBody: input.rawBody, secret, receivedAt: input.receivedAt }); verified = true; break; } catch (err) { lastError = err; }
     }
     if (!verified) throw lastError;

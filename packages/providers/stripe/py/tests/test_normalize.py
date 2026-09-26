@@ -715,3 +715,16 @@ def test_subscription_checkout_identity_from_invoice_snapshot():
         assert normalized.subscription_id == "sub_test_1"
         assert normalized.raw["metadata"] == metadata
         assert original.metadata.to_dict() == {}
+
+
+def test_ec_e23_refunded_charge_is_not_succeeded():
+    def ch(**kw):
+        base = {"id": "ch_1", "amount_captured": 10000, "amount_refunded": 0, "refunded": False, "disputed": False}
+        base.update(kw)
+        return _Obj(base)
+
+    assert normalize_payment_intent(_pi("succeeded", latest_charge=ch(amount_refunded=10000, refunded=True))).status == "refunded"
+    assert normalize_payment_intent(_pi("succeeded", latest_charge=ch(amount_refunded=2500))).status == "partially_refunded"
+    assert normalize_payment_intent(_pi("succeeded", latest_charge=ch(disputed=True))).status == "disputed"
+    assert normalize_payment_intent(_pi("succeeded", latest_charge=ch())).status == "succeeded"
+    assert normalize_payment_intent(_pi("succeeded", latest_charge="ch_1")).status == "succeeded"

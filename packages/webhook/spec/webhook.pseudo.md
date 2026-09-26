@@ -479,3 +479,14 @@ verifyWebhook({ headers, rawBody, receivedAt }):
 
 교체 절차: 새 값을 `*_WEBHOOK_SECRET`, 옛 값을 `*_WEBHOOK_PREVIOUS_SECRETS` 에 두고, 옛 값으로 서명된 저장
 행이 다 처리된 뒤 옛 값을 지운다.
+
+## [EC:E21] 이전 비밀값은 재검증에만
+
+```pseudo
+verifyWebhook({headers, rawBody, receivedAt?}):
+   secrets = receivedAt ? [current, ...previous] : [current]   # 수신 시점엔 현재 값만
+   for s in secrets: if signature valid under s: return event
+   raise WebhookSignatureError
+```
+
+이전 값은 이미 저장된 행의 재처리 때만 쓴다. 유출로 교체한 옛 값이 목록에 남아 있어도 새 이벤트는 서명할 수 없다.

@@ -314,3 +314,11 @@ verifyWebhook({ headers, rawBody, receivedAt?, remoteAddress? }):
       require constantTimeEqual(payment.secret, body.secret)
    return mapTossWebhook(body)
 ```
+
+## [EC:E22] 허용목록: 주소, CIDR, IPv4-mapped IPv6
+
+```pseudo
+construct: for entry in allowedWebhookIps: parse as address or CIDR (IPv4/IPv6); otherwise throw
+receipt:   addr = remoteAddress; if addr is ::ffff:a.b.c.d: addr = a.b.c.d
+           allowed iff addr parses and falls in some entry of the same family
+```

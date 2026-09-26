@@ -819,7 +819,9 @@ class PortoneProvider:
                 continue
         # EC:E20 -- the current secret first, then secrets being rotated out.
         ok = False
-        for secret in [self._webhook_secret, *self._previous_webhook_secrets]:
+        # EC:E21 -- rotated-out secrets only re-verify stored rows (received_at set), never new events.
+        secrets = [self._webhook_secret, *self._previous_webhook_secrets] if received_at is not None else [self._webhook_secret]
+        for secret in secrets:
             key = base64.b64decode(secret.removeprefix("whsec_"))
             expected = hmac.new(key, signed_content, hashlib.sha256).digest()
             if any(hmac.compare_digest(sig_bytes, expected) for sig_bytes in sig_bytes_list):

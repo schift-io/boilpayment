@@ -60,3 +60,11 @@ def test_ec_e20_rotation_previous_secret_reverifies() -> None:
     bare = PolarProvider(access_token="polar_at_dummy", webhook_secret="whsec_bmV3c2VjcmV0a2V5Zm9ydGVzdA==", server="sandbox")
     with pytest.raises(WebhookSignatureError):
         asyncio.run(bare.verify_webhook(headers=HEADERS, raw_body=BODY, received_at=AT))
+
+
+def test_ec_e21_rotated_out_secret_refused_at_receipt() -> None:
+    now = str(int(time.time()))
+    headers = {"webhook-id": "msg_e21", "webhook-timestamp": now, "webhook-signature": _sign("msg_e21", now, BODY)}
+    new = PolarProvider(access_token="polar_at_dummy", webhook_secret="whsec_bmV3c2VjcmV0a2V5Zm9ydGVzdA==", previous_webhook_secrets=[SECRET], server="sandbox")
+    with pytest.raises(WebhookSignatureError):
+        asyncio.run(new.verify_webhook(headers=headers, raw_body=BODY))

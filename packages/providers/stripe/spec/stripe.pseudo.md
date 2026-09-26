@@ -168,3 +168,14 @@ every provider call the handler makes for that delivery. See
 
 근거: [Stripe metadata 전파 규칙](https://docs.stripe.com/metadata),
 [Invoice subscription snapshot](https://docs.stripe.com/api/invoices/object).
+
+## [EC:E23] 환불·분쟁된 PaymentIntent
+
+```pseudo
+getPayment(pi_…): retrieve(expand: invoice, latest_charge)
+status = map(pi.status)
+if status == succeeded and latest_charge is an object:
+   if charge.disputed: status = disputed
+   elif charge.amount_refunded > 0:
+      status = refunded if charge.refunded or amount_refunded >= amount_captured else partially_refunded
+```

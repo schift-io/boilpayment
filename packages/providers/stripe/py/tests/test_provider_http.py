@@ -237,7 +237,7 @@ def test_ec_e7_get_payment_pi_prefix_gets_with_expand_invoice(mock):
     req = mock.requests[0]
     assert req.method == "get"
     assert req.path == "/v1/payment_intents/pi_1"
-    assert parse_qs(req.query) == {"expand[0]": ["invoice"]}
+    assert parse_qs(req.query) == {"expand[0]": ["invoice"], "expand[1]": ["latest_charge"]}  # EC:E23
     assert _auth_header(req) == f"Bearer {SECRET_KEY}"
 
 

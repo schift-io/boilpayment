@@ -43,3 +43,13 @@ describe('[EC:E20] StripeProvider webhook secret rotation', () => {
     await expect(rotated().verifyWebhook({ headers, rawBody: raw, receivedAt: new Date(t * 1000) })).rejects.toBeInstanceOf(WebhookSignatureError);
   });
 });
+
+describe('[EC:E21] a rotated-out secret re-verifies stored rows only', () => {
+  it('[EC:E21] a fresh webhook signed with the rotated-out secret is refused at receipt', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const raw = body(now);
+    const headers = { 'stripe-signature': signStripePayload(raw, secret, now) };
+    const p = new StripeProvider({ secretKey: 'sk_test_dummy', webhookSecret: 'whsec_rotated_new', previousWebhookSecrets: [secret] });
+    await expect(p.verifyWebhook({ headers, rawBody: raw })).rejects.toBeInstanceOf(WebhookSignatureError);
+  });
+});

@@ -132,6 +132,16 @@ function invoiceSubscriptionMetadata(invoice: SubscriptionInvoice): Stripe.Metad
   return invoice.parent?.subscription_details?.metadata ?? invoice.subscription_details?.metadata ?? {};
 }
 
+// EC:E23 — a PaymentIntent stays 'succeeded' after its charge is refunded or disputed; the charge
+// says what happened to the money. Only an expanded charge object is read (a bare id says nothing).
+function chargeAdjustedStatus(status: PaymentStatus, charge: Stripe.PaymentIntent['latest_charge']): PaymentStatus {
+  if (status !== 'succeeded' || !charge || typeof charge === 'string') return status;
+  if (charge.disputed) return 'disputed';
+  const refunded = charge.amount_refunded ?? 0;
+  if (refunded <= 0) return status;
+  return charge.refunded || refunded >= (charge.amount_captured ?? charge.amount ?? 0) ? 'refunded' : 'partially_refunded';
+}
+
 // EC:E7 E12 — normalize PaymentIntent -> Payment (pure)
 export function normalizePaymentIntent(pi: Stripe.PaymentIntent, invoice?: Stripe.Invoice | null): Payment {
   const kind: PaymentKind = invoice ? 'subscription' : 'topup';
@@ -143,7 +153,7 @@ export function normalizePaymentIntent(pi: Stripe.PaymentIntent, invoice?: Strip
     providerRef: pi.id,
     subscriptionId,
     amount: money(pi.amount, pi.currency),
-    status: mapIntentStatus(pi.status),
+    status: chargeAdjustedStatus(mapIntentStatus(pi.status), pi.latest_charge),
     kind,
     period: invoice ? invoicePeriod(invoice) : null,
     occurredAt: new Date(pi.created * 1000),
@@ -498,7 +508,8 @@ export class StripeProvider implements PaymentProvider {
       const pi = piRef ? await this.client.paymentIntents.retrieve(piRef) : null;
       return normalizeInvoiceAsPayment(invoice, pi);
     }
-    const pi = await this.client.paymentIntents.retrieve(providerRef, { expand: ['invoice'] });
+    // EC:E23 — latest_charge carries refunds/disputes the PaymentIntent status never shows.
+    const pi = await this.client.paymentIntents.retrieve(providerRef, { expand: ['invoice', 'latest_charge'] });
     const invoice = typeof pi.invoice === 'object' && pi.invoice ? pi.invoice : null;
     return normalizePaymentIntent(pi, invoice);
   }
@@ -604,7 +615,9 @@ export class StripeProvider implements PaymentProvider {
     // (`tolerance || 300`) and skips the age check only for tolerance <= 0 after that, hence -1.
     // EC:E20 — the current secret first, then secrets being rotated out.
     let lastError: unknown;
-    for (const secret of [this.webhookSecret, ...this.previousWebhookSecrets]) {
+    // EC:E21 — secrets being rotated out only re-verify stored rows (receivedAt set); at receipt only
+    // the current secret counts, so a secret rotated out after a leak cannot sign new events.
+    for (const secret of input.receivedAt ? [this.webhookSecret, ...this.previousWebhookSecrets] : [this.webhookSecret]) {
       try {
         return toNormalizedEvent(this.client.webhooks.constructEvent(input.rawBody, sig, secret, input.receivedAt ? -1 : 300));
       } catch (err) {

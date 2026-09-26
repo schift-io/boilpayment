@@ -58,3 +58,22 @@ def test_ec_e19_deposit_callback_without_secret_refused() -> None:
     del body["secret"]
     with pytest.raises(WebhookSignatureError):
         asyncio.run(p.verify_webhook(headers={}, raw_body=json.dumps(body), remote_address="203.0.113.10"))
+
+
+def test_ec_e22_allowlist_mapped_ipv6_and_cidr() -> None:
+    p = make_provider(_no_fetch, allowed_webhook_ips=["13.124.18.147", "203.0.113.0/24", "2001:db8::/32"])
+
+    def at(addr: str):
+        return asyncio.run(p.verify_webhook(headers={}, raw_body=DONE, remote_address=addr))
+
+    for ok in ("::ffff:13.124.18.147", "203.0.113.77", "::ffff:203.0.113.5", "2001:db8:1::5"):
+        assert at(ok).type == "payment.succeeded"
+    for bad in ("203.0.114.1", "13.124.18.148", "2001:db9::1", "not-an-ip"):
+        with pytest.raises(WebhookSignatureError):
+            at(bad)
+
+
+def test_ec_e22_invalid_allowlist_entry_refused() -> None:
+    for entry in ("203.0.113.0/40", "toss.example"):
+        with pytest.raises(ValueError):
+            make_provider(_no_fetch, allowed_webhook_ips=[entry])

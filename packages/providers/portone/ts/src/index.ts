@@ -616,7 +616,8 @@ export class PortoneProvider implements PaymentProvider {
       })
       .filter(Boolean);
     // EC:E20 — the current secret first, then secrets being rotated out.
-    const ok = [this.webhookSecret, ...this.previousWebhookSecrets].some((secret) => {
+    // EC:E21 — rotated-out secrets only re-verify stored rows (receivedAt set), never new events.
+    const ok = (input.receivedAt ? [this.webhookSecret, ...this.previousWebhookSecrets] : [this.webhookSecret]).some((secret) => {
       const key = Buffer.from(secret.startsWith('whsec_') ? secret.slice(6) : secret, 'base64');
       const expectedBuf = Buffer.from(createHmac('sha256', key).update(signedContent).digest('base64'), 'base64');
       return candidates.some((sig) => {

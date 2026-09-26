@@ -36,3 +36,24 @@ describe('[EC:E18] Toss webhook origin', () => {
     await expect(p.verifyWebhook({ headers: {}, remoteAddress: '203.0.113.10', rawBody: JSON.stringify(body) })).rejects.toBeInstanceOf(WebhookSignatureError);
   });
 });
+
+describe('[EC:E22] Toss allowlist matching', () => {
+  const p = new TossProvider({ secretKey: 'test_sk_x', allowedWebhookIps: ['13.124.18.147', '203.0.113.0/24', '2001:db8::/32'] }, noFetch);
+  const at = (remoteAddress: string) => p.verifyWebhook({ headers: {}, rawBody: DONE, remoteAddress });
+  it('[EC:E22] an IPv4-mapped IPv6 peer (dual-stack socket) matches its IPv4 entry', async () => {
+    expect((await at('::ffff:13.124.18.147')).type).toBe('payment.succeeded');
+  });
+  it('[EC:E22] CIDR entries match addresses inside the block and nothing outside it', async () => {
+    expect((await at('203.0.113.77')).type).toBe('payment.succeeded');
+    expect((await at('::ffff:203.0.113.5')).type).toBe('payment.succeeded');
+    expect((await at('2001:db8:1::5')).type).toBe('payment.succeeded');
+    await expect(at('203.0.114.1')).rejects.toBeInstanceOf(WebhookSignatureError);
+    await expect(at('13.124.18.148')).rejects.toBeInstanceOf(WebhookSignatureError);
+    await expect(at('2001:db9::1')).rejects.toBeInstanceOf(WebhookSignatureError);
+    await expect(at('not-an-ip')).rejects.toBeInstanceOf(WebhookSignatureError);
+  });
+  it('[EC:E22] an invalid allowlist entry is refused at construction, not silently skipped', () => {
+    expect(() => new TossProvider({ secretKey: 'test_sk_x', allowedWebhookIps: ['203.0.113.0/40'] }, noFetch)).toThrow();
+    expect(() => new TossProvider({ secretKey: 'test_sk_x', allowedWebhookIps: ['toss.example'] }, noFetch)).toThrow();
+  });
+});

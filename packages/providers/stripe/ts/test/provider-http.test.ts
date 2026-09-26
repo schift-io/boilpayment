@@ -124,7 +124,7 @@ describe('[EC:E6] createCheckout', () => {
 });
 
 describe('[EC:E7] getPayment', () => {
-  it('providerRef starting with pi_ -> GET /v1/payment_intents/{ref}?expand[0]=invoice', async () => {
+  it('providerRef starting with pi_ -> GET /v1/payment_intents/{ref} expanding invoice and latest_charge (EC:E23)', async () => {
     mock.respondJson(200, { id: 'pi_1', object: 'payment_intent', amount: 10000, currency: 'krw', status: 'succeeded', created: 1700000000, last_payment_error: null, invoice: null });
     const provider = makeProvider();
 
@@ -135,7 +135,7 @@ describe('[EC:E7] getPayment', () => {
     expect(payment.kind).toBe('topup');
     const req = mock.requests[0];
     expect(req.method).toBe('GET');
-    expect(req.path).toBe('/v1/payment_intents/pi_1?expand[0]=invoice');
+    expect(decodeURIComponent(req.path)).toBe('/v1/payment_intents/pi_1?expand[0]=invoice&expand[1]=latest_charge');
     expect(authHeader(req)).toBe(`Bearer ${SECRET_KEY}`);
   });
 

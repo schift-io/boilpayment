@@ -585,3 +585,21 @@ describe('[EC:F(Stripe)] toNormalizedEvent — field extraction per event type',
     expect(result.raw).toBe(event);
   });
 });
+
+describe('[EC:E23] a succeeded PaymentIntent whose charge was refunded is not reported as succeeded', () => {
+  const pi = (charge: Record<string, unknown> | string | null) => ({ id: 'pi_r', amount: 10000, currency: 'usd', status: 'succeeded', created: NOW,
+    last_payment_error: null, invoice: null, latest_charge: charge }) as unknown as Stripe.PaymentIntent;
+  it('[EC:E23] fully refunded charge -> refunded', () => {
+    expect(normalizePaymentIntent(pi({ id: 'ch_1', amount_captured: 10000, amount_refunded: 10000, refunded: true, disputed: false })).status).toBe('refunded');
+  });
+  it('[EC:E23] partially refunded charge -> partially_refunded', () => {
+    expect(normalizePaymentIntent(pi({ id: 'ch_1', amount_captured: 10000, amount_refunded: 2500, refunded: false, disputed: false })).status).toBe('partially_refunded');
+  });
+  it('[EC:E23] disputed charge -> disputed', () => {
+    expect(normalizePaymentIntent(pi({ id: 'ch_1', amount_captured: 10000, amount_refunded: 0, refunded: false, disputed: true })).status).toBe('disputed');
+  });
+  it('[EC:E23] untouched charge, or charge not expanded -> succeeded', () => {
+    expect(normalizePaymentIntent(pi({ id: 'ch_1', amount_captured: 10000, amount_refunded: 0, refunded: false, disputed: false })).status).toBe('succeeded');
+    expect(normalizePaymentIntent(pi('ch_1')).status).toBe('succeeded');
+  });
+});

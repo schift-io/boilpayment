@@ -618,7 +618,9 @@ class PolarProvider:
     ) -> NormalizedEvent:
         # EC:E20 -- the current secret first, then secrets being rotated out.
         last_error: WebhookSignatureError | None = None
-        for secret in [self._webhook_secret, *self._previous_webhook_secrets]:
+        # EC:E21 -- rotated-out secrets only re-verify stored rows (received_at set), never new events.
+        secrets = [self._webhook_secret, *self._previous_webhook_secrets] if received_at is not None else [self._webhook_secret]
+        for secret in secrets:
             try:
                 verify_standard_webhook_signature(
                     headers=headers, raw_body=raw_body, secret=secret, received_at=received_at
