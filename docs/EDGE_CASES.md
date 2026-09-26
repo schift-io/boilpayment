@@ -108,6 +108,7 @@
 | D16 | 환불 사유별 처리 — 기술 실패 | `policy.refund.reasons.technical_failure` | **`rules`** (위 금액 규칙) / `full` (환불 창·방식·연간 제한과 무관하게 남은 결제 전액, 크레딧은 남은 만큼만 회수하고 금액은 줄이지 않음) | refund | P0 |
 | D16 | 환불 사유별 처리 — 결과 불만족 | `policy.refund.reasons.dissatisfied` | **`rules`** / `evidence_required` (요청에 `evidenceRef` 가 없으면 담당자 확인) / `needs_human` | refund · cs | P0 |
 | D16 | 환불 사유별 처리 — 사용자 과실 | `policy.refund.reasons.user_error` | **`rules`** / `deny`. 사유는 `support.requestRefund({ ..., reason: { category, evidenceRef } })` 로 넘기고, 카테고리는 `technical_failure` · `dissatisfied` · `user_error` · `other`(항상 금액 규칙) | refund · cs | P0 |
+| D17 | 같은 결제에 키가 다른 환불 요청 두 개가 동시에 도착 (합이 결제액 초과) | (구현 규칙) | 남은 환불 가능액 검사부터 보류·pending 환불 기록까지를 고객 단위 임계구역(`ledger.transaction`: 메모리 잠금, Postgres advisory lock)에서 실행해 하나만 통과한다. 결제사 호출은 잠금 밖 | refund | P0 |
 | D15 | 환불 중 소비 시도 (회수 전) | (구현 규칙) | 환불 시작 시 `hold` 행으로 잔액 선차감. 실패 시 hold 해제 | refund · credits | P0 |
 
 ## E. 결제 실패 · 복구 (CS 수익의 본체)

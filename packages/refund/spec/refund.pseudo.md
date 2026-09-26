@@ -395,3 +395,17 @@ an exact refund reference may resolve the already stored refund's payment. Ambig
 unmatched pending refunds, missing refund IDs, and untracked refunds without an amount require
 reconciliation. The kit does not use delivery IDs or infer the remaining refundable amount.
 Known pending refunds can use their stored approved amount when the final event omits it.
+
+## [EC:D17] Refund cap check is serialized per customer
+
+```pseudo
+operation = ledger.transaction(decision.customerId, () =>
+   committed = sum(refunds of this payment in succeeded | pending)
+   require decision.amount <= payment.amount - committed        # else refund_invalid_decision
+   claim operation; hold credits; refunds.put(pending))
+provider.refund(...)                                           # outside the lock
+```
+
+Without the lock, two requests with different keys for one payment both read the same `committed`
+and both pass; Postgres race test before the fix: 600 + 600 on a 1000 payment refunded 1200 in 4 of
+5 rounds (TS) and 5 of 5 (Py).

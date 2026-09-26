@@ -38,40 +38,47 @@ async def request_refund(input: ExecuteInput, execution_key: str) -> Refund:
         failure=PaymentFailure(code="refund_outcome_unknown", provider_code=None, retryable=False,
             user_message="Refund outcome requires provider confirmation; do not resubmit"),
     )
-    committed = sum(
-        refund.amount.amount_minor for refund in await repo.refunds.list(payment_id=payment.id)
-        if refund.id != pending.id and refund.status in ("succeeded", "pending")
-    )
-    if (
-        payment.customer_id != decision.customer_id or payment.amount.currency != decision.amount.currency
-        or type(decision.amount.amount_minor) is not int or type(decision.credits_to_revoke) is not int
-        or decision.amount.amount_minor > 9007199254740991 or decision.credits_to_revoke > 9007199254740991
-        or decision.amount.amount_minor <= 0 or decision.credits_to_revoke < 0
-        or decision.amount.amount_minor > payment.amount.amount_minor - committed
-        or payment.status not in ("succeeded", "partially_refunded")
-    ):
-        raise PaymentKitError("refund decision does not match current payment", "refund_invalid_decision", decision)
-    claimed = await repo.operations.claim(Operation(
-        id=key, key=key, kind="refund.provider", payload_hash=hash_payload({"decision": decision, "extra": input.extra}),
-        status="in_progress", result=serialize_refund(pending), error="refund_prepared",
-        created_at=clock.now(), completed_at=None, attempts=1,
-    ))
-    if claimed is None:
-        raise PaymentKitError("refund request already in progress", "idempotency_in_progress")
-    operation = replace(claimed, result=serialize_refund(pending), error="refund_prepared")
-    await repo.operations.put(operation)
-    try:
-        if decision.credits_to_revoke > 0:
-            await ledger.append(NewLedgerEntry(
-                customer_id=decision.customer_id, pool="paid", kind="hold", amount=-decision.credits_to_revoke,
-                source="refund", reference=LedgerReference(payment_id=payment.id, refund_id=pending.id,
-                    correlation_id=input.correlation_id), idempotency_key=f"hold:refund:{pending.id}",
-                actor="system", reason=decision.reason,
-            ))
-        await repo.refunds.put(pending)
-    except Exception:  # preparation boundary; no network call happened, retain identity on retry
-        await repo.operations.put(replace(operation, status="failed"))
-        raise
+    # EC:D17 -- the remaining-refundable check and the pending refund write are one critical section
+    # per customer (in-memory lock, Postgres advisory lock): two requests with different keys for
+    # the same payment cannot both pass the cap. The provider call below stays outside the lock.
+    async def _prepare() -> Operation:
+        committed = sum(
+            refund.amount.amount_minor for refund in await repo.refunds.list(payment_id=payment.id)
+            if refund.id != pending.id and refund.status in ("succeeded", "pending")
+        )
+        if (
+            payment.customer_id != decision.customer_id or payment.amount.currency != decision.amount.currency
+            or type(decision.amount.amount_minor) is not int or type(decision.credits_to_revoke) is not int
+            or decision.amount.amount_minor > 9007199254740991 or decision.credits_to_revoke > 9007199254740991
+            or decision.amount.amount_minor <= 0 or decision.credits_to_revoke < 0
+            or decision.amount.amount_minor > payment.amount.amount_minor - committed
+            or payment.status not in ("succeeded", "partially_refunded")
+        ):
+            raise PaymentKitError("refund decision does not match current payment", "refund_invalid_decision", decision)
+        claimed = await repo.operations.claim(Operation(
+            id=key, key=key, kind="refund.provider", payload_hash=hash_payload({"decision": decision, "extra": input.extra}),
+            status="in_progress", result=serialize_refund(pending), error="refund_prepared",
+            created_at=clock.now(), completed_at=None, attempts=1,
+        ))
+        if claimed is None:
+            raise PaymentKitError("refund request already in progress", "idempotency_in_progress")
+        operation = replace(claimed, result=serialize_refund(pending), error="refund_prepared")
+        await repo.operations.put(operation)
+        try:
+            if decision.credits_to_revoke > 0:
+                await ledger.append(NewLedgerEntry(
+                    customer_id=decision.customer_id, pool="paid", kind="hold", amount=-decision.credits_to_revoke,
+                    source="refund", reference=LedgerReference(payment_id=payment.id, refund_id=pending.id,
+                        correlation_id=input.correlation_id), idempotency_key=f"hold:refund:{pending.id}",
+                    actor="system", reason=decision.reason,
+                ))
+            await repo.refunds.put(pending)
+        except Exception:  # preparation boundary; no network call happened, retain identity on retry
+            await repo.operations.put(replace(operation, status="failed"))
+            raise
+        return operation
+
+    operation = await ledger.transaction(decision.customer_id, _prepare)
     # A lost response checkpoint leaves this marker pending, preventing another provider call.
     await repo.operations.put(replace(operation, error="refund_submitted"))
     provider = input.provider
