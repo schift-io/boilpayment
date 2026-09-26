@@ -1,9 +1,13 @@
 """Thin re-export -- see ../README.md. Full surface of boilpayment_lifecycle (upgrade, downgrade, cancel,
-reactivate, trial, renewal, retry, and the dunning/scheduler/period submodules).
+reactivate, trial, renewal, retry, backfill, and the dunning/scheduler/period submodules).
 """
 from __future__ import annotations
 
 from boilpayment_lifecycle import (
+    BackfillInput,
+    BackfillReport,
+    BackfillRow,
+    BackfillRowResult,
     CancelInput,
     CancelResult,
     Churn,
@@ -20,6 +24,7 @@ from boilpayment_lifecycle import (
     TrialEligibilityInput,
     UpgradeInput,
     UpgradeResult,
+    backfill,
     cancel,
     convert_trial,
     downgrade,
@@ -27,6 +32,7 @@ from boilpayment_lifecycle import (
     internal,
     is_trial_eligible,
     on_renewal_paid,
+    parse_backfill_file,
     period,
     reactivate,
     renewal,
@@ -38,6 +44,10 @@ from boilpayment_lifecycle import (
 )
 
 __all__ = [
+    "BackfillInput",
+    "BackfillReport",
+    "BackfillRow",
+    "BackfillRowResult",
     "CancelInput",
     "CancelResult",
     "Churn",
@@ -54,6 +64,7 @@ __all__ = [
     "TrialEligibilityInput",
     "UpgradeInput",
     "UpgradeResult",
+    "backfill",
     "cancel",
     "convert_trial",
     "downgrade",
@@ -61,6 +72,7 @@ __all__ = [
     "internal",
     "is_trial_eligible",
     "on_renewal_paid",
+    "parse_backfill_file",
     "period",
     "reactivate",
     "renewal",

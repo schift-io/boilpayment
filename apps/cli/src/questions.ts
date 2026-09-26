@@ -4,6 +4,8 @@
 import { DEFAULT_POLICY } from 'boilpayment-core';
 import { getPath } from './util/path.js';
 import type { WizardConfig } from './wizard-state.js';
+import { PROVIDER_OPTIONS, SITUATION_QUESTIONS, existing, has } from './situation.js';
+export { questionDefault } from './situation.js';
 
 export type QuestionType = 'select' | 'multiselect' | 'number' | 'text' | 'confirm';
 
@@ -25,6 +27,8 @@ export interface Question {
   message: string;
   options?: QuestionOption[];
   default: unknown;
+  /** Default that follows earlier answers (EC:M1 situation). Falls back to `default` when it returns undefined. */
+  defaultFrom?: (config: WizardConfig) => unknown;
   /** Only asked when this returns true. Receives the config as built so far (including prior answers). */
   when?: (config: WizardConfig) => boolean;
   /** Turns the raw prompt answer into the stored value (e.g. a comma list into number[]). */
@@ -42,8 +46,9 @@ const hasPortone = (c: WizardConfig) => c.providers.includes('portone');
 const hasKrProvider = (c: WizardConfig) => hasToss(c) || hasPortone(c);
 const csEnabled = (c: WizardConfig) => c.cs.enabled;
 const def = (p: string) => getPath(DEFAULT_POLICY, p);
-
 export const QUESTIONS: Question[] = [
+  ...SITUATION_QUESTIONS,
+
   // 1. Provider (F)
   {
     id: 'providers',
@@ -52,13 +57,9 @@ export const QUESTIONS: Question[] = [
     type: 'multiselect',
     group: 'provider',
     message: '결제 provider 를 선택하세요 (Payment providers, 다중 선택 가능)',
-    options: [
-      { value: 'stripe', label: 'Stripe', hint: '글로벌, 네이티브 구독' },
-      { value: 'polar', label: 'Polar', hint: 'Merchant of Record, 글로벌 세금 위임' },
-      { value: 'toss', label: 'Toss', hint: 'KR, 네이티브 구독 없음 → 자체 스케줄러 필요' },
-      { value: 'portone', label: 'Portone', hint: 'KR, PG 여럿을 정규화, provider 스케줄 가능' },
-    ],
+    options: PROVIDER_OPTIONS,
     default: ['stripe'],
+    defaultFrom: (c) => (existing(c) && c.situation?.providers?.length ? [...c.situation.providers] : undefined),
   },
 
   // 2. 결제 모델
@@ -75,6 +76,7 @@ export const QUESTIONS: Question[] = [
       { value: 'usage', label: '이용량 (Usage)', hint: '사용량 기반 과금/한도' },
     ],
     default: ['subscription'],
+    defaultFrom: (c) => (existing(c) && has(c, 'credits') && !has(c, 'subscriptions') ? ['topup'] : undefined),
   },
 
   // 3. 재화

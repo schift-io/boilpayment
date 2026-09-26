@@ -480,3 +480,41 @@ Toss/PortOne billing keys do not imply a remote subscription ID. Native subscrip
 `subscription_provider_ref_required` before any remote call or subscription mutation.
 Self-scheduled paths continue using the local subscription and billing key without inventing
 provider references. PostgreSQL forward migration 0007 matches this core contract.
+
+## [EC:M1] [EC:M2] [EC:M3] [EC:M4] backfill — 기존 결제 고객 들이기
+
+```pseudo
+input: { rows: BackfillRow[], repo, ledger, providers, clock, ids }
+output: { results: [{ row, customerId, status: ok|error, reason, customer, subscription, credits, subscriptionId }], ok, errors }
+
+for row in rows:
+   # EC:M2 EC:M3 — every refusal happens before any write; an error row writes nothing
+   require customerId, customerRef; provider in providers else provider_not_configured
+   credits is null or integer >= 0 else invalid_credits
+   planId given -> repo.plans.get(planId) else unknown_plan
+   subscriptionRef and billingKey both -> subscription_ref_and_billing_key
+   if subscriptionRef or billingKey: planId required (missing_plan_id)
+   if subscriptionRef:                                   # native (Stripe, Polar)
+      provider.capabilities().nativeSubscriptions else provider_has_no_native_subscriptions
+      local = repo.subscriptions.list({ provider, providerRef: subscriptionRef })
+      if local: local.customerId == row.customerId else subscription_owned_by_other_customer -> skip
+      remote = provider.getSubscription(subscriptionRef)  # status/period/anchor from the provider
+      remote.customerId in (customerRef, customerId) else provider_customer_mismatch
+      remote.status in (trialing, active, past_due) else subscription_not_live
+      new sub: remote status/period/anchorDay/cancelAtPeriodEnd, providerRef, billingKey null
+   if billingKey:                                        # self-scheduled (Toss, PortOne)
+      not native else billing_key_needs_self_scheduled_provider
+      periodStart < periodEnd else invalid_period
+      same (customer, provider, billingKey) exists -> skip
+      new sub: status active, period from file, anchorDay = periodStart UTC day, providerRef null
+   customer: absent -> create (providerRefs [row ref]); ref missing -> add (updated); else skipped
+   sub: put with ids.newId(), version 0 (created) unless skipped
+   # EC:M4
+   credits > 0 -> ledger.append(grant, pool paid, source manual, actor backfill,
+                                idempotencyKey "backfill:{customerId}:paid", expiresAt creditsExpireAt)
+                  duplicated -> skipped
+```
+
+`parseBackfillFile` / `parse_backfill_file`: CSV with a header row or JSON array, columns
+`customer_id,email,provider,customer_ref,subscription_ref,plan_id,billing_key,period_start,period_end,credits,credits_expire_at`.
+Dates are ISO 8601; a date without a zone is UTC.

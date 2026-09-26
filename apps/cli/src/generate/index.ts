@@ -14,6 +14,7 @@ import { generateMigrations, type MigrationsResult } from './migrations.js';
 import { generateEnvExample } from './env.js';
 import { generatePolicyMd } from './policy-md.js';
 import { generateIntegrationMd } from './integration-md.js';
+import { generateBackfillCsv, generateBackfillPy, generateBackfillTs, hasBackfill } from './backfill.js';
 
 export interface GenerateResult {
   configFile: string;
@@ -64,6 +65,12 @@ export async function generateAll(config: PaykitConfig, outDir: string, opts: Ge
     await writeFile(path.join(paykitDir, 'index.py'), generateIndexPy(config));
     await writeFile(path.join(paykitDir, 'webhook.py'), generateWebhookPy(config));
     await writeFile(path.join(paykitDir, '__init__.py'), '');
+  }
+  // EC:M1 — only for developers who already have paying customers.
+  if (hasBackfill(config)) {
+    await writeFile(path.join(paykitDir, 'backfill.example.csv'), generateBackfillCsv(config));
+    if (config.languages.includes('ts')) await writeFile(path.join(paykitDir, 'backfill.ts'), generateBackfillTs());
+    if (config.languages.includes('py')) await writeFile(path.join(paykitDir, 'backfill.py'), generateBackfillPy());
   }
 
   return { configFile, policyMdFile, envExampleFile, paykitDir, writtenFiles, migrations };

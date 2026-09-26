@@ -5,6 +5,7 @@
 // configured paths, and a section only appears when the corresponding choice was made. A generic
 // integration guide is worse than none — the reader cannot tell which half applies to them.
 import type { PaykitConfig } from '../config.js';
+import { backfillIntegrationSection, hasBackfill } from './backfill.js';
 
 const KR_PROVIDERS = ['toss', 'portone'] as const;
 
@@ -249,8 +250,11 @@ export function generateIntegrationMd(config: PaykitConfig): string {
   l.push('이 코드는 고객 문의를 읽는 호스팅 AI 상담 서비스나 채팅 위젯을 포함하지 않습니다.');
   l.push('');
 
-  // ── 7. 문제 생겼을 때 ──────────────────────────────────────────────────────
-  const n = 7;
+  // ── 7. 기존 고객 들이기 (EC:M1, 있다고 답했을 때만) ─────────────────────────
+  if (hasBackfill(config)) l.push(...backfillIntegrationSection(config, 7));
+
+  // ── 7/8. 문제 생겼을 때 ────────────────────────────────────────────────────
+  const n = hasBackfill(config) ? 8 : 7;
   l.push(`## ${n}. 문제가 생겼을 때`);
   l.push('');
   l.push('"이 결제에 무슨 일이 있었나"에 답하는 게 이 킷을 쓰는 이유입니다.');

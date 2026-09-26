@@ -22,7 +22,8 @@ if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return; fi
 echo "Local mock HTTP checks and isolated CS-server checks; not real-provider evidence."
 if command -v stripe-mock >/dev/null; then
   stripe-mock -http-port 12111 -https-port 12112 >/dev/null 2>&1 & SM=$!; sleep 1
-  run "stripe ts" $TSX examples/live/stripe-mock.ts; run "stripe py" $PY examples/live/stripe_mock.py; kill $SM
+  run "stripe ts" $TSX examples/live/stripe-mock.ts; run "stripe py" $PY examples/live/stripe_mock.py
+  run "stripe native renewal ts" $TSX examples/e2e/native-renewal-stripe-mock.ts; kill $SM
 else echo "SKIP  stripe (stripe-mock not installed)"; fi
 for p in toss portone polar; do
   for lang in ts py; do

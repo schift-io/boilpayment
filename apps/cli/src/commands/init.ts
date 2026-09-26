@@ -78,4 +78,9 @@ export async function runInit(argv: ParsedArgv): Promise<void> {
     console.log(`  ${step++}. npx boilpayment migrate   # 마이그레이션 적용 (--dry-run 으로 먼저 확인 가능)`);
   }
   console.log(`  ${step++}. npx boilpayment check   # config 검증 + 스키마가 이 빌드와 맞는지 조회 (읽기 전용)`);
+  if (config.situation?.existingCustomers) {
+    // EC:M1 — the generated backfill brings in customers who were paying before the kit.
+    const run = config.languages.includes('ts') ? 'npx tsx paykit/backfill.ts customers.csv' : 'python -m paykit.backfill customers.csv';
+    console.log(`  ${step++}. ${run}   # 기존 고객 들이기 (열: paykit/backfill.example.csv, INTEGRATION.md 7절)`);
+  }
 }

@@ -8,3 +8,4 @@ export * from './retry.js';
 export * as dunning from './dunning.js';
 export * as scheduler from './scheduler.js';
 export * as period from './period.js';
+export * from './backfill.js';

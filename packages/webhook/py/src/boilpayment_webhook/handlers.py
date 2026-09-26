@@ -203,6 +203,46 @@ def default_handlers(
             failure=provider_payment.failure,
         )
 
+    async def resolve_renewal_payment(
+        ctx: HandlerCtx, payment_ref: str, subscription_ref: str
+    ) -> Payment:
+        """EC:E16 -- a native provider (Stripe/Polar) renews on its own schedule, so the renewal
+        invoice reaches us first as a webhook: no local Payment row exists for it yet. When the
+        event names a subscription we already have, re-fetch the payment from the provider
+        (EC:E3), check that the provider ties it to that same subscription, and record it before
+        renewing. Anything else keeps the unknown_provider_ref path."""
+        if await repo.payments.list(provider_ref=payment_ref):
+            return await resolve_local_payment(ctx, payment_ref)
+        subs = await repo.subscriptions.list(
+            provider=ctx.provider.name, provider_ref=subscription_ref
+        )
+        if not subs or not ctx.provider.capabilities().native_subscriptions:
+            return await resolve_local_payment(ctx, payment_ref)
+        sub = subs[0]
+        remote = await ctx.provider.get_payment(payment_ref)
+        if remote.kind != "subscription" or remote.subscription_id != subscription_ref:
+            await mark_unknown_provider_ref("payment", payment_ref, ctx.provider.name)
+        # A concurrent delivery of the same invoice may have recorded it since the first lookup.
+        raced = await repo.payments.list(provider_ref=payment_ref)
+        if raced:
+            return raced[0]
+        return await repo.payments.put(
+            Payment(
+                id=ids.new_id(),
+                customer_id=sub.customer_id,
+                provider=ctx.provider.name,
+                provider_ref=payment_ref,
+                subscription_id=sub.id,
+                amount=remote.amount,
+                status=remote.status,
+                kind="subscription",
+                period=remote.period,
+                occurred_at=remote.occurred_at,
+                failure=remote.failure,
+                cash_receipt=None,
+            )
+        )
+
     async def maybe_issue_cash_receipt(payment: Payment, provider: Any) -> None:
         """EC:K2 K4 K6 K7 -- auto-issue a cash receipt. Never rolls back a payment that succeeded.
 
@@ -276,7 +316,13 @@ def default_handlers(
         # ctx.correlation_id merged into its reference, without lifecycle/credits knowing
         # correlation_id exists (see correlation.py module docstring).
         scoped_ledger = with_correlation_id(ledger, ctx.correlation_id)
-        payment = await resolve_local_payment(ctx, ctx.event.payment_ref)
+        payment = (
+            await resolve_renewal_payment(
+                ctx, ctx.event.payment_ref, ctx.event.subscription_ref
+            )
+            if ctx.event.subscription_ref
+            else await resolve_local_payment(ctx, ctx.event.payment_ref)
+        )
         if ctx.event.subscription_ref:
             if lifecycle is not None:
                 # EC:K1 call-site audit -- resolve_local_subscription reads the row, then

@@ -5,6 +5,15 @@ from . import (  # noqa: F401  (submodules: lifecycle.dunning.*, .scheduler.*, .
     period,
     scheduler,
 )
+from .backfill import (  # noqa: F401
+    BACKFILL_COLUMNS,
+    BackfillInput,
+    BackfillReport,
+    BackfillRow,
+    BackfillRowResult,
+    backfill,
+    parse_backfill_file,
+)
 from .cancel import CancelInput, CancelResult, Churn, ChurnInfo, cancel  # noqa: F401
 from .downgrade import DowngradeInput, DowngradeResult, downgrade  # noqa: F401
 from .reactivate import (  # noqa: F401

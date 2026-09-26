@@ -2,7 +2,7 @@
 // non-interactively (--yes / --config), producing a WizardConfig.
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
-import { QUESTIONS, type Question } from './questions.js';
+import { QUESTIONS, questionDefault, type Question } from './questions.js';
 import { getPath, setPath } from './util/path.js';
 import { emptyConfig, type PaykitConfig } from './config.js';
 import type { WizardConfig } from './wizard-state.js';
@@ -20,6 +20,7 @@ export interface WizardOptions {
 }
 
 const GROUP_TITLES: Record<string, string> = {
+  situation: '0. 지금 상황',
   provider: '1. Provider 선택',
   model: '2. 결제 모델',
   goods: '3. 재화',
@@ -152,13 +153,14 @@ export async function runWizard(opts: WizardOptions): Promise<WizardConfig> {
     } else if (opts.yes) {
       // `--yes` must land on the same stored value an interactive run would, so the default goes
       // through `parse` too (e.g. a 0-day answer becomes `null`, not a 0-day expiry).
-      value = q.parse ? q.parse(String(q.default)) : q.default;
+      const d = questionDefault(q, config);
+      value = q.parse ? q.parse(String(d)) : d;
     } else {
       if (q.group !== lastGroup) {
         p.note(q.ec.join(', '), GROUP_TITLES[q.group] ?? q.group);
         lastGroup = q.group;
       }
-      value = await promptOne(q);
+      value = await promptOne({ ...q, default: questionDefault(q, config) });
       if (q.parse && (typeof value === 'string' || typeof value === 'number')) value = q.parse(String(value));
       if (q.id === 'providers' && Array.isArray(value) && value.includes('toss') && !notedD13) {
         p.note(

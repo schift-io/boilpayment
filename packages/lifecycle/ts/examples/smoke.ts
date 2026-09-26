@@ -20,7 +20,7 @@ import {
   resolvePolicy,
 } from 'boilpayment-core';
 import { upgrade, downgrade, dunning } from 'boilpayment-lifecycle';
-import { onRenewalPaid } from 'boilpayment-lifecycle';
+import { onRenewalPaid, backfill } from 'boilpayment-lifecycle';
 import { consume, manualRevoke, notifyExpiring } from 'boilpayment-credits';
 
 // Minimal canned PaymentProvider — only changeSubscription is actually invoked by this scenario
@@ -341,6 +341,34 @@ async function main(): Promise<void> {
   const notice1 = await notifyExpiring({ customerId: 'cust_expire_1', ledger, repo, notifier, policy: expiryPolicy, clock });
   const notice2 = await notifyExpiring({ customerId: 'cust_expire_1', ledger, repo, notifier, policy: expiryPolicy, clock });
   console.log(`11_expiry_notice: first_pending=${notice1.pending.length} second_pending_same_day=${notice2.pending.length}`);
+
+  // 12. EC:M1-M4 — backfill: a native subscription (state from the provider), a self-scheduled one
+  //     (billing key + paid period from the file), a refused row, then a full re-run that writes nothing.
+  const bfRepo = new InMemoryRepo();
+  const bfLedger = new InMemoryLedger(new SequentialIdGen('bfled_'));
+  await bfRepo.plans.put(planA);
+  const bfPeriod = { start: new Date('2026-03-01T00:00:00.000Z'), end: new Date('2026-04-01T00:00:00.000Z') };
+  const bfNative = {
+    name: 'stripe',
+    capabilities: () => ({ nativeSubscriptions: true, partialRefund: true, meters: false, scheduling: 'provider' as const, webhookSignature: true }),
+    getSubscription: async (ref: string): Promise<Subscription> => ({
+      id: ref, customerId: 'cus_bf_1', planId: '', provider: 'stripe', providerRef: ref, status: 'active', currentPeriod: bfPeriod,
+      anchorDay: 1, cancelAtPeriodEnd: false, graceUntil: null, billingKey: null, scheduledPlanId: null, version: 0, createdAt: clock.now(),
+    }),
+  } as unknown as PaymentProvider;
+  const bfSelf = { name: 'toss', capabilities: () => ({ nativeSubscriptions: false, partialRefund: true, meters: false, scheduling: 'self' as const, webhookSignature: false }) } as unknown as PaymentProvider;
+  const bfRows = [
+    { customerId: 'bf_1', email: null, provider: 'stripe' as const, customerRef: 'cus_bf_1', subscriptionRef: 'sub_bf_1', planId: planA.id, billingKey: null, periodStart: null, periodEnd: null, credits: 40, creditsExpireAt: null },
+    { customerId: 'bf_2', email: null, provider: 'toss' as const, customerRef: 'ck_bf_2', subscriptionRef: null, planId: planA.id, billingKey: 'bk_bf_2', periodStart: new Date('2026-03-05T00:00:00.000Z'), periodEnd: new Date('2026-04-05T00:00:00.000Z'), credits: null, creditsExpireAt: null },
+    { customerId: 'bf_3', email: null, provider: 'stripe' as const, customerRef: 'cus_other', subscriptionRef: 'sub_bf_3', planId: planA.id, billingKey: null, periodStart: null, periodEnd: null, credits: 5, creditsExpireAt: null },
+  ];
+  const bfDeps = { rows: bfRows, repo: bfRepo, ledger: bfLedger, providers: { stripe: bfNative, toss: bfSelf }, clock, ids: new SequentialIdGen('bfsub_') };
+  const bfShow = (r: Awaited<ReturnType<typeof backfill>>) => r.results.map((x) => `${x.status}:${x.reason ?? '-'}:${x.customer}:${x.subscription}:${x.credits}`).join(',');
+  const bf1 = await backfill(bfDeps);
+  const bf2 = await backfill(bfDeps);
+  const bfSubs = await bfRepo.subscriptions.list();
+  const bfBal = await bfLedger.balance('bf_1', 'paid', clock.now());
+  console.log(`12_backfill: first=${bfShow(bf1)} second=${bfShow(bf2)} subs=${bfSubs.length} bf_1_balance=${bfBal.available}`);
 }
 
 main().catch((err) => {

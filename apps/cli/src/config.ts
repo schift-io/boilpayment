@@ -29,8 +29,17 @@ export interface PlanConfig {
   prices: PlanPriceConfig[];
 }
 
+/** EC:M1 — what the developer already has. Stored only when existingCustomers is true. */
+export type ExistingGood = 'subscriptions' | 'credits';
+export interface SituationConfig {
+  existingCustomers: boolean;
+  providers: ProviderName[];
+  has: ExistingGood[];
+}
+
 export interface PaykitConfig {
   version: 1;
+  situation?: SituationConfig;
   providers: ProviderName[];
   models: PaymentModel[];
   goods: Good[];

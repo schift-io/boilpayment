@@ -630,6 +630,52 @@ async def main() -> None:
         f"11_expiry_notice: first_pending={len(notice1.pending)} second_pending_same_day={len(notice2.pending)}"
     )
 
+    # 12. EC:M1-M4 -- backfill: a native subscription (state from the provider), a self-scheduled one
+    #     (billing key + paid period from the file), a refused row, then a full re-run that writes nothing.
+    from boilpayment_lifecycle import BackfillInput, BackfillRow, backfill
+
+    bf_repo = InMemoryRepo()
+    bf_ledger = InMemoryLedger(SequentialIdGen("bfled_"))
+    await bf_repo.plans.put(plan_a)
+    bf_period = Period(start=datetime(2026, 3, 1, tzinfo=UTC), end=datetime(2026, 4, 1, tzinfo=UTC))
+
+    class BfNative:
+        name = "stripe"
+
+        def capabilities(self) -> ProviderCapabilities:
+            return ProviderCapabilities(native_subscriptions=True, partial_refund=True, meters=False, scheduling="provider", webhook_signature=True)
+
+        async def get_subscription(self, ref: str) -> Subscription:
+            return Subscription(
+                id=ref, customer_id="cus_bf_1", plan_id="", provider="stripe", provider_ref=ref, status="active",
+                current_period=bf_period, anchor_day=1, cancel_at_period_end=False, grace_until=None,
+                billing_key=None, scheduled_plan_id=None, created_at=clock.now(),
+            )
+
+    class BfSelf:
+        name = "toss"
+
+        def capabilities(self) -> ProviderCapabilities:
+            return ProviderCapabilities(native_subscriptions=False, partial_refund=True, meters=False, scheduling="self", webhook_signature=False)
+
+    bf_rows = [
+        BackfillRow(customer_id="bf_1", provider="stripe", customer_ref="cus_bf_1", subscription_ref="sub_bf_1", plan_id=plan_a.id, credits=40),
+        BackfillRow(customer_id="bf_2", provider="toss", customer_ref="ck_bf_2", plan_id=plan_a.id, billing_key="bk_bf_2",
+                    period_start=datetime(2026, 3, 5, tzinfo=UTC), period_end=datetime(2026, 4, 5, tzinfo=UTC)),
+        BackfillRow(customer_id="bf_3", provider="stripe", customer_ref="cus_other", subscription_ref="sub_bf_3", plan_id=plan_a.id, credits=5),
+    ]
+    bf_input = BackfillInput(rows=bf_rows, repo=bf_repo, ledger=bf_ledger, providers={"stripe": BfNative(), "toss": BfSelf()},  # type: ignore[dict-item]
+                             clock=clock, ids=SequentialIdGen("bfsub_"))
+
+    def bf_show(r) -> str:
+        return ",".join(f"{x.status}:{x.reason or '-'}:{x.customer}:{x.subscription}:{x.credits}" for x in r.results)
+
+    bf1 = await backfill(bf_input)
+    bf2 = await backfill(bf_input)
+    bf_subs = await bf_repo.subscriptions.list()
+    bf_bal = await bf_ledger.balance("bf_1", "paid", clock.now())
+    print(f"12_backfill: first={bf_show(bf1)} second={bf_show(bf2)} subs={len(bf_subs)} bf_1_balance={bf_bal.available}")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

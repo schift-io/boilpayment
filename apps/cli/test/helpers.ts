@@ -1,5 +1,5 @@
 // Shared test helpers — not a *.test.ts file itself (vitest only picks up test/spec files).
-import { QUESTIONS } from '../src/questions.js';
+import { QUESTIONS, questionDefault } from '../src/questions.js';
 import { emptyConfig } from '../src/config.js';
 import { setPath } from '../src/util/path.js';
 import type { WizardConfig } from '../src/wizard-state.js';
@@ -18,7 +18,7 @@ export function buildConfig(overridesById: Record<string, unknown> = {}): Wizard
   for (const q of QUESTIONS) {
     if (q.when && !q.when(config)) continue;
     const path = q.policyPath ? `policy.${q.policyPath}` : q.configPath!;
-    let value = Object.prototype.hasOwnProperty.call(overridesById, q.id) ? overridesById[q.id] : q.default;
+    let value = Object.prototype.hasOwnProperty.call(overridesById, q.id) ? overridesById[q.id] : questionDefault(q, config);
     // Mirror wizard.ts exactly: BOTH its paths run the answer through `q.parse` when there is one.
     // Skipping it here made this double looser than the real thing, and the generate tests spent a
     // long time passing against a config the wizard cannot produce — `dunning.retryIntervalHours`

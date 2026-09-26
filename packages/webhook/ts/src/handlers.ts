@@ -105,7 +105,7 @@ export interface DefaultHandlersInput {
 }
 
 export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
-  const { policy, ledger, repo, notifier, clock, lifecycle, credits, refund, cs } = input;
+  const { policy, ledger, repo, notifier, clock, ids, lifecycle, credits, refund, cs } = input;
 
   // Not-found local entity for a webhook's providerRef -> notify + fail the record (caught by process()).
   async function markUnknownProviderRef(kind: 'subscription' | 'payment', providerRef: string, providerName: string): Promise<never> {
@@ -131,6 +131,29 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
     if (payments.length === 0) return markUnknownProviderRef('payment', providerRef, ctx.provider.name);
     const providerPayment = await ctx.provider.getPayment(providerRef); // re-fetch for verification (EC:E3)
     return { ...payments[0], status: providerPayment.status, amount: providerPayment.amount, period: providerPayment.period, occurredAt: providerPayment.occurredAt, failure: providerPayment.failure };
+  }
+
+  // EC:E16 — a native provider (Stripe/Polar) renews on its own schedule, so the renewal invoice
+  // reaches us first as a webhook: no local Payment row exists for it yet. When the event names a
+  // subscription we already have, re-fetch the payment from the provider (EC:E3), check that the
+  // provider ties it to that same subscription, and record it before renewing. Anything else keeps
+  // the unknown_provider_ref path.
+  async function resolveRenewalPayment(ctx: HandlerCtx, paymentRef: string, subscriptionRef: string): Promise<Payment> {
+    if ((await repo.payments.list({ providerRef: paymentRef } as Partial<Payment>)).length > 0) return resolveLocalPayment(ctx, paymentRef);
+    const [sub] = await repo.subscriptions.list({ provider: ctx.provider.name, providerRef: subscriptionRef } as Partial<Subscription>);
+    if (!sub || !ctx.provider.capabilities().nativeSubscriptions) return resolveLocalPayment(ctx, paymentRef);
+    const remote = await ctx.provider.getPayment(paymentRef);
+    if (remote.kind !== 'subscription' || remote.subscriptionId !== subscriptionRef) {
+      return markUnknownProviderRef('payment', paymentRef, ctx.provider.name);
+    }
+    // A concurrent delivery of the same invoice may have recorded it since the first lookup.
+    const [raced] = await repo.payments.list({ providerRef: paymentRef } as Partial<Payment>);
+    if (raced) return raced;
+    return repo.payments.put({
+      id: ids.newId(), customerId: sub.customerId, provider: ctx.provider.name, providerRef: paymentRef, subscriptionId: sub.id,
+      amount: remote.amount, status: remote.status, kind: 'subscription', period: remote.period, occurredAt: remote.occurredAt,
+      failure: remote.failure, cashReceipt: null,
+    });
   }
 
   // EC:K2 K4 K6 K7 — issue a cash receipt for a succeeded payment when policy.cashReceipt.mode ===
@@ -180,7 +203,9 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
     // ctx.correlationId merged into its reference, without lifecycle/credits knowing correlationId
     // exists (see correlation.ts doc comment).
     const scopedLedger = withCorrelationId(ledger, ctx.correlationId);
-    const payment = await resolveLocalPayment(ctx, ctx.event.paymentRef!);
+    const payment = ctx.event.subscriptionRef
+      ? await resolveRenewalPayment(ctx, ctx.event.paymentRef!, ctx.event.subscriptionRef)
+      : await resolveLocalPayment(ctx, ctx.event.paymentRef!);
     if (ctx.event.subscriptionRef) {
       if (lifecycle) {
         // EC:K1 call-site audit — resolveLocalSubscription reads the row, then lifecycle.onRenewalPaid

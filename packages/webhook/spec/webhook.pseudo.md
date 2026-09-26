@@ -200,6 +200,30 @@ resolveLocalPayment(ctx, providerRef) -> Payment:
             period: providerPayment.period, occurredAt: providerPayment.occurredAt, failure: providerPayment.failure }
 ```
 
+## [EC:E16] Native renewal — record the renewal invoice for a known subscription
+
+Stripe/Polar renew on their own schedule, so a renewal invoice reaches us first as
+`payment.succeeded` with a paymentRef that has no local row. Without this every native renewal
+would end in `unknown_provider_ref`.
+
+```pseudo
+resolveRenewalPayment(ctx, paymentRef, subscriptionRef) -> Payment:
+   if repo.payments.list({ providerRef: paymentRef }) is not empty: return resolveLocalPayment(ctx, paymentRef)
+   sub = first of repo.subscriptions.list({ provider: ctx.provider.name, providerRef: subscriptionRef })
+   if sub is null or not ctx.provider.capabilities().nativeSubscriptions:
+      return resolveLocalPayment(ctx, paymentRef)            # unchanged: unknown payment -> throws
+   remote = ctx.provider.getPayment(paymentRef)                # re-fetch (EC:E3), never the payload
+   if remote.kind != 'subscription' or remote.subscriptionId != subscriptionRef:
+      markUnknownProviderRef('payment', paymentRef, ctx.provider.name)   # someone else's payment
+   raced = first of repo.payments.list({ providerRef: paymentRef })     # concurrent delivery
+   if raced: return raced
+   return repo.payments.put({ id: ids.newId(), customerId: sub.customerId, provider: ctx.provider.name,
+                              providerRef: paymentRef, subscriptionId: sub.id, kind: 'subscription',
+                              amount/status/period/occurredAt/failure: from remote, cashReceipt: null })
+   # Two deliveries racing past both lookups: Postgres `payments (provider, provider_ref)` is unique,
+   # so the second insert fails that record; its retry finds the row. Never two rows.
+```
+
 ### Unmatched providerRef — do not process, fail the record, alert
 
 If no local row matches a webhook's `providerRef` (dashboard-created entity, or a webhook that
@@ -217,7 +241,8 @@ markUnknownProviderRef(kind, providerRef, providerName):
 
 ```pseudo
 handlers['payment.succeeded'] = async (ctx):
-   payment = resolveLocalPayment(ctx, ctx.event.paymentRef)
+   payment = ctx.event.subscriptionRef ? resolveRenewalPayment(ctx, ctx.event.paymentRef, ctx.event.subscriptionRef)
+                                       : resolveLocalPayment(ctx, ctx.event.paymentRef)
    if ctx.event.subscriptionRef is not null:
       if lifecycle is not null:
          retryOnVersionConflict(async () =>          # EC:K1

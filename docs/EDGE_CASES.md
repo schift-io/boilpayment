@@ -116,6 +116,7 @@
 | E13 | 결제 성공 webhook 도착 전 사용자가 페이지 이탈 (success URL 미도달) | (구현 규칙) | success URL 은 UX 용. 지급은 webhook 만. 프론트는 polling `GET /grants?checkout_id` | webhook | P0 |
 | E14 | 재지급 후 원래 webhook 이 뒤늦게 도착 | (B12) | 같은 멱등키 → no-op | cs | P0 |
 | E15 | 동일 고객 여러 provider 에서 결제 (Stripe + Toss) | (구현 규칙) | `customers.provider_refs[]`. 풀은 하나, grant 마다 `provider` 태그 | core | P1 |
+| E16 | 네이티브 구독(Stripe/Polar) 갱신 인보이스가 webhook 으로 먼저 도착 (로컬 결제 행 없음) | (구현 규칙) | 로컬 구독이 있으면 provider 에서 결제를 재조회(E3) → 그 구독의 결제일 때만 결제 행 기록 → 갱신 지급. 다른 구독 결제·모르는 구독은 `unknown_provider_ref`. 같은 인보이스 재전송은 행 1개 (`payments (provider, provider_ref)` unique) | webhook | P0 |
 
 ## F. Provider 별 특이점
 
@@ -234,8 +235,22 @@
 
 ---
 
+## M. 기존 고객 들이기 (backfill)
+
+kit 을 붙이기 전부터 결제 중인 고객이 있으면, 그 고객의 구독과 크레딧 잔액이 kit 테이블에 없어서
+다음 갱신 webhook 이 `unknown_provider_ref` 로 실패하고 잔액이 0 으로 보인다. 위저드가 이 상황을
+먼저 묻고(`situation.*`, config 키), 답이 "있다" 일 때만 `paykit/backfill.{ts,py}` 를 생성한다.
+
+| ID | 케이스 | 정책 키 | 선택지 (기본값 **굵게**) | 모듈 | P |
+|---|---|---|---|---|---|
+| M1 | 이미 결제 중인 고객이 있다 | `situation.existingCustomers` · `situation.providers` · `situation.has` (config) | 있음 / **없음**. 있으면 지금 결제사(기본값이 뒤 provider 질문의 기본값), 옮겨 올 것 `subscriptions` · `credits`(뒤 결제 모델·재화 질문의 기본값). 없음이면 생성물은 이 기능 이전과 바이트 단위로 같다 | cli · lifecycle `backfill` | P0 |
+| M2 | 파일의 행이 kit 설정과 맞지 않는다 | (구현 규칙) | 행 단위로 거절하고 그 행은 아무것도 쓰지 않는다: 설정에 없는 plan(`unknown_plan`) · 설정에 없는 결제사(`provider_not_configured`) · 네이티브 구독 없는 결제사에 구독 id(`provider_has_no_native_subscriptions`) · 네이티브 결제사에 빌링키(`billing_key_needs_self_scheduled_provider`) · 기간 누락(`invalid_period`) · 음수/비정수 크레딧(`invalid_credits`) · 다른 로컬 고객이 가진 구독(`subscription_owned_by_other_customer`) | lifecycle `backfill` | P0 |
+| M3 | 파일의 구독 상태를 믿을 수 없다 | (구현 규칙) | 네이티브 결제사(Stripe·Polar)는 `getSubscription(ref)` 로 결제사에서 상태·기간·anchor 를 가져온다. 결제사 쪽 고객이 `customer_ref`(또는 `customer_id`)와 다르면 `provider_customer_mismatch`, 끝난 구독이면 `subscription_not_live` 로 거절. 자체 스케줄(Toss·PortOne)은 결제사에 구독이 없으므로 파일의 빌링키와 이미 결제된 기간을 쓴다 | lifecycle `backfill` | P0 |
+| M4 | 다시 돌려도 두 번 들어가면 안 된다 | (구현 규칙) | 고객은 providerRef 가 이미 있으면 skip, 구독은 (provider, providerRef) 또는 (고객, provider, billingKey) 로 skip, 잔액은 원장 grant 한 건(`source='manual'`, `actor='backfill'`, 멱등 키 `backfill:{customerId}:paid`)이라 재실행은 `duplicated`. 결과 표는 행마다 created / updated / skipped / error | lifecycle `backfill` | P0 |
+
 ## 위저드 질문 순서 (정책 키 → 질문)
 
+0. 지금 상황 (M1): 이미 결제 중인 고객 → 있으면 지금 결제사 · 옮겨 올 것
 1. Provider (F)
 2. 결제 모델: subscription / topup / usage
 3. 재화: credits / usage_quota
