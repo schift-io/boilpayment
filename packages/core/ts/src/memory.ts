@@ -330,6 +330,13 @@ export class InMemoryLedger implements LedgerStore {
         return result;
       }
 
+      // EC:B21 — a row key already taken by another operation (a grant appended with 'k#0', say)
+      // must not be answered with that row: refuse before writing anything.
+      for (let i = 0; i < plan.length; i++) {
+        if (this.byIdempotencyKey.has(scopedKey(input.customerId, `${input.idempotencyKey}#${i}`))) {
+          throw new PaymentKitError(`idempotency key ${input.idempotencyKey} collides with an existing ledger row`, 'idempotency_key_conflict');
+        }
+      }
       const entries: LedgerEntry[] = [];
       for (let i = 0; i < plan.length; i++) {
         const step = plan[i];

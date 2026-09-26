@@ -185,7 +185,9 @@ export class PostgresLedgerStore implements LedgerStore {
       const client = this.client(input.customerId);
 
       const existing = await client.query(
-        `select * from ledger_entries where customer_id = $2 and (idempotency_key = $1 or idempotency_key like $1 || ':%') order by created_at asc`,
+        // EC:B21 — exact match only: the caller's key is never used as a pattern.
+        `select * from ledger_entries where customer_id = $2 and kind = 'consume'
+           and (consume_key = $1 or (consume_key is null and idempotency_key = $1)) order by created_at asc`,
         [input.idempotencyKey, input.customerId],
       );
       if (existing.rows.length) {
@@ -255,13 +257,15 @@ export class PostgresLedgerStore implements LedgerStore {
       for (let i = 0; i < writes.length; i++) {
         const w = writes[i];
         const id = `le_${randomUUID()}`;
-        const key = i === 0 ? input.idempotencyKey : `${input.idempotencyKey}:${i}`;
+        // EC:B21 — follow-up rows get a random key so they never collide with a key a caller picks;
+        // every row is found again through consume_key.
+        const key = i === 0 ? input.idempotencyKey : `consume-part:${randomUUID()}`;
         const reference = referenceToJson({ ...input.meta, grantId: w.grantId ?? undefined });
         const res = await client.query(
           `insert into ledger_entries
              (id, customer_id, pool, kind, amount, unit_price_minor, expires_at, source, reference,
-              idempotency_key, actor, reason)
-           values ($1,$2,$3,'consume',$4,$5,$6,'usage',$7,$8,$9,$10)
+              idempotency_key, actor, reason, consume_key)
+           values ($1,$2,$3,'consume',$4,$5,$6,'usage',$7,$8,$9,$10,$11)
            returning *`,
           [
             id,
@@ -274,6 +278,7 @@ export class PostgresLedgerStore implements LedgerStore {
             key,
             input.meta.actor ?? 'app',
             input.meta.reason ?? null,
+            input.idempotencyKey,
           ],
         );
         entries.push(rowToLedgerEntry(res.rows[0]));

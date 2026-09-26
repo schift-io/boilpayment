@@ -70,7 +70,7 @@ def test_migrate_applies_all_files_and_is_idempotent():
                 async with conn.cursor() as cur:
                     await cur.execute("select count(*) as n from paykit_migrations")
                     row = await cur.fetchone()
-                assert row["n"] == 11
+                assert row["n"] == 12
             finally:
                 await conn.close()
         finally:

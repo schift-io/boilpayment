@@ -243,10 +243,11 @@ class PostgresLedgerStore:
                 conn.cursor() as cur,
             ):
                 await cur.execute(
-                    "select * from ledger_entries where customer_id = %s "
-                    "and (idempotency_key = %s or idempotency_key like %s) "
+                    # EC:B21 — exact match only: the caller's key is never used as a pattern.
+                    "select * from ledger_entries where customer_id = %s and kind = 'consume' "
+                    "and (consume_key = %s or (consume_key is null and idempotency_key = %s)) "
                     "order by created_at asc",
-                    (input.customer_id, input.idempotency_key, f"{input.idempotency_key}:%"),
+                    (input.customer_id, input.idempotency_key, input.idempotency_key),
                 )
                 existing = await cur.fetchall()
                 if existing:
@@ -348,11 +349,10 @@ class PostgresLedgerStore:
                 entries: list[LedgerEntry] = []
                 for i, w in enumerate(writes):
                     entry_id = f"le_{uuid.uuid4()}"
-                    key = (
-                        input.idempotency_key
-                        if i == 0
-                        else f"{input.idempotency_key}:{i}"
-                    )
+                    # EC:B21 — follow-up rows get a random key so they never collide with a key a
+                    # caller picks; every row is found again through consume_key.
+                    key = input.idempotency_key if i == 0 else f"consume-part:{uuid.uuid4()}"
+
                     reference = _reference_to_json(input.meta)
                     if w["grant_id"] is not None:
                         reference["grantId"] = w["grant_id"]
@@ -360,8 +360,8 @@ class PostgresLedgerStore:
                         """
                         insert into ledger_entries
                           (id, customer_id, pool, kind, amount, unit_price_minor, expires_at, source, reference,
-                           idempotency_key, actor, reason)
-                        values (%s,%s,%s,'consume',%s,%s,%s,'usage',%s,%s,%s,%s)
+                           idempotency_key, actor, reason, consume_key)
+                        values (%s,%s,%s,'consume',%s,%s,%s,'usage',%s,%s,%s,%s,%s)
                         returning *
                         """,
                         (
@@ -375,6 +375,7 @@ class PostgresLedgerStore:
                             key,
                             input.actor or "app",
                             input.reason,
+                            input.idempotency_key,
                         ),
                     )
                     entries.append(_row_to_entry(await cur.fetchone()))

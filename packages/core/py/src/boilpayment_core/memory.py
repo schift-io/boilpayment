@@ -370,6 +370,14 @@ class InMemoryLedger:
                 self._consume_results[(input.customer_id, input.idempotency_key)] = result
                 return result
 
+            # EC:B21 -- a row key already taken by another operation (a grant appended with 'k#0',
+            # say) must not be answered with that row: refuse before writing anything.
+            for i in range(len(plan)):
+                if (input.customer_id, f"{input.idempotency_key}#{i}") in self._by_idempotency_key:
+                    raise PaymentKitError(
+                        f"idempotency key {input.idempotency_key} collides with an existing ledger row",
+                        "idempotency_key_conflict",
+                    )
             written: list[LedgerEntry] = []
             for i, (pool, amount, grant_id) in enumerate(plan):
                 # EC:L5 -- replace(), do not re-list: a field whitelist here silently drops

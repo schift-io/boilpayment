@@ -386,3 +386,22 @@ reports it pending on older databases. No migration is applied automatically by 
 0009 and 0010 replace the global indexes from 0002/0003). Every duplicate lookup filters by
 customer: a key another customer already used is a new operation for this customer, and the
 first customer's rows are never returned. The in-memory stores key their maps the same way.
+
+
+## [EC:B21] consume 멱등 조회는 정확한 일치
+
+```pseudo
+consume(input):
+   existing = select * from ledger_entries
+              where customer_id = input.customerId and kind = 'consume'
+                and (consume_key = input.idempotencyKey
+                     or (consume_key is null and idempotency_key = input.idempotencyKey))   # 0013 이전 행
+   if existing: return { ok, entries: existing, duplicated: true }
+   ... plan writes ...
+   for i, w in writes:
+      key = i == 0 ? input.idempotencyKey : 'consume-part:' + uuid()   # 호출자 키와 겹칠 수 없는 뒤쪽 행 키
+      insert (..., idempotency_key = key, consume_key = input.idempotencyKey)
+```
+
+호출자 키를 LIKE 패턴으로 쓰지 않는다. 이전 구현(`idempotency_key like key || ':%'`)은 `topup`,
+`%`, `_` 같은 키가 무관한 행에 걸려 차감 없이 중복으로 답했다.
