@@ -191,3 +191,53 @@ def test_ec_a15_forces_active_so_grant_is_not_deferred_for_stale_past_due():
         assert res.grant.entry.amount == 100
 
     run(scenario())
+
+
+def test_ec_a25_non_succeeded_payment_is_refused_without_writes():
+    import pytest
+    from boilpayment_core import PaymentKitError
+
+    for status in ("pending", "failed", "requires_action"):
+
+        async def scenario(status=status):
+            clock, ledger, repo = await setup()
+            sub = mk_sub()
+            await repo.subscriptions.put(sub)
+            nxt = Period(start=PERIOD.end, end=datetime(2024, 3, 1, tzinfo=UTC))
+            with pytest.raises(PaymentKitError) as exc:
+                await on_renewal_paid(
+                    OnRenewalPaidInput(
+                        sub=sub,
+                        payment=mk_payment(status=status, period=nxt),
+                        policy=resolve_policy(),
+                        ledger=ledger,
+                        repo=repo,
+                        clock=clock,
+                    )
+                )
+            assert exc.value.code == "renewal_payment_not_succeeded"
+            assert await ledger.entries("cust_1") == []
+            assert (await repo.subscriptions.get("sub_1")).current_period.end == PERIOD.end
+
+        run(scenario())
+
+
+def test_ec_a25_same_period_grants_once_payment_succeeded():
+    import pytest
+    from boilpayment_core import PaymentKitError
+
+    async def scenario():
+        clock, ledger, repo = await setup()
+        sub = mk_sub()
+        await repo.subscriptions.put(sub)
+        policy = resolve_policy()
+
+        def inp(payment):
+            return OnRenewalPaidInput(sub=sub, payment=payment, policy=policy, ledger=ledger, repo=repo, clock=clock)
+
+        with pytest.raises(PaymentKitError):
+            await on_renewal_paid(inp(mk_payment(status="pending")))
+        ok = await on_renewal_paid(inp(mk_payment()))
+        assert ok.grant.entry.amount == 100
+
+    run(scenario())

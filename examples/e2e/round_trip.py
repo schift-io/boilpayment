@@ -14,8 +14,9 @@ implied "same call shape" — see FINDINGS.md).
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from boilpayment_core import (
     Customer,
@@ -763,6 +764,86 @@ async def main() -> None:
             "revoked_count": len(grace_result.revoked),
             "balance": bal.available,
             "notifier_types": ",".join(n.type for n in notifier.sent),
+        },
+    )
+
+    # ── 10 EC:A25 renewal arrives while the payment is still pending, then settles ──
+    await repo.customers.put(
+        Customer(
+            id="cust2",
+            email="f@x.com",
+            provider_refs=[ProviderRef(provider="stripe", ref="cus_2")],
+            status="active",
+            created_at=clock.now(),
+        )
+    )
+    p10_start = clock.now()
+    p10 = Period(start=p10_start, end=p10_start + timedelta(days=30))
+    sub2 = Subscription(
+        id="sub2",
+        customer_id="cust2",
+        plan_id="planA",
+        provider="stripe",
+        provider_ref="sub_2",
+        status="active",
+        current_period=Period(start=p10_start - timedelta(days=30), end=p10_start),
+        anchor_day=1,
+        cancel_at_period_end=False,
+        grace_until=None,
+        billing_key=None,
+        scheduled_plan_id=None,
+        created_at=clock.now(),
+    )
+    await repo.subscriptions.put(sub2)
+    provider.set_subscription(sub2)
+    payment3 = Payment(
+        id="pay3",
+        customer_id="cust2",
+        provider="stripe",
+        provider_ref="pay_3",
+        subscription_id="sub2",
+        amount=Money(amount_minor=plan_a.prices[0].amount_minor, currency="USD"),
+        status="pending",
+        kind="subscription",
+        period=p10,
+        occurred_at=clock.now(),
+        failure=None,
+    )
+    await repo.payments.put(payment3)
+    provider.set_payment(payment3, "cus_2")
+    evt10 = {
+        "id": "evt_10",
+        "type": "payment.succeeded",
+        "occurred_at": clock.now().isoformat(),
+        "customer_ref": "cus_2",
+        "subscription_ref": "sub_2",
+        "payment_ref": "pay_3",
+        "amount": {"amount_minor": payment3.amount.amount_minor, "currency": "USD"},
+    }
+    r10 = await webhook.receive(
+        provider=provider, headers={"x-sig": "ok"}, raw_body=json.dumps(evt10), repo=repo, clock=clock
+    )
+    await webhook.process(
+        event_id=r10.event_id, providers={"stripe": provider}, handlers=handlers, repo=repo, clock=clock
+    )
+    # copy the fields now: the in-memory repo hands back the live row, which the retry below rewrites
+    pending_record = dataclasses.replace(await repo.webhook_events.get(r10.event_id))
+    bal_pending = await ledger.balance("cust2", "paid", clock.now())
+    provider.set_payment(dataclasses.replace(payment3, status="succeeded"), "cus_2")
+    await webhook.process(
+        event_id=r10.event_id, providers={"stripe": provider}, handlers=handlers, repo=repo, clock=clock
+    )
+    paid_record = await repo.webhook_events.get(r10.event_id)
+    bal_paid = await ledger.balance("cust2", "paid", clock.now())
+    _line(
+        "10",
+        "renewal_pending_then_paid",
+        {
+            "pending_status": pending_record.status,
+            "pending_error": pending_record.error,
+            "pending_balance": bal_pending.available,
+            "paid_status": paid_record.status,
+            "paid_balance": bal_paid.available,
         },
     )
 

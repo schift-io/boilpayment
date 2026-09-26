@@ -216,7 +216,7 @@ steps:
 output: bool
 ```
 
-## [EC:A7 A15 A17 B12] onRenewalPaid — 갱신 결제 성공 처리
+## [EC:A7 A15 A17 A25 B12] onRenewalPaid — 갱신 결제 성공 처리
 
 ```pseudo
 input: { sub, payment, policy, ledger, repo, clock }
@@ -232,6 +232,12 @@ steps:
   2. EC:A7 — 멱등: 이 주기(grant:{sub.id}:{period.start ISO})에 대한 grant 가 이미 있으면
      재활성화 없이 { sub, grant:{entry, duplicated:true, deferred:false}, rollover:no-op,
      duplicated:true, recovered:false } 를 반환한다 (같은 주기 안 재활성화 시 재지급 금지).
+  2b. EC:A25 — payment.status != 'succeeded' 이면 어떤 쓰기도 하기 전에
+     PaymentKitError('renewal_payment_not_succeeded', {subscriptionId, paymentId, status}) 를 던진다.
+     pending/draft 인보이스, requires_action, failed 는 돈이 들어온 것이 아니다. webhook 경로에서는
+     레코드가 failed 로 남고, 재시도(processPending/재전송)가 결제를 다시 조회(E3)해 succeeded 가
+     되는 순간 지급한다. 2번(이미 지급된 주기)이 먼저라 지급 뒤의 재전송은 계속 no-op 이다.
+     scheduler.tick 은 succeeded 일 때만 부르므로 영향이 없다.
   3. wasRecovering = sub.status == 'past_due'   (EC:A17 판단용)
   4. plan = repo.plans.get(sub.scheduledPlanId ?? sub.planId)   # 예약된 다운/업그레이드 반영
   5. EC:B2 — rollover = credits.rolloverOnRenewal({ sub, policy, ledger, clock, newPeriod: period })

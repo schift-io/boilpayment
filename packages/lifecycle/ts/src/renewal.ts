@@ -1,4 +1,4 @@
-// spec: packages/lifecycle/spec/lifecycle.pseudo.md — EC:A7 A15 A17 B12
+// spec: packages/lifecycle/spec/lifecycle.pseudo.md — EC:A7 A15 A17 A25 B12
 import { Clock, LedgerStore, PaymentKitError, Payment, Policy, Repo, Subscription } from 'boilpayment-core';
 import { grantForPeriod, GrantResult, rolloverOnRenewal, RolloverResult } from 'boilpayment-credits';
 
@@ -57,6 +57,15 @@ export async function onRenewalPaid(input: OnRenewalPaidInput): Promise<OnRenewa
       duplicated: true,
       recovered: needsAdvance && sub.status === 'past_due',
     };
+  }
+
+  // EC:A25 — only money that actually arrived buys a period. A pending/draft invoice (or any other
+  // non-succeeded status) is refused before any write; the webhook record fails and its retry
+  // re-fetches the payment, so the grant happens once the provider reports it succeeded.
+  if (payment.status !== 'succeeded') {
+    throw new PaymentKitError('Renewal payment has not succeeded', 'renewal_payment_not_succeeded', {
+      subscriptionId: sub.id, paymentId: payment.id, status: payment.status,
+    });
   }
 
   const wasRecovering = sub.status === 'past_due';

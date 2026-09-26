@@ -1,4 +1,4 @@
-"""spec: packages/lifecycle/spec/lifecycle.pseudo.md — EC:A7 A15 A17 B12"""
+"""spec: packages/lifecycle/spec/lifecycle.pseudo.md — EC:A7 A15 A17 A25 B12"""
 
 from __future__ import annotations
 
@@ -90,6 +90,16 @@ async def on_renewal_paid(input: OnRenewalPaidInput) -> OnRenewalPaidResult:
             rollover=_NO_ROLLOVER,
             duplicated=True,
             recovered=needs_advance and sub.status == "past_due",
+        )
+
+    # EC:A25 — only money that actually arrived buys a period. A pending/draft invoice (or any
+    # other non-succeeded status) is refused before any write; the webhook record fails and its
+    # retry re-fetches the payment, so the grant happens once the provider reports it succeeded.
+    if payment.status != "succeeded":
+        raise PaymentKitError(
+            "Renewal payment has not succeeded",
+            "renewal_payment_not_succeeded",
+            {"subscriptionId": sub.id, "paymentId": payment.id, "status": payment.status},
         )
 
     was_recovering = sub.status == "past_due"

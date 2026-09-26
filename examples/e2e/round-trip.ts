@@ -343,6 +343,42 @@ async function main() {
     balance: bal.available,
     notifier_types: notifier.sent.map((n) => n.type).join(','),
   });
+
+  // ── 10 EC:A25 renewal arrives while the payment is still pending, then settles ──
+  await repo.customers.put({ id: 'cust2', email: 'f@x.com', providerRefs: [{ provider: 'stripe', ref: 'cus_2' }], status: 'active', createdAt: clock.now() });
+  const p10Start = clock.now();
+  const p10 = { start: p10Start, end: new Date(p10Start.getTime() + 30 * 86_400_000) };
+  const sub2: Subscription = {
+    id: 'sub2', customerId: 'cust2', planId: 'planA', provider: 'stripe', providerRef: 'sub_2', status: 'active',
+    currentPeriod: { start: new Date(p10Start.getTime() - 30 * 86_400_000), end: p10Start }, anchorDay: 1,
+    cancelAtPeriodEnd: false, graceUntil: null, billingKey: null, scheduledPlanId: null, version: 0, createdAt: clock.now(),
+  };
+  await repo.subscriptions.put(sub2);
+  provider.setSubscription(sub2);
+  const payment3: Payment = {
+    id: 'pay3', customerId: 'cust2', provider: 'stripe', providerRef: 'pay_3', subscriptionId: 'sub2',
+    amount: { amountMinor: planA.prices[0].amountMinor, currency: 'USD' }, status: 'pending', kind: 'subscription',
+    period: p10, occurredAt: clock.now(), failure: null,
+  };
+  await repo.payments.put(payment3);
+  provider.setPayment(payment3, 'cus_2');
+  const evt10 = { id: 'evt_10', type: 'payment.succeeded', occurredAt: clock.now().toISOString(), customerRef: 'cus_2', subscriptionRef: 'sub_2', paymentRef: 'pay_3', amount: payment3.amount };
+  const r10 = await webhook.receive({ provider, headers: { 'x-sig': 'ok' }, rawBody: JSON.stringify(evt10), repo, clock });
+  await webhook.process({ eventId: r10.eventId!, providers: { stripe: provider }, handlers, repo, clock });
+  // copy the fields now: the in-memory repo hands back the live row, which the retry below rewrites
+  const pendingRecord = { ...(await repo.webhookEvents.get(r10.eventId!)) };
+  const balPending = await ledger.balance('cust2', 'paid', clock.now());
+  provider.setPayment({ ...payment3, status: 'succeeded' }, 'cus_2');
+  await webhook.process({ eventId: r10.eventId!, providers: { stripe: provider }, handlers, repo, clock });
+  const paidRecord = await repo.webhookEvents.get(r10.eventId!);
+  const balPaid = await ledger.balance('cust2', 'paid', clock.now());
+  line('10', 'renewal_pending_then_paid', {
+    pending_status: pendingRecord?.status,
+    pending_error: pendingRecord?.error,
+    pending_balance: balPending.available,
+    paid_status: paidRecord?.status,
+    paid_balance: balPaid.available,
+  });
 }
 
 main().catch((e) => {
