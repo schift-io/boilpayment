@@ -142,4 +142,98 @@ asyncio.run(main())
     ]);
     expect((await mockPayments()).slice(before).map((p) => p.status)).toEqual(['PAID', 'PAID']);
   }, 120_000);
+
+  // EC:A47 (round-5 audit A5-1): an app generated before A43 left every PortOne subscription months
+  // behind. After the upgrade, ticks every 10 minutes must charge once (the period containing now),
+  // not one missed period per tick. Postgres, TS and Python.
+  it('A47 TS on Postgres: four periods behind -> one charge, usable credits, period advanced to now', async () => {
+    const { dir, env } = await generate();
+    const billingKey = await issueBillingKey();
+    const before = (await mockPayments()).length;
+    const db = `paykit_test_a47_ts_${process.pid}_${Math.floor(Math.random() * 1e6)}`;
+    spawnSync('createdb', ['-h', '127.0.0.1', db]);
+    try {
+      await fs.writeFile(path.join(dir, 'harness.ts'), `
+import { createPaymentKit } from './paykit/index.js';
+import { FixedClock, SequentialIdGen, NoopLogger } from 'boilpayment-sdk/core';
+import { createPool, PostgresRepo, PostgresLedgerStore, migrate } from 'boilpayment-sdk/postgres';
+import config from './paykit.config.json' with { type: 'json' };
+const pool = createPool('postgres://127.0.0.1/${db}');
+await migrate({ pool, modules: ['core', 'credits', 'webhook', 'refund', 'cs'] } as any);
+const clock = new FixedClock(new Date('2026-05-15T09:00:00Z'));
+const ids = new SequentialIdGen('t');
+const repo = new PostgresRepo(pool); const ledger = new PostgresLedgerStore(pool);
+const kit = createPaymentKit(config as any, { clock, ids, repo, ledger, logger: new NoopLogger(), env: ${JSON.stringify(env)} } as any);
+const plan = config.plans[0] as any;
+await repo.plans.put(plan);
+await repo.customers.put({ id: 'c1', email: null, providerRefs: [], status: 'active', createdAt: new Date('2026-01-01T00:00:00Z') } as any);
+await repo.subscriptions.put({ id: 's_a47_ts', customerId: 'c1', planId: plan.id, provider: 'portone', providerRef: null, status: 'active', currentPeriod: { start: new Date('2026-01-01T00:00:00Z'), end: new Date('2026-02-01T00:00:00Z') }, anchorDay: 1, cancelAtPeriodEnd: false, graceUntil: null, billingKey: ${JSON.stringify(billingKey)}, scheduledPlanId: null, version: 0, currency: plan.prices[0].currency, createdAt: new Date('2026-01-01T00:00:00Z') } as any);
+const charged: number[] = [];
+for (let i = 0; i < 5; i++) {
+  if (i) clock.advance(10 * 60_000);
+  charged.push((await kit.cron.schedulerTick()).charged.length);
+}
+const sub = await repo.subscriptions.get('s_a47_ts');
+console.log(JSON.stringify({ charged, periodStart: sub!.currentPeriod.start.toISOString().slice(0, 10), usable: (await ledger.balance('c1', undefined, clock.now())).available }));
+await pool.end();
+`);
+      const res = spawnSync(path.join(ROOT, 'apps/cli/node_modules/.bin/tsx'), ['harness.ts'], { cwd: dir, encoding: 'utf8' });
+      expect(res.status, `${res.stdout}\n${res.stderr}`).toBe(0);
+      const out = JSON.parse(res.stdout.trim().split('\n').pop()!);
+      expect(out.charged).toEqual([1, 0, 0, 0, 0]);
+      expect(out.periodStart).toBe('2026-05-01');
+      expect(out.usable).toBeGreaterThanOrEqual(kitchenSinkConfig().plans[0].creditsPerPeriod);
+      expect((await mockPayments()).slice(before).map((p) => p.status)).toEqual(['PAID']);
+    } finally {
+      spawnSync('dropdb', ['-h', '127.0.0.1', '--if-exists', db]);
+    }
+  }, 120_000);
+
+  it('A47 Python on Postgres: four periods behind -> one charge', async () => {
+    const { dir, env } = await generate();
+    const billingKey = await issueBillingKey();
+    const before = (await mockPayments()).length;
+    const db = `paykit_test_a47_py_${process.pid}_${Math.floor(Math.random() * 1e6)}`;
+    spawnSync('createdb', ['-h', '127.0.0.1', db]);
+    try {
+      await fs.writeFile(path.join(dir, 'harness.py'), `
+import asyncio, importlib.util, json
+from datetime import datetime, timezone
+from boilpayment_core import Customer, Deps, FixedClock, SequentialIdGen, NoopLogger, Period, Plan, PlanPrice, Subscription
+from boilpayment.postgres import PostgresRepo, PostgresLedgerStore, migrate
+spec = importlib.util.spec_from_file_location('generated', ${JSON.stringify(path.join(dir, 'paykit/index.py'))})
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+DSN = 'postgresql://127.0.0.1/${db}'
+def d(s):
+    return datetime.fromisoformat(s).astimezone(timezone.utc)
+async def main():
+    await migrate(conninfo=DSN, modules=['core', 'credits', 'webhook', 'refund', 'cs'])
+    clock = FixedClock(d('2026-05-15T09:00:00Z'))
+    ids = SequentialIdGen('t')
+    repo = PostgresRepo(DSN); ledger = PostgresLedgerStore(DSN)
+    config = json.load(open(${JSON.stringify(path.join(dir, 'paykit.config.json'))}))
+    kit = mod.create_payment_kit(config, Deps(clock=clock, ids=ids, repo=repo, ledger=ledger, logger=NoopLogger(), notifier=None, providers={}, policy=None), json.loads(${JSON.stringify(JSON.stringify(env))}))
+    p = config['plans'][0]
+    await repo.plans.put(Plan(id=p['id'], name=p['name'], interval=p['interval'], credits_per_period=p['creditsPerPeriod'], usage_included=p['usageIncluded'], trial_days=p['trialDays'], prices=[PlanPrice(currency=x['currency'], amount_minor=x['amountMinor'], provider_price_refs=x.get('providerPriceRefs') or {}) for x in p['prices']]))
+    await repo.customers.put(Customer(id='c1', email=None, provider_refs=[], status='active', created_at=d('2026-01-01T00:00:00Z')))
+    await repo.subscriptions.put(Subscription(id='s_a47_py', customer_id='c1', plan_id=p['id'], provider='portone', provider_ref=None, status='active', current_period=Period(start=d('2026-01-01T00:00:00Z'), end=d('2026-02-01T00:00:00Z')), anchor_day=1, cancel_at_period_end=False, grace_until=None, billing_key=${JSON.stringify(billingKey)}, scheduled_plan_id=None, version=0, currency=p['prices'][0]['currency'], created_at=d('2026-01-01T00:00:00Z')))
+    charged = []
+    for i in range(5):
+        if i:
+            clock.advance(10 * 60_000)
+        charged.append(len((await kit['cron']['scheduler_tick']())['charged']))
+    sub = await repo.subscriptions.get('s_a47_py')
+    print(json.dumps({'charged': charged, 'periodStart': sub.current_period.start.date().isoformat()}))
+asyncio.run(main())
+`);
+      const res = spawnSync(path.join(ROOT, '.venv/bin/python'), [path.join(dir, 'harness.py')], { encoding: 'utf8' });
+      expect(res.status, `${res.stdout}\n${res.stderr}`).toBe(0);
+      const out = JSON.parse(res.stdout.trim().split('\n').pop()!);
+      expect(out).toEqual({ charged: [1, 0, 0, 0, 0], periodStart: '2026-05-01' });
+      expect((await mockPayments()).slice(before).map((p) => p.status)).toEqual(['PAID']);
+    } finally {
+      spawnSync('dropdb', ['-h', '127.0.0.1', '--if-exists', db]);
+    }
+  }, 120_000);
 });
