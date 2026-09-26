@@ -5,7 +5,15 @@ import asyncio
 from datetime import UTC, datetime
 
 import pytest
-from boilpayment_core import ConsumeInput, FixedClock, InMemoryLedger, LedgerReference, NewLedgerEntry, PaymentKitError, UuidIdGen
+from boilpayment_core import (
+    ConsumeInput,
+    FixedClock,
+    InMemoryLedger,
+    LedgerReference,
+    NewLedgerEntry,
+    PaymentKitError,
+    UuidIdGen,
+)
 
 
 def test_ec_b21_memory_consume_key_collision_is_refused() -> None:
