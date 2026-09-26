@@ -263,6 +263,23 @@ the version you expect actually shows up: `npm view <name> version`.
 
 ## 5. Publish — Python (PyPI)
 
+**Since 0.1.0 PyPI gets one distribution, `boilpayment`, not 14.** The generated code imports only
+the facade, and creating 14 new PyPI projects at once hit PyPI's "429 Too many new projects
+created" limit. Build and upload it with:
+
+```bash
+scripts/build-pypi-bundle.sh /tmp/boilpayment-pypi      # from the committed HEAD
+uvx twine check /tmp/boilpayment-pypi/*
+uvx twine upload /tmp/boilpayment-pypi/*
+```
+
+The script copies every module's import package plus the facade into one wheel and takes the union
+of the modules' external dependencies, so steps 2 and 3 (pinning internal deps, per-module
+`uv build`) are not needed for PyPI. `boilpayment-core`, `-credits`, `-notify` and `-polar` 0.1.0
+exist on PyPI from the first attempt; they are not used by `boilpayment` and are not updated.
+
+The per-module steps below are kept for reference only.
+
 ```bash
 uv publish --help   # confirm PYPI credentials (UV_PUBLISH_TOKEN or ~/.pypirc) are set first
 

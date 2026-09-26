@@ -139,6 +139,10 @@ Schedule the crons listed in your generated `INTEGRATION.md` (`dunningSweep`, `e
 | `-schema-postgres` | Postgres ledger and repo, migrations, retention |
 | `-stripe` / `-toss` / `-portone` / `-polar` | Provider adapters |
 
+The module packages (`-core` … `-polar`) are published separately on npm as `boilpayment-<module>`.
+On PyPI everything ships in the one `boilpayment` distribution (same import names:
+`boilpayment.core`, `boilpayment_core`, …), built by `scripts/build-pypi-bundle.sh`.
+
 Each package has `spec/*.pseudo.md` (the contract), `ts/` and `py/`.
 Architecture: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
