@@ -19,7 +19,7 @@ afterAll(async () => {
 });
 
 describe('migrate() idempotency', () => {
-  it('first call applies all 10 migration files in order and records them in paykit_migrations', async () => {
+  it('first call applies all 11 migration files in order and records them in paykit_migrations', async () => {
     const { applied } = await migrate({ pool, modules: ['core', 'credits', 'usage', 'webhook', 'refund', 'cs'] });
     expect(applied).toEqual([
       '0001_core.sql',
@@ -32,6 +32,7 @@ describe('migrate() idempotency', () => {
       '0009_ledger_idempotency_per_customer.sql',
       '0010_usage_idempotency_per_customer.sql',
       '0011_subscription_status_paused_incomplete.sql',
+      '0012_subscription_currency.sql',
     ]);
 
     const rows = await pool.query('select name from paykit_migrations order by name');
@@ -46,6 +47,7 @@ describe('migrate() idempotency', () => {
       '0009_ledger_idempotency_per_customer.sql',
       '0010_usage_idempotency_per_customer.sql',
       '0011_subscription_status_paused_incomplete.sql',
+      '0012_subscription_currency.sql',
     ]);
 
     // sanity: tables from every module actually exist
@@ -68,13 +70,13 @@ describe('migrate() idempotency', () => {
     expect(applied).toEqual([]);
     const after = await pool.query('select count(*)::int as n from paykit_migrations');
     expect(after.rows[0].n).toBe(before.rows[0].n);
-    expect(after.rows[0].n).toBe(10);
+    expect(after.rows[0].n).toBe(11);
   });
 
   it('third call (repeat) is still a no-op — consistent final state across repeated calls', async () => {
     const { applied } = await migrate({ pool, modules: ['core', 'credits', 'usage', 'webhook', 'refund', 'cs'] });
     expect(applied).toEqual([]);
     const rows = await pool.query('select count(*)::int as n from paykit_migrations');
-    expect(rows.rows[0].n).toBe(10);
+    expect(rows.rows[0].n).toBe(11);
   });
 });

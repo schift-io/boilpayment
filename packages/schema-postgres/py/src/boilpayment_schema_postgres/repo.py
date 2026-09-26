@@ -81,6 +81,7 @@ def _subscription_to_row(s: Subscription) -> dict[str, Any]:
         "grace_until": s.grace_until,
         "billing_key": s.billing_key,
         "scheduled_plan_id": s.scheduled_plan_id,
+        "currency": s.currency,  # EC:A28
         "version": getattr(s, "version", 0) or 0,  # EC:K1
         "created_at": s.created_at,
     }
@@ -100,6 +101,7 @@ def _row_to_subscription(r: dict[str, Any]) -> Subscription:
         grace_until=r["grace_until"],
         billing_key=r["billing_key"],
         scheduled_plan_id=r["scheduled_plan_id"],
+        currency=r.get("currency"),  # EC:A28
         version=int(r.get("version") or 0),  # EC:K1
         created_at=r["created_at"],
     )

@@ -229,6 +229,7 @@ export function normalizeSubscription(sub: Stripe.Subscription): Subscription {
     graceUntil: null,
     billingKey: null,
     scheduledPlanId: null,
+    currency: sub.currency ? sub.currency.toUpperCase() : null, // EC:A28
     version: 0, // provider-side row; the local repo row owns the EC:K1 optimistic lock
     createdAt: new Date(sub.created * 1000),
   };

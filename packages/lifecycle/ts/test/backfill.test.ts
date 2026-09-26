@@ -301,3 +301,19 @@ describe("backfill", () => {
     });
   });
 });
+
+describe("[EC:A28] backfill sets the subscription currency", () => {
+  it("[EC:A28] native: the provider's currency; self-scheduled: the row's, else the plan's only price", async () => {
+    const d = await setup();
+    d.stripe.subs.set("sub_1", { ...remote("sub_1", "cus_1"), currency: "KRW" });
+    await backfill({ ...d, rows: [
+      row({ subscriptionRef: "sub_1", planId: "pro" }),
+      row({ customerId: "u2", customerRef: "ck_2", provider: "toss", planId: "pro", billingKey: "bk_2",
+        periodStart: new Date("2026-03-01T00:00:00.000Z"), periodEnd: new Date("2026-04-01T00:00:00.000Z") }),
+      row({ customerId: "u3", customerRef: "ck_3", provider: "toss", planId: "pro", billingKey: "bk_3", currency: "EUR",
+        periodStart: new Date("2026-03-01T00:00:00.000Z"), periodEnd: new Date("2026-04-01T00:00:00.000Z") }),
+    ] });
+    const byCustomer = Object.fromEntries((await d.repo.subscriptions.list()).map((s) => [s.customerId, s.currency]));
+    expect(byCustomer).toEqual({ u1: "KRW", u2: "USD", u3: "EUR" });
+  });
+});

@@ -72,7 +72,7 @@ export async function registerStorePurchase(input: RegisterStorePurchaseInput): 
     const existing = await repo.subscriptions.get(subscriptionId);
     if (existing && existing.customerId !== customerId) throw refuse('iap_already_claimed', 'this subscription is recorded for another customer');
     if (!existing) {
-      const sub: Subscription = { ...v.subscription, id: subscriptionId, customerId, planId: plan.id, provider: input.provider, providerRef: v.subscriptionRef, version: 0 };
+      const sub: Subscription = { ...v.subscription, id: subscriptionId, customerId, planId: plan.id, provider: input.provider, providerRef: v.subscriptionRef, version: 0, currency: catalog.currency }; // EC:A28
       await repo.subscriptions.put(sub);
     }
     if (v.replacesSubscriptionRef) { // EC:N9 — one purchase is never held twice

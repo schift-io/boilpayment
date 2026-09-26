@@ -4,7 +4,12 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
-from boilpayment_core import CollectingNotifier, FixedClock, InMemoryRepo, resolve_policy
+from boilpayment_core import (
+    CollectingNotifier,
+    FixedClock,
+    InMemoryRepo,
+    resolve_policy,
+)
 from boilpayment_lifecycle.dunning import OnPaymentFailedInput, on_payment_failed
 from test_dunning import mk_sub
 

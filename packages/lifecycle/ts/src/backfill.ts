@@ -36,6 +36,8 @@ export interface BackfillRow {
   billingKey: string | null;
   periodStart: Date | null;
   periodEnd: Date | null;
+  /** EC:A28 — the currency the customer pays in; needed for plans priced in several currencies. */
+  currency?: string | null;
   /** Credit balance carried over from the old system (paid pool). */
   credits: number | null;
   creditsExpireAt: Date | null;
@@ -137,6 +139,7 @@ async function planRow(input: BackfillInput, row: BackfillRow): Promise<RowPlan>
         graceUntil: null,
         billingKey: null,
         scheduledPlanId: null,
+        currency: remote.currency ?? (await singlePriceCurrency(input, row.planId!)), // EC:A28
       },
     };
   }
@@ -164,6 +167,7 @@ async function planRow(input: BackfillInput, row: BackfillRow): Promise<RowPlan>
       graceUntil: null,
       billingKey: row.billingKey,
       scheduledPlanId: null,
+      currency: row.currency ?? (await singlePriceCurrency(input, row.planId!)), // EC:A28
     },
   };
 }
@@ -345,4 +349,10 @@ export function parseBackfillFile(content: string): BackfillRow[] {
     credits: int(r.credits),
     creditsExpireAt: date(r.credits_expire_at),
   }));
+}
+
+/** EC:A28 — a plan priced in one currency pins the subscription to it; otherwise unknown (null). */
+async function singlePriceCurrency(input: BackfillInput, planId: string): Promise<string | null> {
+  const plan = await input.repo.plans.get(planId);
+  return plan && plan.prices.length === 1 ? plan.prices[0].currency : null;
 }

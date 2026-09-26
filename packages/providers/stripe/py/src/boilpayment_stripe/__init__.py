@@ -480,6 +480,7 @@ def normalize_subscription(sub: Any) -> Subscription:
         billing_key=None,
         scheduled_plan_id=None,
         created_at=_dt(_get(sub, "created")),
+        currency=(_get(sub, "currency") or "").upper() or None,  # EC:A28
     )
 
 

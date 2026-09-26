@@ -77,7 +77,7 @@ export async function downgrade(input: DowngradeInput): Promise<DowngradeResult>
       // never needs an immediate charge (price only goes down), so there's nothing to bill here.
       if (provider.capabilities().nativeSubscriptions) {
         if (sub.providerRef === null) throw new PaymentKitError('native subscription mutation requires its provider reference', 'subscription_provider_ref_required');
-        const priceRef = resolvePriceRef(newPlan, sub.provider);
+        const priceRef = resolvePriceRef(newPlan, sub.provider, sub.currency);
         await scopeProvider(provider, input.correlationId).changeSubscription(sub.providerRef, { newPriceRef: priceRef, proration: 'immediate', resetAnchor: false });
       }
 

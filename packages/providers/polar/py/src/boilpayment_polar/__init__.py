@@ -135,6 +135,7 @@ def normalize_subscription(sub: dict[str, Any]) -> Subscription:
         billing_key=None,
         scheduled_plan_id=None,
         created_at=_parse_dt(sub.get("created_at")),
+        currency=sub["currency"].upper() if isinstance(sub.get("currency"), str) else None,  # EC:A28
     )
 
 

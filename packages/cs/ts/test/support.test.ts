@@ -90,6 +90,8 @@ it('keeps native subscription entitlement from sale after catalog credits change
   const grants = await input.ledger.entries('customer', { kind: 'grant' });
   expect(grants[0]?.amount).toBe(100); expect(grants[0]?.source).toBe('subscription');
   expect(grants[0]?.expiresAt).toEqual(period.end);
+  // EC:A28 — the subscription remembers the currency it was bought in
+  expect((await input.repo.subscriptions.get('subscription:stripe:sub_remote'))?.currency).toBe('USD');
 });
 it('finishes a pending case only after persisted confirmed settlement', async () => {
   const input = await setup(); await recoverMissingGrant(input);

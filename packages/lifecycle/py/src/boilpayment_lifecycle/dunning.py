@@ -29,7 +29,7 @@ from boilpayment_credits import (
     grant_for_period,
 )
 
-from .internal import replace_sub
+from .internal import price_for_subscription, replace_sub
 from .retry import retry_on_version_conflict
 
 _HOUR = timedelta(hours=1)
@@ -387,12 +387,12 @@ async def run_retry(input: RunRetryInput) -> RunRetryResult:
             return RunRetryResult(outcome="deferred_to_provider", sub=sub, grants=[])
 
         plan = await repo.plans.get(sub.plan_id)
-        if plan is None or not plan.prices:
+        price = price_for_subscription(plan, sub) if plan is not None else None  # EC:A28
+        if plan is None or price is None:
             item.status = "failed"
             item.attempts += 1
             await repo.outbox.put(item)
             return RunRetryResult(outcome="failed", sub=sub, grants=[])
-        price = plan.prices[0]
         # Deterministic per (sub, attempt) — a version-conflict retry of this whole function
         # re-issues the same idempotency_key, safe even if the first attempt already reached the
         # provider (same pattern as scheduler.tick's charge:{sub.id}:{period.end} key).

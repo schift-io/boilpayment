@@ -10,7 +10,9 @@ from boilpayment_core import (
     LedgerReference,
     LedgerStore,
     NewLedgerEntry,
+    PaymentKitError,
     Plan,
+    PlanPrice,
     Pool,
     Subscription,
 )
@@ -32,7 +34,12 @@ def scope_provider(provider: object, correlation_id: str | None):
     return scope(correlation_id) if callable(scope) else provider
 
 
-def resolve_price_ref(plan: Plan, provider: str) -> str:
+def resolve_price_ref(plan: Plan, provider: str, currency: str | None = None) -> str:
+    # EC:A28 -- the price in the subscription's currency first.
+    if currency:
+        for p in plan.prices:
+            if p.currency == currency and p.provider_price_refs and p.provider_price_refs.get(provider):
+                return p.provider_price_refs[provider]
     for p in plan.prices:
         if p.provider_price_refs and p.provider_price_refs.get(provider):
             return p.provider_price_refs[provider]
@@ -41,6 +48,27 @@ def resolve_price_ref(plan: Plan, provider: str) -> str:
         if ref:
             return ref
     return plan.id
+
+
+def price_for_subscription(plan: Plan, sub: Subscription) -> PlanPrice | None:
+    """EC:A28 -- the plan price a subscription is charged: the one in its currency. A subscription
+    written before `currency` existed falls back to the first price (previous behaviour). None when
+    the plan has no usable price, so the caller refuses the charge instead of switching currency."""
+    if sub.currency:
+        return next((p for p in plan.prices if p.currency == sub.currency), None)
+    return plan.prices[0] if plan.prices else None
+
+
+def require_price_for_subscription(plan: Plan, sub: Subscription) -> PlanPrice:
+    """EC:A28 -- price_for_subscription, raising `plan_price_missing` when there is none."""
+    price = price_for_subscription(plan, sub)
+    if price is None:
+        raise PaymentKitError(
+            f"plan {plan.id} has no price in {sub.currency or 'any currency'}",
+            "plan_price_missing",
+            {"planId": plan.id, "currency": sub.currency},
+        )
+    return price
 
 
 async def revoke_pool_balance(

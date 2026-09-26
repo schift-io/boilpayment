@@ -64,6 +64,8 @@ class BackfillRow:
     billing_key: str | None = None
     period_start: datetime | None = None
     period_end: datetime | None = None
+    # EC:A28 -- the currency the customer pays in; needed for plans priced in several currencies.
+    currency: str | None = None
     # Credit balance carried over from the old system (paid pool).
     credits: int | None = None
     credits_expire_at: datetime | None = None
@@ -169,6 +171,8 @@ async def _plan_row(input: BackfillInput, row: BackfillRow) -> _RowPlan:
                 "grace_until": None,
                 "billing_key": None,
                 "scheduled_plan_id": None,
+                # EC:A28
+                "currency": remote.currency or await _single_price_currency(input, row.plan_id),
             }
         )
 
@@ -200,6 +204,8 @@ async def _plan_row(input: BackfillInput, row: BackfillRow) -> _RowPlan:
             "grace_until": None,
             "billing_key": row.billing_key,
             "scheduled_plan_id": None,
+            # EC:A28
+            "currency": row.currency or await _single_price_currency(input, row.plan_id),
         }
     )
 
@@ -325,3 +331,9 @@ def parse_backfill_file(content: str) -> list[BackfillRow]:
         )
         for r in records
     ]
+
+
+async def _single_price_currency(input: BackfillInput, plan_id: str | None) -> str | None:
+    """EC:A28 -- a plan priced in one currency pins the subscription to it; otherwise None."""
+    plan = await input.repo.plans.get(plan_id) if plan_id else None
+    return plan.prices[0].currency if plan is not None and len(plan.prices) == 1 else None

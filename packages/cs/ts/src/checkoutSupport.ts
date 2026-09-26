@@ -77,7 +77,8 @@ export async function registerCompletedCheckout(input: RegisterCompletedCheckout
     subscriptionId = `subscription:${snapshot.provider}:${subscriptionRef}`;
     period = live.period ?? liveSub.currentPeriod;
     const existing = await input.repo.subscriptions.get(subscriptionId);
-    if (!existing) await input.repo.subscriptions.put({ ...liveSub, id: subscriptionId, customerId: snapshot.customerId, planId: snapshot.plan.id, provider: snapshot.provider, providerRef: subscriptionRef });
+    // EC:A28 — the subscription is charged in the currency it was bought in.
+    if (!existing) await input.repo.subscriptions.put({ ...liveSub, id: subscriptionId, customerId: snapshot.customerId, planId: snapshot.plan.id, provider: snapshot.provider, providerRef: subscriptionRef, currency: snapshot.price.currency });
   }
   const purchase: PurchaseSnapshot = { ...snapshot, paymentId, paymentRef: input.paymentRef,
     purchasedAt: live.occurredAt.toISOString(), subscriptionId, period: period ? { start: period.start.toISOString(), end: period.end.toISOString() } : null };

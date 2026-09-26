@@ -18,7 +18,7 @@ import {
   serializeSubscription,
 } from 'boilpayment-core';
 import { nextPeriod, prorationRatio } from './period.js';
-import { resolvePriceRef, scopeProvider } from './internal.js';
+import { priceForSubscription, requirePriceForSubscription, resolvePriceRef, scopeProvider } from './internal.js';
 
 export interface UpgradeInput {
   sub: Subscription;
@@ -85,12 +85,13 @@ export async function upgrade(input: UpgradeInput): Promise<UpgradeResult> {
       const scopedProvider = scopeProvider(provider, input.correlationId);
       if (provider.capabilities().nativeSubscriptions) {
         if (sub.providerRef === null) throw new PaymentKitError('native subscription mutation requires its provider reference', 'subscription_provider_ref_required');
-        const priceRef = resolvePriceRef(newPlan, sub.provider);
+        const priceRef = resolvePriceRef(newPlan, sub.provider, sub.currency);
         await scopedProvider.changeSubscription(sub.providerRef, { newPriceRef: priceRef, proration: 'immediate', resetAnchor });
       } else {
         if (!sub.billingKey) throw new PaymentKitError('upgrade requires a billing key for self-scheduling providers', 'billing_key_required');
-        const oldPrice = oldPlan.prices[0]; // representative price per plan — see spec note #4
-        const newPrice = newPlan.prices[0];
+        // EC:A28 — both prices in the subscription's currency (spec note #4 used the first price).
+        const oldPrice = priceForSubscription(oldPlan, sub) ?? undefined;
+        const newPrice = requirePriceForSubscription(newPlan, sub);
         const priceDeltaMinor = (newPrice?.amountMinor ?? 0) - (oldPrice?.amountMinor ?? 0);
         const moneyRatio = prorationRatio(sub.currentPeriod, now, policy.proration.denominator);
         const proratedMoneyDelta = Math.floor(priceDeltaMinor * moneyRatio);

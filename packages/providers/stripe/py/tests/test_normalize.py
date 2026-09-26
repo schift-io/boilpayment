@@ -267,6 +267,11 @@ def test_ec_f_stripe_subscription_status_table():
         assert result.status == expected, stripe_status
 
 
+def test_ec_a28_stripe_subscription_currency_carried():
+    assert normalize_subscription(_sub(currency="krw")).currency == "KRW"
+    assert normalize_subscription(_sub()).currency is None
+
+
 def test_ec_f_stripe_subscription_unmapped_status_defaults_to_expired():
     assert normalize_subscription(_sub(status="some_future_status")).status == "expired"
 

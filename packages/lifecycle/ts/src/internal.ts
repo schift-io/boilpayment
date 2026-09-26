@@ -1,9 +1,28 @@
 // Shared helpers, not part of the public spec surface.
-import { Clock, LedgerEntry, LedgerReference, LedgerStore, PaymentProvider, Plan, Pool, ProviderName } from 'boilpayment-core';
+import { Clock, LedgerEntry, LedgerReference, LedgerStore, PaymentKitError, PaymentProvider, Plan, PlanPrice, Pool, ProviderName, Subscription } from 'boilpayment-core';
 
-export function resolvePriceRef(plan: Plan, provider: ProviderName): string {
-  const withRef = plan.prices.find((p) => p.providerPriceRefs?.[provider]);
+export function resolvePriceRef(plan: Plan, provider: ProviderName, currency?: string | null): string {
+  // EC:A28 — the price in the subscription's currency first.
+  const inCurrency = currency ? plan.prices.find((p) => p.currency === currency && p.providerPriceRefs?.[provider]) : undefined;
+  const withRef = inCurrency ?? plan.prices.find((p) => p.providerPriceRefs?.[provider]);
   return withRef?.providerPriceRefs?.[provider] ?? plan.prices[0]?.providerPriceRefs?.[provider] ?? plan.id;
+}
+
+/**
+ * EC:A28 — the plan price a subscription is charged: the one in its currency. A subscription
+ * written before `currency` existed falls back to the first price (previous behaviour). Returns null
+ * when the plan has no usable price, so the caller refuses the charge instead of switching currency.
+ */
+export function priceForSubscription(plan: Plan, sub: Pick<Subscription, 'currency'>): PlanPrice | null {
+  if (sub.currency) return plan.prices.find((p) => p.currency === sub.currency) ?? null;
+  return plan.prices[0] ?? null;
+}
+
+/** EC:A28 — priceForSubscription, throwing `plan_price_missing` when there is none. */
+export function requirePriceForSubscription(plan: Plan, sub: Pick<Subscription, 'currency'>): PlanPrice {
+  const price = priceForSubscription(plan, sub);
+  if (!price) throw new PaymentKitError(`plan ${plan.id} has no price in ${sub.currency ?? 'any currency'}`, 'plan_price_missing', { planId: plan.id, currency: sub.currency ?? null });
+  return price;
 }
 
 /**

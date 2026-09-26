@@ -88,6 +88,8 @@ async def register_completed_checkout(input: RegisterCompletedCheckoutInput) -> 
                     plan_id=snapshot.plan.id,
                     provider=snapshot.provider,
                     provider_ref=subscription_ref,
+                    # EC:A28 -- the subscription is charged in the currency it was bought in.
+                    currency=snapshot.price.currency,
                 )
             )
     purchase = PurchaseSnapshot(

@@ -63,6 +63,7 @@ function subscriptionToRow(s: Subscription): Record<string, unknown> {
     grace_until: s.graceUntil,
     billing_key: s.billingKey,
     scheduled_plan_id: s.scheduledPlanId,
+    currency: s.currency ?? null, // EC:A28
     version: s.version ?? 0,
     created_at: s.createdAt,
   };
@@ -82,6 +83,7 @@ function rowToSubscription(r: Record<string, unknown>): Subscription {
     graceUntil: r.grace_until ? new Date(r.grace_until as string) : null,
     billingKey: (r.billing_key as string) ?? null,
     scheduledPlanId: (r.scheduled_plan_id as string) ?? null,
+    ...(r.currency ? { currency: r.currency as string } : {}), // EC:A28 — absent on rows without one
     version: Number(r.version ?? 0), // EC:K1
     createdAt: new Date(r.created_at as string),
   };

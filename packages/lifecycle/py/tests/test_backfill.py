@@ -276,3 +276,20 @@ def test_parses_csv_and_json():
         "bk",
         None,
     )
+
+
+def test_ec_a28_backfill_sets_subscription_currency():
+    import dataclasses
+
+    async def run():
+        deps = await setup()
+        deps["providers"]["stripe"].subs["sub_1"] = dataclasses.replace(remote("sub_1", "cus_1"), currency="KRW")
+        period = {"period_start": datetime(2026, 3, 1, tzinfo=UTC), "period_end": datetime(2026, 4, 1, tzinfo=UTC)}
+        await go(deps, [
+            row(subscription_ref="sub_1", plan_id="pro"),
+            row(customer_id="u2", customer_ref="ck_2", provider="toss", plan_id="pro", billing_key="bk_2", **period),
+            row(customer_id="u3", customer_ref="ck_3", provider="toss", plan_id="pro", billing_key="bk_3", currency="EUR", **period),
+        ])
+        return {s.customer_id: s.currency for s in await deps["repo"].subscriptions.list()}
+
+    assert asyncio.run(run()) == {"u1": "KRW", "u2": "USD", "u3": "EUR"}

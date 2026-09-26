@@ -23,7 +23,7 @@ from boilpayment_core import (
 )
 
 from .dunning import OnPaymentFailedInput, on_payment_failed
-from .internal import scope_provider
+from .internal import price_for_subscription, scope_provider
 from .period import next_period
 from .renewal import OnRenewalPaidInput, on_renewal_paid
 from .retry import retry_on_version_conflict
@@ -128,9 +128,10 @@ async def tick(input: SchedulerTickInput) -> SchedulerTickResult:
             ):
                 return None
             plan = await repo.plans.get(sub.plan_id)
-            if plan is None or not plan.prices:
+            # EC:A28 -- the price in the subscription's currency; none means no charge.
+            price = price_for_subscription(plan, sub) if plan is not None else None
+            if plan is None or price is None:
                 return ("failed", sub)
-            price = plan.prices[0]
             # Transport errors and local persistence errors do not prove a declined charge.
             # Propagate them for reconciliation instead of starting customer dunning.
             payment = await scope_provider(provider, correlation_id).charge_billing_key(

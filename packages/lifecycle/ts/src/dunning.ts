@@ -15,6 +15,7 @@ import {
 } from 'boilpayment-core';
 import { grantForPeriod, GrantResult } from 'boilpayment-credits';
 import { retryOnVersionConflict } from './retry.js';
+import { priceForSubscription } from './internal.js';
 
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
@@ -280,13 +281,13 @@ export async function runRetry(input: RunRetryInput): Promise<RunRetryResult> {
     }
 
     const plan = await repo.plans.get(sub.planId);
-    if (!plan || plan.prices.length === 0) {
+    const price = plan ? priceForSubscription(plan, sub) : null; // EC:A28
+    if (!plan || !price) {
       item.status = 'failed';
       item.attempts += 1;
       await repo.outbox.put(item);
       return { outcome: 'failed' as const, sub, grants: [] };
     }
-    const price = plan.prices[0];
     // Deterministic per (sub, attempt) — a version-conflict retry of this whole function
     // re-issues the same idempotencyKey, safe even if the first attempt already reached the
     // provider (same pattern as scheduler.tick's charge:{sub.id}:{period.end} key).

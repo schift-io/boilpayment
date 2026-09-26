@@ -5,7 +5,7 @@ import { onRenewalPaid } from './renewal.js';
 import { onPaymentFailed } from './dunning.js';
 import { nextPeriod } from './period.js';
 import { retryOnVersionConflict } from './retry.js';
-import { scopeProvider } from './internal.js';
+import { priceForSubscription, scopeProvider } from './internal.js';
 
 export interface DueSubscriptionsInput {
   repo: Repo;
@@ -81,10 +81,11 @@ export async function tick(input: SchedulerTickInput): Promise<SchedulerTickResu
         return null;
       }
       const plan = await repo.plans.get(sub.planId);
-      if (!plan || plan.prices.length === 0) {
+      // EC:A28 — the price in the subscription's currency; none means no charge (never another currency).
+      const price = plan ? priceForSubscription(plan, sub) : null;
+      if (!plan || !price) {
         return { kind: 'failed' as const, sub };
       }
-      const price = plan.prices[0];
       // Transport exceptions do not prove a declined charge. Propagate for reconciliation;
       // local renewal/ledger failures must likewise never trigger another payment or dunning.
       const payment = await scopeProvider(provider, correlationId).chargeBillingKey({

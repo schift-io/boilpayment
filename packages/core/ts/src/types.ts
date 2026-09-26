@@ -201,6 +201,12 @@ export interface Subscription {
   billingKey: string | null; // Toss/Portone self-scheduling
   scheduledPlanId: string | null; // pending downgrade / next_period change
   /**
+   * EC:A28 — the currency the subscription was bought in. Renewals, dunning retries and upgrade
+   * proration charge the plan price in this currency. Null/absent on rows written before it
+   * existed; those fall back to the plan's first price, as before.
+   */
+  currency?: string | null;
+  /**
    * EC:K1 — optimistic lock. Every writer must pass the row it read; `Repo.subscriptions.put` rejects
    * a stale version with `PaymentKitError('subscription_version_conflict')` and bumps it on success.
    * Without it an upgrade racing a renewal webhook silently loses one of the two writes.

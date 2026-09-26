@@ -357,6 +357,10 @@ class Subscription:
     # success. Without it an upgrade racing a renewal webhook silently loses one of the two writes.
     version: int = 0
     created_at: datetime
+    # EC:A28 -- the currency the subscription was bought in; renewals, dunning retries and upgrade
+    # proration charge the plan price in it. None on rows written before it existed (they keep the
+    # plan's first price, as before).
+    currency: str | None = None
 
 
 PaymentStatus = Literal[

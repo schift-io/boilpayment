@@ -545,3 +545,18 @@ recoverMissingGrants.
 
 A subscription that never paid (`incomplete`) has no access to keep: a failed first payment returns
 the subscription unchanged, with no grace period, retries or notices.
+
+## [EC:A28] Charge in the subscription's currency
+
+```pseudo
+priceForSubscription(plan, sub):
+   if sub.currency: return plan.prices.find(p => p.currency == sub.currency) ?? null   # never another currency
+   return plan.prices[0] ?? null                                                      # rows written before currency existed
+scheduler.tick / dunning.runRetry: price = priceForSubscription(plan, sub); none -> failed, no charge
+upgrade (self-scheduled): old/new price = priceForSubscription(...) (new: required, plan_price_missing)
+resolvePriceRef(plan, provider, sub.currency): the provider price ref of the same currency first
+```
+
+Currency is recorded when the subscription is created: checkout (the captured sale price), backfill
+(provider subscription currency, else the row's `currency`, else the plan's only price), in-app
+purchases (the matched catalog price), and the Stripe/Polar subscription mappers.

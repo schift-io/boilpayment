@@ -111,6 +111,7 @@ export function normalizeSubscription(sub: Record<string, any>): Subscription {
     graceUntil: null,
     billingKey: null,
     scheduledPlanId: null,
+    currency: typeof sub.currency === 'string' ? sub.currency.toUpperCase() : null, // EC:A28
     version: 0, // provider-side row; the local repo row owns the EC:K1 optimistic lock
     createdAt: new Date(sub.created_at),
   };

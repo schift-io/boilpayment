@@ -189,6 +189,7 @@ async def register_store_purchase(
                     provider=name,
                     provider_ref=v.subscription_ref,
                     version=0,  # type: ignore[arg-type]
+                    currency=catalog.currency,  # EC:A28
                 )
             )
         if v.replaces_subscription_ref:  # EC:N9 -- one purchase is never held twice

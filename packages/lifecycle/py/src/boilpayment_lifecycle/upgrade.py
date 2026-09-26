@@ -27,7 +27,13 @@ from boilpayment_core import (
     serialize_subscription,
 )
 
-from .internal import replace_sub, resolve_price_ref, scope_provider
+from .internal import (
+    price_for_subscription,
+    replace_sub,
+    require_price_for_subscription,
+    resolve_price_ref,
+    scope_provider,
+)
 from .period import next_period, proration_ratio
 
 
@@ -138,7 +144,7 @@ async def _do_upgrade(input: UpgradeInput) -> UpgradeResult:
     if provider.capabilities().native_subscriptions:
         if sub.provider_ref is None:
             raise PaymentKitError("native subscription mutation requires its provider reference", "subscription_provider_ref_required")
-        price_ref = resolve_price_ref(new_plan, sub.provider)
+        price_ref = resolve_price_ref(new_plan, sub.provider, sub.currency)
         await scoped_provider.change_subscription(
             sub.provider_ref,
             new_price_ref=price_ref,
@@ -151,10 +157,9 @@ async def _do_upgrade(input: UpgradeInput) -> UpgradeResult:
                 "upgrade requires a billing key for self-scheduling providers",
                 "billing_key_required",
             )
-        old_price = (
-            old_plan.prices[0] if old_plan.prices else None
-        )  # representative price per plan — see spec note #4
-        new_price = new_plan.prices[0] if new_plan.prices else None
+        # EC:A28 -- both prices in the subscription's currency (spec note #4 used the first price).
+        old_price = price_for_subscription(old_plan, sub)
+        new_price = require_price_for_subscription(new_plan, sub)
         price_delta_minor = (new_price.amount_minor if new_price else 0) - (
             old_price.amount_minor if old_price else 0
         )

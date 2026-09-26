@@ -42,6 +42,7 @@
 | A25 | 갱신 결제가 아직 확정 전(pending·draft 인보이스, requires_action)이거나 실패인데 갱신 지급 경로로 들어옴 | (정책 키 없음 — 돈이 들어오지 않은 주기는 지급하지 않는다) | `lifecycle.onRenewalPaid` 가 `payment.status !== 'succeeded'` 면 쓰기 전에 `PaymentKitError('renewal_payment_not_succeeded')`. webhook 레코드는 failed 로 남고 재시도가 결제를 다시 조회해 succeeded 가 되면 한 번 지급(A7 멱등키 그대로). 이미 지급된 주기의 재전송은 A7 no-op. scheduler 는 succeeded 일 때만 호출하므로 변화 없음 | lifecycle · webhook | P0 |
 | A26 | 자체 스케줄 갱신 결제(Toss, PortOne scheduler=self)가 로컬 결제 행으로 남지 않음 (Toss 는 빌링 결제에 webhook 을 보내지 않음) | (구현 규칙) | `scheduler.tick` 이 성공한 청구를 결제 행(kind `subscription`, 구독 id, 청구 기간)으로 저장한 뒤 `onRenewalPaid` 로 지급하고 지급은 그 행을 가리킨다. 같은 청구의 재시도는 `(provider, providerRef)` 행을 다시 쓴다. 실패한 청구는 행 없이 dunning 으로 | lifecycle | P0 |
 | A27 | 결제사 구독이 `paused`(결제수단 없이 트라이얼 종료, 인보이스 없음) 또는 `incomplete`(첫 결제 전) | (구현 규칙) | 로컬 상태도 `paused` / `incomplete` 로 두고 권한이 없는 상태로 본다: `usage.check` 는 `subscription_inactive` 로 거절, 첫 결제 실패에 dunning·유예를 시작하지 않는다. `subscription.updated` webhook 이 결제사 상태를 다시 조회해 이 두 상태로 들어가고 나오는 전이만 반영(재개, 첫 결제 완료). 나머지 전이는 dunning·갱신·취소 처리기 몫. Postgres 는 0011 이 상태 제약을 넓힌다 | core + lifecycle + usage + webhook + providers | P0 |
+| A28 | 여러 통화로 가격을 둔 플랜의 갱신·dunning 재시도·업그레이드 청구 | (구현 규칙) | 구독이 산 통화(`subscription.currency`)를 저장하고(checkout, backfill, 인앱결제, Stripe/Polar 조회값), 청구는 그 통화의 플랜 가격으로 한다. 플랜에 그 통화 가격이 없으면 다른 통화로 청구하지 않고 실패(`plan_price_missing`). 통화가 없는 옛 행은 첫 가격을 쓴다(이전 동작). 네이티브 가격 ref 도 같은 통화의 것을 고른다. Postgres 는 0012 가 열을 더한다 | core + lifecycle + cs + providers + schema-postgres | P0 |
 
 ## B. 크레딧 원장
 

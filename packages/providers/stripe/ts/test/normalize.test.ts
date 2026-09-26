@@ -233,6 +233,10 @@ describe('[EC:F(Stripe)] normalizeSubscription', () => {
     });
   }
 
+  it('[EC:A28] the subscription currency is carried (upper case), null when absent', () => {
+    expect([normalizeSubscription(sub({ currency: 'krw' })).currency, normalizeSubscription(sub()).currency]).toEqual(['KRW', null]);
+  });
+
   it('[EC:F(Stripe)] unmapped status defaults to expired', () => {
     expect(normalizeSubscription(sub({ status: 'some_future_status' })).status).toBe('expired');
   });
