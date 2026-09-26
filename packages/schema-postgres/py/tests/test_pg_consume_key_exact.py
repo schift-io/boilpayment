@@ -49,12 +49,14 @@ async def _legacy_customer(db, repo, ledger) -> str:
     """What the pre-0013 build wrote for consume('job', 80) over two grants: 'job' and 'job:1'."""
     cid = await _customer(repo, ledger, [("g", 100)])
     import psycopg
+    # One transaction, so both rows get the same now() -- with microseconds, as the old build wrote them.
     async with await psycopg.AsyncConnection.connect(db.dsn) as conn:
-        for key, amount in (("job", -50), ("job:1", -30)):
-            await conn.execute(
-                "insert into ledger_entries (id, customer_id, pool, kind, amount, source, reference, idempotency_key, actor, created_at) "
-                "values (%s, %s, 'paid', 'consume', %s, 'usage', '{}'::jsonb, %s, 'app', '2026-01-01T00:00:00Z')",
-                (f"le_{uuid.uuid4()}", cid, amount, key))
+        async with conn.transaction():
+            for key, amount in (("job", -50), ("job:1", -30)):
+                await conn.execute(
+                    "insert into ledger_entries (id, customer_id, pool, kind, amount, source, reference, idempotency_key, actor) "
+                    "values (%s, %s, 'paid', 'consume', %s, 'usage', '{}'::jsonb, %s, 'app')",
+                    (f"le_{uuid.uuid4()}", cid, amount, key))
         await conn.execute("select paykit_refresh_balance(%s)", (cid,))
     return cid
 

@@ -63,11 +63,16 @@ describe('[EC:B22] consume rows written before 0013 (consume_key null) after the
     await ledger.append({ customerId: id, pool: 'paid', kind: 'grant', amount: 100, unitPriceMinor: null, currency: null,
       expiresAt: null, source: 'topup', reference: {}, idempotencyKey: 'g', actor: 'test', reason: null });
     // What the pre-0013 build wrote for consume('job', 80) split over two grants: 'job' and 'job:1' in one transaction.
-    const at = '2026-01-01T00:00:00Z';
-    for (const [key, amount] of [['job', -50], ['job:1', -30]] as const) {
-      await db.pool.query(`insert into ledger_entries (id, customer_id, pool, kind, amount, source, reference, idempotency_key, actor, created_at)
-        values ($1, $2, 'paid', 'consume', $3, 'usage', '{}'::jsonb, $4, 'app', $5)`, [`le_${randomUUID()}`, id, amount, key, at]);
-    }
+    // One transaction, so both rows get the same now() — with microseconds, as the old build wrote them.
+    const client = await db.pool.connect();
+    try {
+      await client.query('begin');
+      for (const [key, amount] of [['job', -50], ['job:1', -30]] as const) {
+        await client.query(`insert into ledger_entries (id, customer_id, pool, kind, amount, source, reference, idempotency_key, actor)
+          values ($1, $2, 'paid', 'consume', $3, 'usage', '{}'::jsonb, $4, 'app')`, [`le_${randomUUID()}`, id, amount, key]);
+      }
+      await client.query('commit');
+    } finally { client.release(); }
     await db.pool.query('select paykit_refresh_balance($1)', [id]);
     return id;
   }

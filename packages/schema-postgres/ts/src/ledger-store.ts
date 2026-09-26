@@ -101,8 +101,10 @@ async function findConsume(client: Runner, customerId: string, key: string): Pro
   const first = legacy.rows[0];
   if (!first) return [];
   const sameTx = (await client.query(
-    `select * from ledger_entries where customer_id = $1 and kind = 'consume' and consume_key is null and created_at = $2 order by idempotency_key asc`,
-    [customerId, first.created_at],
+    // Compared inside SQL: created_at has microseconds, a JS Date only milliseconds.
+    `select * from ledger_entries where customer_id = $1 and kind = 'consume' and consume_key is null
+       and created_at = (select created_at from ledger_entries where id = $2) order by idempotency_key asc`,
+    [customerId, first.id],
   )).rows;
   const followUp = /^(.*):(\d+)$/.exec(key);
   if (followUp && sameTx.some((r) => r.idempotency_key === followUp[1])) return []; // a follow-up row of another consume

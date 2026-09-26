@@ -132,8 +132,8 @@ async def _find_consume(cur: Any, customer_id: str, key: str) -> list[dict[str, 
         return []
     await cur.execute(
         "select * from ledger_entries where customer_id = %s and kind = 'consume' and consume_key is null "
-        "and created_at = %s order by idempotency_key asc",
-        (customer_id, first["created_at"]),
+        "and created_at = (select created_at from ledger_entries where id = %s) order by idempotency_key asc",
+        (customer_id, first["id"]),
     )
     same_tx = list(await cur.fetchall())
     follow_up = re.match(r"^(.*):(\d+)$", key)
