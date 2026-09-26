@@ -1,0 +1,45 @@
+[project]
+name = "schift-payment-kit"
+version = "0.1.0"
+description = "Schift Payment Kit — single-install facade re-exporting every schift-payment-kit-* distribution via submodules"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Schift" }]
+requires-python = ">=3.11"
+dependencies = [
+  "schift-payment-kit-core==0.1.0",
+  "schift-payment-kit-credits==0.1.0",
+  "schift-payment-kit-lifecycle==0.1.0",
+  "schift-payment-kit-refund==0.1.0",
+  "schift-payment-kit-usage==0.1.0",
+  "schift-payment-kit-webhook==0.1.0",
+  "schift-payment-kit-notify==0.1.0",
+  "schift-payment-kit-cs==0.1.0",
+  "schift-payment-kit-schema-postgres==0.1.0",
+  "schift-payment-kit-stripe==0.1.0",
+  "schift-payment-kit-toss==0.1.0",
+  "schift-payment-kit-portone==0.1.0",
+  "schift-payment-kit-polar==0.1.0",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: Office/Business :: Financial",
+]
+
+[project.urls]
+Homepage = "https://github.com/schift-io/payment-kit#readme"
+Repository = "https://github.com/schift-io/payment-kit.git"
+Issues = "https://github.com/schift-io/payment-kit/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/schift_payment_kit"]

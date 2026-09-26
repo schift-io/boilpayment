@@ -1,0 +1,85 @@
+name: ci
+
+"on":
+  push:
+  pull_request:
+
+env:
+  PGHOST: localhost
+  PGUSER: postgres
+  PGPASSWORD: postgres
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: latest
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+
+      - name: uv sync
+        run: uv sync --frozen
+
+      - name: pnpm -r build
+        run: pnpm -r build
+
+      - name: ruff check
+        run: .venv/bin/ruff check packages
+
+      - name: pnpm -r test
+        run: pnpm -r test
+
+      - name: pytest
+        run: bash scripts/ci-pytest.sh
+
+      - name: Verification gate regressions
+        run: node --test scripts/verification.test.mjs
+
+      - name: EC reference mapping (not behavioral coverage)
+        run: node scripts/ec-coverage.mjs
+
+      - name: ts/py parity (smoke examples + e2e round-trip)
+        run: bash scripts/parity.sh
+
+      - name: Generated Step 1 TS/Python flow (local HTTP mock, no provider credentials)
+        run: pnpm run test:step1
+
+      - name: Generated Step 1 TS/Python Postgres flow (isolated database)
+        env:
+          STEP1_POSTGRES_USER: postgres
+        run: pnpm run test:step1:postgres

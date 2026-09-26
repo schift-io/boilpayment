@@ -1,0 +1,24 @@
+{
+  "name": "schift-payment-kit-monorepo",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm -r --filter './packages/**' --filter './apps/**' run build",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test",
+    "ec-coverage": "node scripts/ec-coverage.mjs",
+    "parity": "bash scripts/parity.sh",
+    "test:step1": "apps/cli/node_modules/.bin/tsx examples/e2e/step1-run.ts --python",
+    "test:step1:postgres": "apps/cli/node_modules/.bin/tsx examples/e2e/step1-run.ts --python --postgres",
+    "test:verification": "node --test scripts/verification.test.mjs",
+    "check:all": "pnpm run test:verification && pnpm run build && .venv/bin/ruff check packages && pnpm run test && bash scripts/ci-pytest.sh && pnpm run ec-coverage && pnpm run parity && pnpm run test:step1",
+    "live": "bash scripts/live.sh"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
+  }
+}

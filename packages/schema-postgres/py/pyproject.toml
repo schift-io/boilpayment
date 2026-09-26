@@ -1,0 +1,36 @@
+[project]
+name = "schift-payment-kit-schema-postgres"
+version = "0.1.0"
+description = "Schift Payment Kit — schema-postgres"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Schift" }]
+requires-python = ">=3.11"
+dependencies = ["schift-payment-kit-core", "psycopg[binary]>=3.2", "psycopg-pool>=3.2"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: Office/Business :: Financial",
+]
+
+[project.urls]
+Homepage = "https://github.com/schift-io/payment-kit#readme"
+Repository = "https://github.com/schift-io/payment-kit.git"
+Issues = "https://github.com/schift-io/payment-kit/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/schift_payment_kit_schema_postgres"]
+
+# The sql/*.sql files live in the package directory as a COMMITTED copy of the monorepo's
+# packages/schema-postgres/sql (source of truth), synced by scripts/sync-sql.mjs and drift-checked
+# by tests/test_sql_sync.py. A `force-include "../sql"` cannot work here: `uv build` builds the
+# wheel from the sdist, where a path above the package root does not exist.

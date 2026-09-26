@@ -1,0 +1,56 @@
+{
+  "name": "@schift/payment-kit-lifecycle",
+  "version": "0.1.0",
+  "description": "Schift Payment Kit — lifecycle",
+  "license": "MIT",
+  "keywords": [
+    "schift",
+    "payment-kit",
+    "payments",
+    "subscription-lifecycle",
+    "dunning",
+    "billing",
+    "typescript"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@schift/payment-kit-core": "workspace:*",
+    "@schift/payment-kit-credits": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0",
+    "vitest": "^2.1.0"
+  },
+  "homepage": "https://github.com/schift-io/payment-kit#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/schift-io/payment-kit.git"
+  },
+  "bugs": {
+    "url": "https://github.com/schift-io/payment-kit/issues"
+  }
+}

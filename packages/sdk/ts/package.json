@@ -1,0 +1,117 @@
+{
+  "name": "@schift/payment-kit-sdk",
+  "version": "0.1.0",
+  "description": "Schift Payment Kit — single-install facade re-exporting every @schift/payment-kit-* package via subpaths",
+  "license": "MIT",
+  "keywords": [
+    "schift",
+    "payment-kit",
+    "payments",
+    "billing",
+    "subscriptions",
+    "typescript"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./core": {
+      "types": "./dist/core.d.ts",
+      "import": "./dist/core.js"
+    },
+    "./credits": {
+      "types": "./dist/credits.d.ts",
+      "import": "./dist/credits.js"
+    },
+    "./lifecycle": {
+      "types": "./dist/lifecycle.d.ts",
+      "import": "./dist/lifecycle.js"
+    },
+    "./refund": {
+      "types": "./dist/refund.d.ts",
+      "import": "./dist/refund.js"
+    },
+    "./usage": {
+      "types": "./dist/usage.d.ts",
+      "import": "./dist/usage.js"
+    },
+    "./webhook": {
+      "types": "./dist/webhook.d.ts",
+      "import": "./dist/webhook.js"
+    },
+    "./notify": {
+      "types": "./dist/notify.d.ts",
+      "import": "./dist/notify.js"
+    },
+    "./cs": {
+      "types": "./dist/cs.d.ts",
+      "import": "./dist/cs.js"
+    },
+    "./postgres": {
+      "types": "./dist/postgres.d.ts",
+      "import": "./dist/postgres.js"
+    },
+    "./stripe": {
+      "types": "./dist/stripe.d.ts",
+      "import": "./dist/stripe.js"
+    },
+    "./toss": {
+      "types": "./dist/toss.d.ts",
+      "import": "./dist/toss.js"
+    },
+    "./portone": {
+      "types": "./dist/portone.d.ts",
+      "import": "./dist/portone.js"
+    },
+    "./polar": {
+      "types": "./dist/polar.d.ts",
+      "import": "./dist/polar.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@schift/payment-kit-core": "workspace:*",
+    "@schift/payment-kit-credits": "workspace:*",
+    "@schift/payment-kit-lifecycle": "workspace:*",
+    "@schift/payment-kit-refund": "workspace:*",
+    "@schift/payment-kit-usage": "workspace:*",
+    "@schift/payment-kit-webhook": "workspace:*",
+    "@schift/payment-kit-notify": "workspace:*",
+    "@schift/payment-kit-cs": "workspace:*",
+    "@schift/payment-kit-schema-postgres": "workspace:*",
+    "@schift/payment-kit-stripe": "workspace:*",
+    "@schift/payment-kit-toss": "workspace:*",
+    "@schift/payment-kit-portone": "workspace:*",
+    "@schift/payment-kit-polar": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0",
+    "vitest": "^2.1.0"
+  },
+  "homepage": "https://github.com/schift-io/payment-kit#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/schift-io/payment-kit.git"
+  },
+  "bugs": {
+    "url": "https://github.com/schift-io/payment-kit/issues"
+  }
+}

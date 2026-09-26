@@ -1,0 +1,780 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://schift.io/schemas/payment-kit/policy.schema.json",
+  "title": "Policy",
+  "description": "Schift Payment Kit policy (paykit.config.json `policy` field). Mirrors packages/core/ts/src/policy.ts / packages/core/py/src/schift_payment_kit_core/policy.py exactly (camelCase). Defaults are the bold values in docs/EDGE_CASES.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "period",
+    "proration",
+    "credits",
+    "upgrade",
+    "downgrade",
+    "cancel",
+    "intervalChange",
+    "trial",
+    "pause",
+    "dunning",
+    "refund",
+    "usage",
+    "dispute",
+    "cs",
+    "subscription",
+    "cashReceipt",
+    "retention"
+  ],
+  "properties": {
+    "period": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "timezone",
+        "monthEndAnchor"
+      ],
+      "properties": {
+        "timezone": {
+          "type": "string",
+          "default": "UTC",
+          "description": "IANA timezone or 'UTC' (EC:C3)."
+        },
+        "monthEndAnchor": {
+          "type": "string",
+          "enum": [
+            "clamp_keep_original_day",
+            "clamp_permanently"
+          ],
+          "default": "clamp_keep_original_day",
+          "description": "EC:G1"
+        }
+      }
+    },
+    "proration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "denominator"
+      ],
+      "properties": {
+        "denominator": {
+          "type": "string",
+          "enum": [
+            "actual_days_in_period",
+            "fixed_30"
+          ],
+          "default": "actual_days_in_period",
+          "description": "EC:G2"
+        }
+      }
+    },
+    "credits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rollover",
+        "bankCap",
+        "bankReset",
+        "consumeOrder",
+        "negativeBalance",
+        "negativeFloor",
+        "pools",
+        "topupExpiryDays",
+        "grantLagBehavior",
+        "expiryNoticeDays",
+        "negativeOffset"
+      ],
+      "properties": {
+        "rollover": {
+          "type": "string",
+          "enum": [
+            "none",
+            "banked",
+            "full"
+          ],
+          "default": "none",
+          "description": "EC:B1"
+        },
+        "bankCap": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "default": null,
+          "description": "EC:B1 — required (non-null) when rollover=banked."
+        },
+        "bankReset": {
+          "type": "string",
+          "enum": [
+            "on_renewal",
+            "never",
+            "on_cancel"
+          ],
+          "default": "on_renewal",
+          "description": "EC:B2"
+        },
+        "consumeOrder": {
+          "type": "string",
+          "enum": [
+            "expiring_first",
+            "promo_first_then_expiring",
+            "paid_first"
+          ],
+          "default": "expiring_first",
+          "description": "EC:B3"
+        },
+        "negativeBalance": {
+          "type": "string",
+          "enum": [
+            "block",
+            "allow_to_floor",
+            "allow_unbounded"
+          ],
+          "default": "block",
+          "description": "EC:B4"
+        },
+        "negativeFloor": {
+          "type": "integer",
+          "maximum": 0,
+          "default": 0,
+          "description": "EC:B4 — floor for allow_to_floor (<= 0)."
+        },
+        "pools": {
+          "type": "string",
+          "enum": [
+            "separate",
+            "merged"
+          ],
+          "default": "separate",
+          "description": "EC:B7"
+        },
+        "topupExpiryDays": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "default": null,
+          "description": "EC:B10 — null = no expiry."
+        },
+        "grantLagBehavior": {
+          "type": "string",
+          "enum": [
+            "reject",
+            "optimistic_hold"
+          ],
+          "default": "reject",
+          "description": "EC:B6"
+        },
+        "expiryNoticeDays": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "default": null,
+          "description": "EC:B16 — days before expiry to notify."
+        },
+        "negativeOffset": {
+          "enum": [
+            "offset_next_grant",
+            "never"
+          ],
+          "default": "offset_next_grant",
+          "description": "EC:B17"
+        }
+      }
+    },
+    "upgrade": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "creditDelta"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "immediate_prorate_reset_anchor",
+            "immediate_prorate_keep_anchor",
+            "next_period"
+          ],
+          "default": "immediate_prorate_reset_anchor",
+          "description": "EC:A1"
+        },
+        "creditDelta": {
+          "type": "string",
+          "enum": [
+            "full_delta",
+            "prorated_delta"
+          ],
+          "default": "full_delta",
+          "description": "EC:A2"
+        }
+      }
+    },
+    "downgrade": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "clawbackShortfall"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "end_of_period",
+            "immediate_keep",
+            "immediate_clawback"
+          ],
+          "default": "end_of_period",
+          "description": "EC:A3"
+        },
+        "clawbackShortfall": {
+          "type": "string",
+          "enum": [
+            "clamp_to_zero",
+            "allow_negative",
+            "deny_downgrade"
+          ],
+          "default": "clamp_to_zero",
+          "description": "EC:A4"
+        }
+      }
+    },
+    "cancel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "credits"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "end_of_period",
+            "immediate"
+          ],
+          "default": "end_of_period",
+          "description": "EC:A5"
+        },
+        "credits": {
+          "type": "string",
+          "enum": [
+            "keep_until_period_end",
+            "keep_forever",
+            "revoke_immediately"
+          ],
+          "default": "keep_until_period_end",
+          "description": "EC:A6"
+        }
+      }
+    },
+    "intervalChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "treat_as_upgrade",
+            "next_period"
+          ],
+          "default": "treat_as_upgrade",
+          "description": "EC:A8"
+        }
+      }
+    },
+    "trial": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "creditsOnConvert",
+        "creditsOnCancel",
+        "abuseGuard"
+      ],
+      "properties": {
+        "creditsOnConvert": {
+          "type": "string",
+          "enum": [
+            "grant_full",
+            "grant_full_keep_trial",
+            "no_grant_until_next_period"
+          ],
+          "default": "grant_full",
+          "description": "EC:A9"
+        },
+        "creditsOnCancel": {
+          "type": "string",
+          "enum": [
+            "revoke",
+            "keep"
+          ],
+          "default": "revoke",
+          "description": "EC:A10"
+        },
+        "abuseGuard": {
+          "type": "string",
+          "enum": [
+            "one_per_customer",
+            "none"
+          ],
+          "default": "one_per_customer",
+          "description": "EC:A11"
+        }
+      }
+    },
+    "pause": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "unsupported",
+            "freeze_credits",
+            "keep_running"
+          ],
+          "default": "unsupported",
+          "description": "EC:A12"
+        }
+      }
+    },
+    "dunning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "graceDays",
+        "usageDuringGrace",
+        "grantDuringGrace",
+        "onFinalFailure",
+        "onRecovery",
+        "preExpiryNoticeDays",
+        "retryAttempts",
+        "retryIntervalHours"
+      ],
+      "properties": {
+        "graceDays": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 7,
+          "description": "EC:A13"
+        },
+        "usageDuringGrace": {
+          "type": "string",
+          "enum": [
+            "allow",
+            "block",
+            "allow_existing_only"
+          ],
+          "default": "allow",
+          "description": "EC:A14"
+        },
+        "grantDuringGrace": {
+          "type": "string",
+          "enum": [
+            "defer_until_paid",
+            "grant_anyway"
+          ],
+          "default": "defer_until_paid",
+          "description": "EC:A15"
+        },
+        "onFinalFailure": {
+          "type": "string",
+          "enum": [
+            "revoke_unpaid_period",
+            "revoke_all",
+            "keep"
+          ],
+          "default": "revoke_unpaid_period",
+          "description": "EC:A16"
+        },
+        "onRecovery": {
+          "type": "string",
+          "enum": [
+            "regrant_current_period",
+            "regrant_all_missed",
+            "no_regrant"
+          ],
+          "default": "regrant_current_period",
+          "description": "EC:A17"
+        },
+        "preExpiryNoticeDays": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 7,
+          "description": "EC:E11"
+        },
+        "retryAttempts": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 3,
+          "description": "EC:A24"
+        },
+        "retryIntervalHours": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "default": [
+            24,
+            72,
+            120
+          ],
+          "description": "EC:A24"
+        }
+      }
+    },
+    "refund": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "noQuestionsDays",
+        "method",
+        "overuseBehavior",
+        "rounding",
+        "revokeShortfall",
+        "feeBearer",
+        "maxPerCustomerPerYear",
+        "annualMethod",
+        "annualDenyAfterDays"
+      ],
+      "properties": {
+        "noQuestionsDays": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 7,
+          "description": "EC:D1"
+        },
+        "method": {
+          "type": "string",
+          "enum": [
+            "unused_credits",
+            "time_prorated",
+            "min_of_both",
+            "deny"
+          ],
+          "default": "unused_credits",
+          "description": "EC:D2"
+        },
+        "overuseBehavior": {
+          "type": "string",
+          "enum": [
+            "deny",
+            "refund_time_prorated_anyway"
+          ],
+          "default": "deny",
+          "description": "EC:D3"
+        },
+        "rounding": {
+          "type": "string",
+          "enum": [
+            "floor_credits",
+            "ceil_credits",
+            "round_credits"
+          ],
+          "default": "floor_credits",
+          "description": "EC:D4"
+        },
+        "revokeShortfall": {
+          "type": "string",
+          "enum": [
+            "clamp_and_reduce_refund",
+            "clamp_to_zero",
+            "allow_negative"
+          ],
+          "default": "clamp_and_reduce_refund",
+          "description": "EC:B13"
+        },
+        "feeBearer": {
+          "type": "string",
+          "enum": [
+            "merchant",
+            "customer"
+          ],
+          "default": "merchant",
+          "description": "EC:D7"
+        },
+        "maxPerCustomerPerYear": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 2,
+          "description": "EC:D10"
+        },
+        "annualMethod": {
+          "type": "string",
+          "enum": [
+            "same_as_monthly",
+            "deny_after_days"
+          ],
+          "default": "same_as_monthly",
+          "description": "EC:D5"
+        },
+        "annualDenyAfterDays": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "default": null,
+          "description": "EC:D5 — required (non-null) when annualMethod=deny_after_days."
+        }
+      }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "overage",
+        "overageUnitPriceMinor",
+        "lateReportWindowHours",
+        "includedQuantity",
+        "creditConversion"
+      ],
+      "properties": {
+        "overage": {
+          "type": "string",
+          "enum": [
+            "hard_block",
+            "soft_cap_notify",
+            "bill_overage"
+          ],
+          "default": "hard_block",
+          "description": "EC:C1"
+        },
+        "overageUnitPriceMinor": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "default": null,
+          "description": "EC:C1 — required (non-null) when overage=bill_overage."
+        },
+        "lateReportWindowHours": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 48,
+          "description": "EC:C2"
+        },
+        "includedQuantity": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "EC:C5"
+        },
+        "creditConversion": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "default": null,
+          "description": "EC:C8",
+          "additionalProperties": false,
+          "required": [
+            "unit",
+            "creditsPerUnit"
+          ],
+          "properties": {
+            "unit": {
+              "type": "string"
+            },
+            "creditsPerUnit": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    "dispute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "onOpen",
+        "onLost",
+        "evidenceDueDays"
+      ],
+      "properties": {
+        "onOpen": {
+          "type": "string",
+          "enum": [
+            "freeze_customer",
+            "revoke_disputed_grant",
+            "none"
+          ],
+          "default": "freeze_customer",
+          "description": "EC:B11"
+        },
+        "onLost": {
+          "type": "string",
+          "enum": [
+            "revoke_and_ban",
+            "revoke_only"
+          ],
+          "default": "revoke_and_ban",
+          "description": "EC:D9"
+        },
+        "evidenceDueDays": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 7,
+          "description": "EC:B18"
+        }
+      }
+    },
+    "cs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "regrant",
+        "autoApprove",
+        "fraud"
+      ],
+      "properties": {
+        "regrant": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "manual_approve",
+                "off"
+              ],
+              "default": "auto",
+              "description": "EC:A18 / EC:E1"
+            }
+          }
+        },
+        "autoApprove": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "maxAmountMinor",
+            "maxCredits"
+          ],
+          "properties": {
+            "maxAmountMinor": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 50000,
+              "description": "EC:I1"
+            },
+            "maxCredits": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 10000,
+              "description": "EC:I1"
+            }
+          }
+        },
+        "fraud": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "refundVelocity",
+            "windowDays"
+          ],
+          "properties": {
+            "refundVelocity": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 2,
+              "description": "EC:I2"
+            },
+            "windowDays": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 30,
+              "description": "EC:I2"
+            }
+          }
+        }
+      }
+    },
+    "subscription": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "multiplePerCustomer"
+      ],
+      "properties": {
+        "multiplePerCustomer": {
+          "type": "string",
+          "enum": [
+            "deny",
+            "allow_separate_pools",
+            "allow_merged_pool"
+          ],
+          "default": "deny",
+          "description": "EC:A19"
+        }
+      }
+    },
+    "cashReceipt": {
+      "type": "object",
+      "description": "EC:K2 — KR 현금영수증 (cash receipt).",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "defaultType",
+        "cancelOnRefund"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "off",
+            "manual",
+            "auto"
+          ],
+          "default": "off"
+        },
+        "defaultType": {
+          "enum": [
+            "personal",
+            "business"
+          ],
+          "default": "personal"
+        },
+        "cancelOnRefund": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operationDays",
+        "auditLogDays"
+      ],
+      "description": "EC:J4 L4 — retention for operational rows.",
+      "properties": {
+        "operationDays": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 7
+        },
+        "auditLogDays": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 90
+        }
+      }
+    }
+  }
+}

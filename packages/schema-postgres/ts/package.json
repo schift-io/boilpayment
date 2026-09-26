@@ -1,0 +1,58 @@
+{
+  "name": "@schift/payment-kit-schema-postgres",
+  "version": "0.1.0",
+  "description": "Schift Payment Kit — schema-postgres",
+  "license": "MIT",
+  "keywords": [
+    "schift",
+    "payment-kit",
+    "payments",
+    "postgres",
+    "ledger",
+    "migrations",
+    "typescript"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && mkdir -p dist/sql && cp ../sql/*.sql dist/sql/",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "prebuild": "node ../scripts/sync-sql.mjs"
+  },
+  "dependencies": {
+    "@schift/payment-kit-core": "workspace:*",
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0",
+    "vitest": "^2.1.0",
+    "@types/pg": "^8.11.0"
+  },
+  "homepage": "https://github.com/schift-io/payment-kit#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/schift-io/payment-kit.git"
+  },
+  "bugs": {
+    "url": "https://github.com/schift-io/payment-kit/issues"
+  }
+}
