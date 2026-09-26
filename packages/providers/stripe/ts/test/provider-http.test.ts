@@ -487,6 +487,7 @@ describe('capabilities()', () => {
       meters: true,
       scheduling: 'provider',
       webhookSignature: true,
+      checkout: 'hosted', // EC:N1 — hosted checkout (in-app purchase stores report 'on_device')
     });
   });
 });

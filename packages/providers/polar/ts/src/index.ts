@@ -321,7 +321,7 @@ export class PolarProvider implements PaymentProvider {
   }
 
   capabilities(): ProviderCapabilities {
-    return { nativeSubscriptions: true, partialRefund: true, meters: true, scheduling: 'provider', webhookSignature: true };
+    return { nativeSubscriptions: true, partialRefund: true, meters: true, scheduling: 'provider', webhookSignature: true, checkout: 'hosted' };
   }
 
   async createCustomer(input: { email: string; name?: string; metadata?: Record<string, string> }): Promise<{ ref: string }> {
