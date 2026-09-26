@@ -34,10 +34,10 @@ function providerImportsTs(config: PaykitConfig): string {
 function providerConstructionTs(config: PaykitConfig): string {
   const lines: string[] = [];
   if (config.providers.includes('stripe')) {
-    lines.push(`  providers.stripe = new StripeProvider({ secretKey: env.STRIPE_SECRET_KEY, webhookSecret: env.STRIPE_WEBHOOK_SECRET, previousWebhookSecrets: (env.STRIPE_WEBHOOK_PREVIOUS_SECRETS ?? '').split(',').map((v: string) => v.trim()).filter(Boolean), logger });`);
+    lines.push(`  providers.stripe = new StripeProvider({ secretKey: env.STRIPE_SECRET_KEY, webhookSecret: env.STRIPE_WEBHOOK_SECRET, previousWebhookSecrets: (env.STRIPE_WEBHOOK_PREVIOUS_SECRETS ?? '').split(',').map((v: string) => v.trim()).filter(Boolean), ...(env.STRIPE_API_BASE ? { apiBase: (() => { const u = new URL(env.STRIPE_API_BASE); return { host: u.hostname, port: u.port ? Number(u.port) : undefined, protocol: u.protocol.replace(':', '') as 'http' | 'https' }; })() } : {}), logger });`);
   }
   if (config.providers.includes('polar')) {
-    lines.push(`  providers.polar = new PolarProvider({ accessToken: env.POLAR_ACCESS_TOKEN, webhookSecret: env.POLAR_WEBHOOK_SECRET, previousWebhookSecrets: (env.POLAR_WEBHOOK_PREVIOUS_SECRETS ?? '').split(',').map((v: string) => v.trim()).filter(Boolean), logger });`);
+    lines.push(`  providers.polar = new PolarProvider({ accessToken: env.POLAR_ACCESS_TOKEN, webhookSecret: env.POLAR_WEBHOOK_SECRET, previousWebhookSecrets: (env.POLAR_WEBHOOK_PREVIOUS_SECRETS ?? '').split(',').map((v: string) => v.trim()).filter(Boolean), ...(env.POLAR_API_BASE ? { apiBase: env.POLAR_API_BASE } : {}), logger });`);
   }
   if (config.providers.includes('toss')) {
     // EC:E19 — no allowlist means every Toss webhook is refused at receipt (fail closed).
@@ -113,8 +113,8 @@ export function generateIndexTs(config: PaykitConfig): string {
 
   l.push(`export interface PaymentKitEnv {`);
   l.push(`  DATABASE_URL: string;`);
-  if (config.providers.includes('stripe')) { l.push(`  STRIPE_SECRET_KEY: string;`); l.push(`  STRIPE_WEBHOOK_SECRET: string;`); l.push(`  STRIPE_WEBHOOK_PREVIOUS_SECRETS?: string; // comma list, secrets being rotated out (EC:E20)`); }
-  if (config.providers.includes('polar')) { l.push(`  POLAR_ACCESS_TOKEN: string;`); l.push(`  POLAR_WEBHOOK_SECRET: string;`); l.push(`  POLAR_WEBHOOK_PREVIOUS_SECRETS?: string; // comma list, secrets being rotated out (EC:E20)`); }
+  if (config.providers.includes('stripe')) { l.push(`  STRIPE_SECRET_KEY: string;`); l.push(`  STRIPE_WEBHOOK_SECRET: string;`); l.push(`  STRIPE_WEBHOOK_PREVIOUS_SECRETS?: string; // comma list, secrets being rotated out (EC:E20)`); l.push(`  STRIPE_API_BASE?: string; // local mock host (e.g. stripe-mock); empty = https://api.stripe.com`); }
+  if (config.providers.includes('polar')) { l.push(`  POLAR_ACCESS_TOKEN: string;`); l.push(`  POLAR_WEBHOOK_SECRET: string;`); l.push(`  POLAR_WEBHOOK_PREVIOUS_SECRETS?: string; // comma list, secrets being rotated out (EC:E20)`); l.push(`  POLAR_API_BASE?: string; // local mock / sandbox host; empty = Polar production`); }
   if (config.providers.includes('toss')) { l.push(`  TOSS_SECRET_KEY: string;`); l.push(`  TOSS_CLIENT_KEY: string;`); l.push(`  TOSS_WEBHOOK_ALLOWED_IPS?: string; // comma list; empty refuses every Toss webhook (EC:E19)`); l.push(`  TOSS_API_BASE?: string; // local mock / staging host; empty = https://api.tosspayments.com`); }
   if (config.providers.includes('portone')) { l.push(`  PORTONE_API_SECRET: string;`); l.push(`  PORTONE_STORE_ID: string;`); l.push(`  PORTONE_WEBHOOK_SECRET: string;`); l.push(`  PORTONE_WEBHOOK_PREVIOUS_SECRETS?: string; // comma list, secrets being rotated out (EC:E20)`); l.push(`  PORTONE_API_BASE?: string; // local mock / sandbox host; empty = https://api.portone.io`); }
   if (config.infra.notify.email === 'resend') { l.push(`  RESEND_API_KEY: string;`); l.push(`  RESEND_FROM_EMAIL: string;`); l.push(`  RESEND_TO_EMAIL: string; // fallback recipient when a notification has no per-customer email`); }

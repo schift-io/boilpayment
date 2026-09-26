@@ -2,8 +2,8 @@
 import type { PaykitConfig } from '../config.js';
 
 const PROVIDER_ENV: Record<string, string[]> = {
-  stripe: ['STRIPE_SECRET_KEY=sk_test_...', 'STRIPE_WEBHOOK_SECRET=whsec_...', '# 웹훅 서명 비밀값을 바꿀 때: 새 값을 위에, 옛 값을 아래에 쉼표로 둡니다. 이미 받은 웹훅의 재처리가 옛 값으로 검증됩니다(EC:E20).', 'STRIPE_WEBHOOK_PREVIOUS_SECRETS='],
-  polar: ['POLAR_ACCESS_TOKEN=polar_at_...', 'POLAR_WEBHOOK_SECRET=whsec_...', '# 웹훅 서명 비밀값을 바꿀 때: 새 값을 위에, 옛 값을 아래에 쉼표로 둡니다. 이미 받은 웹훅의 재처리가 옛 값으로 검증됩니다(EC:E20).', 'POLAR_WEBHOOK_PREVIOUS_SECRETS='],
+  stripe: ['STRIPE_SECRET_KEY=sk_test_...', 'STRIPE_WEBHOOK_SECRET=whsec_...', '# 웹훅 서명 비밀값을 바꿀 때: 새 값을 위에, 옛 값을 아래에 쉼표로 둡니다. 이미 받은 웹훅의 재처리가 옛 값으로 검증됩니다(EC:E20).', 'STRIPE_WEBHOOK_PREVIOUS_SECRETS=', '# 비워 두면 https://api.stripe.com. 로컬 목(stripe-mock 등) 호스트를 쓸 때만 채웁니다(예: http://127.0.0.1:12111).', 'STRIPE_API_BASE='],
+  polar: ['POLAR_ACCESS_TOKEN=polar_at_...', 'POLAR_WEBHOOK_SECRET=whsec_...', '# 웹훅 서명 비밀값을 바꿀 때: 새 값을 위에, 옛 값을 아래에 쉼표로 둡니다. 이미 받은 웹훅의 재처리가 옛 값으로 검증됩니다(EC:E20).', 'POLAR_WEBHOOK_PREVIOUS_SECRETS=', '# 비워 두면 Polar 운영 API. 로컬 목·샌드박스 호스트를 쓸 때만 채웁니다.', 'POLAR_API_BASE='],
   toss: [
     'TOSS_SECRET_KEY=test_sk_...',
     'TOSS_CLIENT_KEY=test_ck_...',

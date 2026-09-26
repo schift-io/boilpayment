@@ -297,6 +297,28 @@ const server = createServer(async (req, res) => {
     return json(res, 200, result);
   }
 
+  // -- control endpoint: renew a subscription for one period (round-5 audit follow-up). Polar itself
+  // charges the subscription at period end and emits order.paid with billing_reason 'subscription_cycle';
+  // this moves the subscription's period forward one interval and creates that renewal order.
+  //   POST /__mock/renew { subscription_id, status?: 'paid' | 'pending' } -> { order_id, period_start, period_end }
+  if (method === 'POST' && pathname === '/__mock/renew') {
+    let body;
+    try { body = await readBody(req); } catch { return json(res, 400, { error: 'invalid_json' }); }
+    const sub = subscriptions.get(body.subscription_id);
+    if (!sub) return json(res, 404, { error: 'entity_not_found', detail: `no subscription ${body.subscription_id}` });
+    const product = PRODUCTS[sub.product_id];
+    const start = new Date(sub.current_period_end);
+    const end = new Date(start.getTime());
+    if (product.recurring_interval === 'year') end.setUTCFullYear(end.getUTCFullYear() + 1); else end.setUTCMonth(end.getUTCMonth() + 1);
+    sub.current_period_start = start.toISOString();
+    sub.current_period_end = end.toISOString();
+    sub.modified_at = nowIso();
+    const order = buildOrderForProduct({ product, customerId: sub.customer_id, subscriptionId: sub.id, checkoutId: null });
+    order.billing_reason = 'subscription_cycle';
+    if (body.status === 'pending') { order.status = 'pending'; order.paid = false; }
+    return json(res, 200, { order_id: order.id, period_start: sub.current_period_start, period_end: sub.current_period_end });
+  }
+
   if (!pathname.startsWith('/v1/')) return json(res, 404, { error: 'not_found' });
   if (!requireAuth(req, res)) return;
 
