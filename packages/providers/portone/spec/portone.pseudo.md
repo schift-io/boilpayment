@@ -332,3 +332,10 @@ every provider call the handler makes for that delivery. See
 - Delivery identity (`webhook-id`) stays separate from cancellation identity. The direct mapper's fallback ID also includes cancellationId, separating same-time partial refunds.
 
 Sources: [cancellation integration](https://developers.portone.io/opi/ko/integration/cancel/v2/readme), [webhook contract](https://developers.portone.io/opi/ko/integration/webhook/readme-v2?v=v2), [official cancellation schema](https://raw.githubusercontent.com/portone-io/server-sdk/main/javascript/src/generated/payment/PaymentCancellation.ts).
+
+
+## [EC:A52] getPaymentByOrderId: only the provider's own "not found" is null
+
+`getPaymentByOrderId(orderId)` returns null only for a 404 whose body code is `PAYMENT_NOT_FOUND`. Any other 404
+(an HTML page from a proxy, a wrong base URL, an unknown route) is thrown, so the attempt stays
+unresolved instead of being closed as "never arrived" and charged again.

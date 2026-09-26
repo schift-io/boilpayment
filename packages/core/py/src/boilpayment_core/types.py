@@ -62,6 +62,8 @@ GrantDuringGrace = Literal["defer_until_paid", "grant_anyway"]
 OnFinalFailure = Literal["revoke_unpaid_period", "revoke_all", "keep"]
 OnRecovery = Literal["regrant_current_period", "regrant_all_missed", "no_regrant"]
 MultipleSubscriptions = Literal["deny", "allow_separate_pools", "allow_merged_pool"]
+# EC:A47 -- a self-scheduled subscription more than one period behind.
+MissedPeriods = Literal["skip_and_notify", "needs_human_only"]
 Rollover = Literal["none", "banked", "full"]
 BankReset = Literal["on_renewal", "never", "on_cancel"]
 ConsumeOrder = Literal["expiring_first", "promo_first_then_expiring", "paid_first"]
@@ -258,6 +260,7 @@ class CsPolicy:
 @dataclass(kw_only=True, slots=True)
 class SubscriptionPolicy:
     multiple_per_customer: MultipleSubscriptions = "deny"
+    missed_periods: MissedPeriods = "skip_and_notify"
 
 
 @dataclass(kw_only=True, slots=True)
@@ -895,6 +898,9 @@ class Table(Protocol[T]):
 
 class OperationTable(Table[Operation], Protocol):
     async def claim(self, row: Operation) -> Operation | None: ...
+
+    # EC:A48 -- optional compare and set (see TS OperationTable.compareAndSet); tables without it
+    # fall back to a plain put.
 
 
 class Repo(Protocol):

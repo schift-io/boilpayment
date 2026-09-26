@@ -1,5 +1,6 @@
 // Wizard questions for the finer-grained options added after the tvc comparison (2026-09-27):
-// EC:C10 reservations, EC:D16 refund reasons, EC:B19 per-source expiry, EC:I10 reports.
+// EC:C10 reservations, EC:D16 refund reasons, EC:B19 per-source expiry, EC:I10 reports,
+// EC:A47 missed periods of self-scheduled renewals (round-5 audit).
 // Spread into QUESTIONS at their place in docs/EDGE_CASES.md "위저드 질문 순서" by questions.ts.
 import { DEFAULT_POLICY } from 'boilpayment-core';
 import { getPath } from './util/path.js';
@@ -144,5 +145,27 @@ export const REPORT_QUESTIONS: Question[] = [
     group: 'cs',
     message: '월 정산 집계 함수(결제·환불·순액·크레딧 이동, 통화별)를 만들까요? (Settlement report)',
     default: false,
+  },
+];
+
+// EC:A47 — a self-scheduled (Toss/PortOne) subscription more than one period behind: charge only the
+// period containing now (and list the skipped ones in one case), or charge nothing and ask a person.
+const selfScheduledSubscription = (c: WizardConfig) =>
+  c.models.includes('subscription') && (c.providers.includes('toss') || c.providers.includes('portone'));
+
+export const MISSED_PERIOD_QUESTIONS: Question[] = [
+  {
+    id: 'subscription_missed_periods',
+    policyPath: 'subscription.missedPeriods',
+    ec: ['A47'],
+    type: 'select',
+    group: 'dunning',
+    when: selfScheduledSubscription,
+    message: '갱신이 여러 달 밀린 구독(cron 중단, 업그레이드 직후 등)은 어떻게 할까요? (Missed periods)',
+    options: [
+      { value: 'skip_and_notify', label: '지금 기간만 1회 청구, 밀린 기간은 건너뛰고 담당자에게 알림', hint: '밀린 달은 청구·지급 없음' },
+      { value: 'needs_human_only', label: '청구하지 않고 담당자가 처리할 때까지 대기', hint: 'past_due, 유예 시계 없음' },
+    ],
+    default: def('subscription.missedPeriods'),
   },
 ];

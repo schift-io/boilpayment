@@ -371,6 +371,16 @@ const operationsTable = (pool: Pool): OperationTable => ({
     );
     return res.rows[0] ? rowToOperation(res.rows[0]) : null;
   },
+  // EC:A48 — compare and set in one statement: only a row still carrying the expected status and result
+  // is updated, so two workers that read the same row cannot both take it over or release it.
+  async compareAndSet(expected: Pick<Operation, 'key' | 'status' | 'result'>, next: Operation): Promise<boolean> {
+    const res = await runner(pool).query(
+      `update operations set status = $4, result = $5, error = $6, completed_at = $7
+       where key = $1 and status = $2 and result is not distinct from $3::jsonb returning key`,
+      [expected.key, expected.status, jsonb(expected.result ?? null), next.status, jsonb(next.result), next.error, next.completedAt],
+    );
+    return (res.rowCount ?? 0) > 0;
+  },
   async get(id: string): Promise<Operation | null> {
     const res = await runner(pool).query('select * from operations where key = $1', [id]);
     return res.rows[0] ? rowToOperation(res.rows[0]) : null;

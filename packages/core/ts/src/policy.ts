@@ -31,7 +31,7 @@ export const DEFAULT_POLICY: Policy = {
   dispute: { onOpen: 'freeze_customer', onLost: 'revoke_and_ban', evidenceDueDays: 7 },
   cashReceipt: { mode: 'off', defaultType: 'personal', cancelOnRefund: true },
   cs: { regrant: { mode: 'auto' }, autoApprove: { maxAmountMinor: 50_000, maxCredits: 10_000 }, fraud: { refundVelocity: 2, windowDays: 30 } },
-  subscription: { multiplePerCustomer: 'deny' },
+  subscription: { multiplePerCustomer: 'deny', missedPeriods: 'skip_and_notify' },
   retention: { operationDays: 7, auditLogDays: 90 },
 };
 
@@ -139,6 +139,7 @@ export function validatePolicy(p: unknown): Policy {
     enumCheck('cashReceipt.defaultType', pol.cashReceipt.defaultType, ['personal', 'business']);
     enumCheck('cs.regrant.mode', pol.cs.regrant.mode, ['auto', 'manual_approve', 'off']);
     enumCheck('subscription.multiplePerCustomer', pol.subscription.multiplePerCustomer, ['deny', 'allow_separate_pools', 'allow_merged_pool']);
+    enumCheck('subscription.missedPeriods', pol.subscription.missedPeriods, ['skip_and_notify', 'needs_human_only']);
     if (pol.credits.rollover === 'banked' && pol.credits.bankCap === null) errors.push('credits.bankCap: required when rollover=banked');
     if (pol.usage.overage === 'bill_overage' && pol.usage.overageUnitPriceMinor === null) errors.push('usage.overageUnitPriceMinor: required when overage=bill_overage');
     if (pol.refund.annualMethod === 'deny_after_days' && pol.refund.annualDenyAfterDays === null) errors.push('refund.annualDenyAfterDays: required when annualMethod=deny_after_days');

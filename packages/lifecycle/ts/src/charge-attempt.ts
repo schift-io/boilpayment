@@ -6,7 +6,7 @@
 // attempt, so every charge that may have moved money has a local row, and a retry of the same
 // attempt re-drives the same provider idempotency key instead of charging again.
 import { createHash } from 'node:crypto';
-import { Clock, Notifier, Operation, Payment, PaymentProvider, PlanPrice, ProviderError, Repo, Subscription } from 'boilpayment-core';
+import { Clock, Money, NoopNotifier, Notifier, Operation, Payment, PaymentProvider, PlanPrice, ProviderError, Repo, Subscription } from 'boilpayment-core';
 import type { Period } from 'boilpayment-core';
 import { scopeProvider } from './internal.js';
 
@@ -47,10 +47,71 @@ export function attemptPaymentId(attemptKey: string): string {
  */
 export function isDecline(err: unknown): err is ProviderError {
   if (!(err instanceof ProviderError)) return false;
+  if (isDuplicateOrder(err)) return false; // EC:A49 — the order exists: it may well have been paid
   const status = err.httpStatus;
   if (status === undefined) return err.failure.code !== 'provider_unavailable';
   return status >= 400 && status < 500 && status !== 408 && status !== 409 && status !== 429;
 }
+
+/**
+ * EC:A49 — the provider refused the request because the orderId / paymentId was already used (Toss
+ * DUPLICATED_ORDER_ID and ALREADY_PROCESSED_PAYMENT after its 15-day Idempotency-Key window, PortOne
+ * ALREADY_PAID). The order exists and may have moved money: it is settled by lookup, never a decline.
+ */
+const DUPLICATE_ORDER_CODES = new Set(['DUPLICATED_ORDER_ID', 'ALREADY_PROCESSED_PAYMENT', 'ALREADY_PAID']);
+export function isDuplicateOrder(err: unknown): boolean {
+  if (!(err instanceof ProviderError)) return false;
+  const d = (err.details ?? {}) as { code?: unknown; type?: unknown };
+  return [d.code, d.type, err.failure.providerCode].some((c) => typeof c === 'string' && DUPLICATE_ORDER_CODES.has(c));
+}
+
+/**
+ * EC:A50 — a looked-up order only settles an attempt when it is the charge the kit asked for: same
+ * amount and currency, same customer, and not refunded or disputed since. Anything else is a reason a
+ * person has to look (the attempt is held: no grant, and nothing is charged for the period meanwhile).
+ */
+export function lookupMismatch(found: Payment, expected: { amount: Money | null; customerId: string }): string | null {
+  if (found.status === 'refunded' || found.status === 'partially_refunded' || found.status === 'disputed') return `order_${found.status}`;
+  if (expected.amount && expected.amount.amountMinor > 0) {
+    if (found.amount?.currency && found.amount.currency !== expected.amount.currency) return 'currency_mismatch';
+    if (found.amount && found.amount.amountMinor !== expected.amount.amountMinor) return 'amount_mismatch';
+  }
+  if (found.customerId && found.customerId !== expected.customerId) return 'customer_mismatch';
+  return null;
+}
+
+/** EC:A50 — an attempt a person has to look at: never charged, re-driven or granted by the kit. */
+export function isUnderReview(row: Payment): boolean {
+  return !!(row.raw as { boilpaymentReview?: unknown } | undefined)?.boilpaymentReview;
+}
+
+/**
+ * EC:A49 A50 — apply a looked-up order to an attempt row. Returns the settled row, or null when it is
+ * still pending at the provider or does not match (then held for review, one notice).
+ */
+async function applyLookup(repo: Repo, notifier: Notifier, row: Payment, found: Payment, expectedAmount: Money | null): Promise<Payment | null> {
+  const reason = lookupMismatch(found, { amount: expectedAmount ?? (row.amount.amountMinor > 0 ? row.amount : null), customerId: row.customerId });
+  if (reason) {
+    await repo.payments.put({ ...row, raw: { ...(row.raw as object | undefined ?? {}), boilpaymentReview: {
+      reason, status: found.status, amount: found.amount ?? null, customerId: found.customerId ?? null, providerRef: found.providerRef ?? null } } });
+    await notifier.send({ type: 'cs.needs_human', customerId: row.customerId, payload: {
+      kind: 'attempt_lookup_mismatch', subscriptionId: row.subscriptionId, paymentId: row.id, reason } });
+    return null;
+  }
+  if (found.status !== 'succeeded' && found.status !== 'failed') return null;
+  const settled: Payment = { ...row, providerRef: found.providerRef || row.providerRef, amount: found.amount ?? row.amount, status: found.status,
+    failure: found.failure, raw: { ...(row.raw as object | undefined ?? {}), provider: found.raw ?? null } };
+  await repo.payments.put(settled);
+  return settled;
+}
+
+const NOT_FOUND_FAILURE = { code: 'order_not_found', providerCode: null, retryable: false, userMessage: 'The provider has no order for this attempt.' } as const;
+
+/**
+ * EC:A49 — without a lookup, a pending attempt is re-sent with its key only while the provider still
+ * replays that key (Toss: 15 days). Past that, re-sending could create a second charge.
+ */
+export const REDRIVE_WITHOUT_LOOKUP_MS = 14 * DAY_MS;
 
 /** Every attempt row of one (subscription, period), oldest first. */
 export async function attemptsFor(repo: Repo, sub: Pick<Subscription, 'id'>, period: Period): Promise<Payment[]> {
@@ -82,7 +143,8 @@ function leaseKey(attemptKey: string): string {
   return `charge-lease:${attemptKey}`;
 }
 
-interface LeaseInfo { leaseUntil?: string; unleasedSince?: string }
+interface LeaseInfo { leaseUntil?: string; unleasedSince?: string; token?: string }
+let leaseSeq = 0;
 
 function leaseIsStale(current: Operation, now: Date): boolean {
   const info = (current.result as LeaseInfo | null) ?? {};
@@ -98,28 +160,39 @@ export async function withAttemptLease<T>(repo: Repo, clock: Clock, attemptKey: 
     id: key, key, kind: 'lifecycle.charge_attempt', payloadHash: LEASE_HASH, status: 'in_progress',
     result: null, error: null, createdAt: now, completedAt: null, attempts: 0,
   };
-  let claimed = await repo.operations.claim(row);
+  const ops = repo.operations;
+  // EC:A48 — every takeover and release is a compare and set against the row as read, so two callers
+  // that saw the same stale lease cannot both take it, and a holder whose lease was taken over cannot
+  // release the new holder's lease. A Repo without compareAndSet keeps the plain writes.
+  const cas = typeof ops.compareAndSet === 'function' ? ops.compareAndSet.bind(ops) : null;
+  const write = async (expected: Operation, next: Operation) => (cas ? cas(expected, next) : (await ops.put(next), true));
+  let claimed = await ops.claim(row);
   if (!claimed) {
-    const current = await repo.operations.get(key);
+    const current = await ops.get(key);
     if (current && current.status === 'in_progress' && leaseIsStale(current, now)) {
       // A stale lease (its holder died mid-call): release it, then compete for it like everyone else.
-      await repo.operations.put({ ...current, status: 'failed', error: 'lease_expired', completedAt: now });
-      claimed = await repo.operations.claim(row);
+      if (await write(current, { ...current, status: 'failed', error: 'lease_expired', result: null, completedAt: now })) claimed = await ops.claim(row);
     } else if (current && current.status === 'in_progress' && !(current.result as LeaseInfo | null)?.leaseUntil &&
         !(current.result as LeaseInfo | null)?.unleasedSince) {
       // Claimed but its lease time not written yet (the holder is between two statements, or died
       // there): remember when this was first seen; it is only taken over LEASE_MS later.
-      await repo.operations.put({ ...current, result: { unleasedSince: now.toISOString() } });
+      await write(current, { ...current, result: { unleasedSince: now.toISOString() } });
     }
   }
   if (!claimed) return { held: false };
-  await repo.operations.put({ ...claimed, result: { leaseUntil: new Date(now.getTime() + ATTEMPT_LEASE_MS).toISOString() } });
+  const token = `${now.getTime().toString(36)}.${(leaseSeq += 1).toString(36)}.${Math.random().toString(36).slice(2, 10)}`;
+  const held: Operation = { ...claimed, result: { leaseUntil: new Date(now.getTime() + ATTEMPT_LEASE_MS).toISOString(), token } };
+  if (!(await write(claimed, held))) return { held: false };
   try {
     return { held: true, value: await fn() };
   } finally {
-    // Released (status 'failed' is the re-claimable state of an operations row).
-    const mine = await repo.operations.get(key);
-    if (mine) await repo.operations.put({ ...mine, status: 'failed', error: null, result: null, completedAt: clock.now() });
+    // Released (status 'failed' is the re-claimable state of an operations row) — only our own lease.
+    const released: Operation = { ...held, status: 'failed', error: null, result: null, completedAt: clock.now() };
+    if (cas) await cas(held, released);
+    else {
+      const mine = await ops.get(key);
+      if (mine && (mine.result as LeaseInfo | null)?.token === token) await ops.put(released);
+    }
   }
 }
 
@@ -142,6 +215,7 @@ export interface ChargeAttemptInput {
   period: Period;
   attemptKey: string;
   correlationId?: string;
+  notifier?: Notifier;
 }
 
 /**
@@ -160,9 +234,17 @@ async function chargeAttemptHeld(input: ChargeAttemptInput): Promise<ChargeAttem
   const { provider, repo, clock, sub, price, period, attemptKey } = input;
   const id = attemptPaymentId(attemptKey);
   const orderId = providerOrderId(attemptKey);
+  const notifier = input.notifier ?? new NoopNotifier();
   const stored = await repo.payments.get(id);
   if (stored?.status === 'succeeded') return { kind: 'succeeded', payment: stored };
   if (stored?.status === 'failed') return { kind: 'declined', payment: stored, fresh: false };
+  if (stored && isUnderReview(stored)) return { kind: 'unresolved', payment: stored, reason: 'attempt_needs_review', first: false };
+  if (stored) {
+    // EC:A49 — a re-drive asks the provider first: the earlier call may have been paid (its answer
+    // lost), and past the key-replay window a re-send would be a new charge.
+    const asked = await askProvider(input, stored, notifier, { amountMinor: price.amountMinor, currency: price.currency });
+    if (asked) return asked;
+  }
 
   const pending: Payment = stored ?? {
     id,
@@ -191,6 +273,11 @@ async function chargeAttemptHeld(input: ChargeAttemptInput): Promise<ChargeAttem
       idempotencyKey: attemptKey,
     });
   } catch (err) {
+    if (isDuplicateOrder(err)) {
+      // EC:A49 — the orderId already exists at the provider: settle from the order itself.
+      const asked = await askProvider(input, pending, notifier, pending.amount, true);
+      return asked ?? { kind: 'unresolved', payment: pending, reason: 'duplicate_order_unverified', first: !stored };
+    }
     if (isDecline(err)) {
       const failed: Payment = { ...pending, status: 'failed', failure: err.failure };
       await repo.payments.put(failed);
@@ -217,6 +304,32 @@ async function chargeAttemptHeld(input: ChargeAttemptInput): Promise<ChargeAttem
     default:
       return { kind: 'unresolved', payment: row, reason: `provider status ${row.status}`, first: !stored };
   }
+}
+
+/**
+ * EC:A49 — settle a re-driven attempt from the provider's own record of the order. Returns an outcome
+ * when the attempt is settled or must stay unresolved; null when the provider has no such order (the
+ * earlier request never arrived), so sending it with the same key is safe.
+ */
+async function askProvider(input: ChargeAttemptInput, row: Payment, notifier: Notifier, expected: Money, mustExist = false): Promise<ChargeAttemptOutcome | null> {
+  const { provider, repo, clock } = input;
+  if (typeof provider.getPaymentByOrderId !== 'function') {
+    if (mustExist) return { kind: 'unresolved', payment: row, reason: 'duplicate_order_no_lookup', first: false };
+    if (clock.now().getTime() - row.occurredAt.getTime() > REDRIVE_WITHOUT_LOOKUP_MS) {
+      return { kind: 'unresolved', payment: row, reason: 'beyond_replay_window_no_lookup', first: false };
+    }
+    return null;
+  }
+  let found: Payment | null;
+  try {
+    found = await provider.getPaymentByOrderId(orderIdOf(row));
+  } catch (err) {
+    return { kind: 'unresolved', payment: row, reason: `lookup failed: ${err instanceof Error ? err.message : String(err)}`, first: false };
+  }
+  if (!found) return mustExist ? { kind: 'unresolved', payment: row, reason: 'duplicate_order_not_found', first: false } : null;
+  const settled = await applyLookup(repo, notifier, row, found, expected);
+  if (!settled) return { kind: 'unresolved', payment: (await repo.payments.get(row.id)) ?? row, reason: isUnderReview((await repo.payments.get(row.id)) ?? row) ? 'attempt_needs_review' : `provider status ${found.status}`, first: false };
+  return settled.status === 'succeeded' ? { kind: 'succeeded', payment: settled } : { kind: 'declined', payment: settled, fresh: true };
 }
 
 /**
@@ -250,13 +363,15 @@ export async function markUnresolved(input: {
  * request never arrived: the row is closed as failed, so it is never charged by anyone later.
  */
 export async function settleAttemptByLookup(input: {
-  provider: PaymentProvider; repo: Repo; clock: Clock; row: Payment;
+  provider: PaymentProvider; repo: Repo; clock: Clock; row: Payment; expected?: Money | null; notifier?: Notifier;
 }): Promise<Payment | null> {
   const { provider, repo, clock, row } = input;
+  const notifier = input.notifier ?? new NoopNotifier();
   const key = attemptKeyOf(row) ?? row.id;
   const leased = await withAttemptLease(repo, clock, key, async () => {
     const fresh = (await repo.payments.get(row.id)) ?? row;
     if (fresh.status === 'succeeded' || fresh.status === 'failed') return fresh;
+    if (isUnderReview(fresh)) return null; // EC:A50 — a person decides
     if (typeof provider.getPaymentByOrderId !== 'function') return null;
     let found: Payment | null;
     try {
@@ -264,13 +379,12 @@ export async function settleAttemptByLookup(input: {
     } catch {
       return null;
     }
-    const settled: Payment = found
-      ? { ...fresh, providerRef: found.providerRef || fresh.providerRef, amount: found.amount ?? fresh.amount, status: found.status,
-          failure: found.failure, raw: { ...(fresh.raw as object | undefined ?? {}), provider: found.raw ?? null } }
-      : { ...fresh, status: 'failed', failure: { code: 'order_not_found', providerCode: null, retryable: false, userMessage: 'The provider has no order for this attempt.' } };
-    if (settled.status === 'pending') return null;
-    await repo.payments.put(settled);
-    return settled;
+    if (!found) {
+      const closed: Payment = { ...fresh, status: 'failed', failure: { ...NOT_FOUND_FAILURE } };
+      await repo.payments.put(closed);
+      return closed;
+    }
+    return applyLookup(repo, notifier, fresh, found, input.expected ?? null);
   });
   return leased.held ? leased.value : null;
 }

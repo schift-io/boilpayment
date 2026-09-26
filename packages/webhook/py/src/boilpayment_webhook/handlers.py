@@ -360,14 +360,17 @@ def default_handlers(
                 await repo.payments.put(dataclasses.replace(
                     stored, status="succeeded", provider_ref=payment.provider_ref, amount=payment.amount, failure=None,
                 ))
-            if lifecycle is not None:
+            # EC:A51 (A5-4) -- the renewal this pays for is the stored attempt's period (see handlers.ts).
+            paid_period = stored.period if stored is not None else None
+            if lifecycle is not None and paid_period is not None:
                 async def _renew(sub_id: str = payment.subscription_id) -> None:
                     sub = await repo.subscriptions.get(sub_id)
                     if sub is None:
                         await mark_unknown_provider_ref("subscription", sub_id, ctx.provider.name)
                         return
                     await lifecycle.on_renewal_paid(
-                        sub=sub, payment=payment, policy=policy, ledger=scoped_ledger, repo=repo, clock=clock,
+                        sub=sub, payment=dataclasses.replace(payment, period=paid_period), policy=policy,
+                        ledger=scoped_ledger, repo=repo, clock=clock,
                     )
 
                 await _retry_on_version_conflict(_renew)

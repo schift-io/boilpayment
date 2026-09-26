@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import itertools
+import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal
@@ -19,6 +21,7 @@ from typing import Literal
 from boilpayment_core import (
     Clock,
     Money,
+    NoopNotifier,
     Notification,
     Notifier,
     Operation,
@@ -65,10 +68,81 @@ def attempt_payment_id(attempt_key: str) -> str:
     return "pay_rn_" + _sha256(attempt_key)[:32]
 
 
+_DUPLICATE_ORDER_CODES = frozenset({"DUPLICATED_ORDER_ID", "ALREADY_PROCESSED_PAYMENT", "ALREADY_PAID"})
+
+
+def is_duplicate_order(err: BaseException) -> bool:
+    """EC:A49 -- the orderId/paymentId was already used (Toss DUPLICATED_ORDER_ID and
+    ALREADY_PROCESSED_PAYMENT after its 15-day key window, PortOne ALREADY_PAID): the order exists
+    and may have moved money, so it is settled by lookup, never a decline."""
+    if not isinstance(err, ProviderError):
+        return False
+    details = err.details if isinstance(err.details, dict) else {}
+    codes = (details.get("code"), details.get("type"), getattr(err.failure, "provider_code", None))
+    return any(isinstance(c, str) and c in _DUPLICATE_ORDER_CODES for c in codes)
+
+
+def lookup_mismatch(found: Payment, *, amount: Money | None, customer_id: str) -> str | None:
+    """EC:A50 -- a looked-up order settles an attempt only when it is the charge the kit asked for."""
+    if found.status in ("refunded", "partially_refunded", "disputed"):
+        return f"order_{found.status}"
+    if amount is not None and amount.amount_minor > 0:
+        if found.amount is not None and found.amount.currency and found.amount.currency != amount.currency:
+            return "currency_mismatch"
+        if found.amount is not None and found.amount.amount_minor != amount.amount_minor:
+            return "amount_mismatch"
+    if found.customer_id and found.customer_id != customer_id:
+        return "customer_mismatch"
+    return None
+
+
+def is_under_review(row: Payment) -> bool:
+    """EC:A50 -- an attempt a person has to look at: never charged, re-driven or granted by the kit."""
+    raw = row.raw if isinstance(row.raw, dict) else {}
+    return bool(raw.get("boilpaymentReview"))
+
+
+async def _apply_lookup(repo: Repo, notifier: Notifier, row: Payment, found: Payment, expected: Money | None) -> Payment | None:
+    """EC:A49 A50 -- apply a looked-up order to an attempt row (see applyLookup in charge-attempt.ts)."""
+    use = expected if expected is not None else (row.amount if row.amount.amount_minor > 0 else None)
+    reason = lookup_mismatch(found, amount=use, customer_id=row.customer_id)
+    raw = dict(row.raw) if isinstance(row.raw, dict) else {}
+    if reason:
+        raw["boilpaymentReview"] = {
+            "reason": reason,
+            "status": found.status,
+            "amount": {"amountMinor": found.amount.amount_minor, "currency": found.amount.currency} if found.amount else None,
+            "customerId": found.customer_id or None,
+            "providerRef": found.provider_ref or None,
+        }
+        await repo.payments.put(dataclasses.replace(row, raw=raw))
+        await notifier.send(Notification(type="cs.needs_human", customer_id=row.customer_id, payload={
+            "kind": "attempt_lookup_mismatch", "subscription_id": row.subscription_id, "payment_id": row.id, "reason": reason}))
+        return None
+    if found.status not in ("succeeded", "failed"):
+        return None
+    raw["provider"] = found.raw
+    settled = dataclasses.replace(row, provider_ref=found.provider_ref or row.provider_ref, amount=found.amount or row.amount,
+                                  status=found.status, failure=found.failure, raw=raw)
+    await repo.payments.put(settled)
+    return settled
+
+
+def _not_found_failure() -> PaymentFailure:
+    return PaymentFailure(code="order_not_found", provider_code=None, retryable=False, user_message="The provider has no order for this attempt.")
+
+
+# EC:A49 -- without a lookup, a pending attempt is re-sent with its key only while the provider still
+# replays that key (Toss: 15 days).
+REDRIVE_WITHOUT_LOOKUP = timedelta(days=14)
+
+
 def is_decline(err: BaseException) -> bool:
     """EC:A34 -- the provider refused the request (a decline) vs. an outcome nobody knows."""
     if not isinstance(err, ProviderError):
         return False
+    if is_duplicate_order(err):
+        return False  # EC:A49
     status = getattr(err, "http_status", None)
     if status is None:
         return err.failure.code != "provider_unavailable"
@@ -127,31 +201,51 @@ def _lease_is_stale(current: Operation, now: datetime) -> bool:
     return False
 
 
+_lease_seq = itertools.count(1)
+
+
 async def with_attempt_lease(repo: Repo, clock: Clock, attempt_key: str, fn):  # type: ignore[no-untyped-def]
     """Run fn() holding the attempt's lease. Returns (True, value) or (False, None) when another
-    caller holds it. Mirrors withAttemptLease in charge-attempt.ts."""
+    caller holds it. Mirrors withAttemptLease in charge-attempt.ts. EC:A48 -- every takeover and
+    release is a compare and set against the row as read (when the table supports it)."""
     key = _lease_key(attempt_key)
     now = clock.now()
+    ops = repo.operations
+    cas = getattr(ops, "compare_and_set", None)
+
+    async def write(expected: Operation, nxt: Operation) -> bool:
+        if cas is not None:
+            return bool(await cas(expected, nxt))
+        await ops.put(nxt)
+        return True
+
     row = Operation(id=key, key=key, kind="lifecycle.charge_attempt", payload_hash=_LEASE_HASH,
                     status="in_progress", created_at=now, result=None, error=None, completed_at=None, attempts=0)
-    claimed = await repo.operations.claim(row)
+    claimed = await ops.claim(row)
     if claimed is None:
-        current = await repo.operations.get(key)
+        current = await ops.get(key)
         info = current.result if current is not None and isinstance(current.result, dict) else {}
         if current is not None and current.status == "in_progress" and _lease_is_stale(current, now):
-            await repo.operations.put(dataclasses.replace(current, status="failed", error="lease_expired", completed_at=now))
-            claimed = await repo.operations.claim(row)
+            if await write(current, dataclasses.replace(current, status="failed", error="lease_expired", result=None, completed_at=now)):
+                claimed = await ops.claim(row)
         elif current is not None and current.status == "in_progress" and not info.get("leaseUntil") and not info.get("unleasedSince"):
-            await repo.operations.put(dataclasses.replace(current, result={"unleasedSince": _iso(now)}))
+            await write(current, dataclasses.replace(current, result={"unleasedSince": _iso(now)}))
     if claimed is None:
         return False, None
-    await repo.operations.put(dataclasses.replace(claimed, result={"leaseUntil": _iso(now + ATTEMPT_LEASE)}))
+    token = f"{int(now.timestamp() * 1000):x}.{next(_lease_seq):x}.{secrets.token_hex(4)}"
+    held = dataclasses.replace(claimed, result={"leaseUntil": _iso(now + ATTEMPT_LEASE), "token": token})
+    if not await write(claimed, held):
+        return False, None
     try:
         return True, await fn()
     finally:
-        mine = await repo.operations.get(key)
-        if mine is not None:
-            await repo.operations.put(dataclasses.replace(mine, status="failed", error=None, result=None, completed_at=clock.now()))
+        released = dataclasses.replace(held, status="failed", error=None, result=None, completed_at=clock.now())
+        if cas is not None:
+            await cas(held, released)
+        else:
+            mine = await ops.get(key)
+            if mine is not None and isinstance(mine.result, dict) and mine.result.get("token") == token:
+                await ops.put(released)
 
 
 @dataclass(kw_only=True, slots=True)
@@ -175,6 +269,7 @@ class ChargeAttemptInput:
     period: Period
     attempt_key: str
     correlation_id: str | None = None
+    notifier: Notifier | None = None
 
 
 async def charge_attempt(input: ChargeAttemptInput) -> ChargeAttemptOutcome:
@@ -189,11 +284,19 @@ async def _charge_attempt_held(input: ChargeAttemptInput) -> ChargeAttemptOutcom
     repo, sub, price = input.repo, input.sub, input.price
     row_id = attempt_payment_id(input.attempt_key)
     order_id = provider_order_id(input.attempt_key)
+    notifier = input.notifier or NoopNotifier()
     stored = await repo.payments.get(row_id)
     if stored is not None and stored.status == "succeeded":
         return ChargeAttemptOutcome(kind="succeeded", payment=stored)
     if stored is not None and stored.status == "failed":
         return ChargeAttemptOutcome(kind="declined", payment=stored, fresh=False)
+    if stored is not None and is_under_review(stored):
+        return ChargeAttemptOutcome(kind="unresolved", payment=stored, reason="attempt_needs_review", first=False)
+    if stored is not None:
+        # EC:A49 -- a re-drive asks the provider first (see charge-attempt.ts).
+        asked = await _ask_provider(input, stored, notifier, Money(amount_minor=price.amount_minor, currency=price.currency))
+        if asked is not None:
+            return asked
 
     pending = stored or Payment(
         id=row_id,
@@ -224,6 +327,9 @@ async def _charge_attempt_held(input: ChargeAttemptInput) -> ChargeAttemptOutcom
             idempotency_key=input.attempt_key,
         )
     except Exception as err:  # noqa: BLE001 -- classified below: decline vs unknown outcome
+        if is_duplicate_order(err):
+            asked = await _ask_provider(input, pending, notifier, pending.amount, must_exist=True)
+            return asked or ChargeAttemptOutcome(kind="unresolved", payment=pending, reason="duplicate_order_unverified", first=stored is None)
         if is_decline(err):
             failed = dataclasses.replace(pending, status="failed", failure=err.failure)  # type: ignore[attr-defined]
             await repo.payments.put(failed)
@@ -252,6 +358,32 @@ async def _charge_attempt_held(input: ChargeAttemptInput) -> ChargeAttemptOutcom
         reason=f"provider status {row.status}",
         first=stored is None,
     )
+
+
+async def _ask_provider(input: ChargeAttemptInput, row: Payment, notifier: Notifier, expected: Money,
+                        must_exist: bool = False) -> ChargeAttemptOutcome | None:
+    """EC:A49 -- settle a re-driven attempt from the provider's own record (see askProvider in TS)."""
+    lookup = getattr(input.provider, "get_payment_by_order_id", None)
+    if lookup is None:
+        if must_exist:
+            return ChargeAttemptOutcome(kind="unresolved", payment=row, reason="duplicate_order_no_lookup", first=False)
+        if input.clock.now() - row.occurred_at > REDRIVE_WITHOUT_LOOKUP:
+            return ChargeAttemptOutcome(kind="unresolved", payment=row, reason="beyond_replay_window_no_lookup", first=False)
+        return None
+    try:
+        found = await lookup(order_id_of(row))
+    except Exception as err:  # noqa: BLE001 -- no answer: stay unresolved, never re-send blind
+        return ChargeAttemptOutcome(kind="unresolved", payment=row, reason=f"lookup failed: {err}", first=False)
+    if found is None:
+        return ChargeAttemptOutcome(kind="unresolved", payment=row, reason="duplicate_order_not_found", first=False) if must_exist else None
+    settled = await _apply_lookup(input.repo, notifier, row, found, expected)
+    if settled is None:
+        current = await input.repo.payments.get(row.id) or row
+        reason = "attempt_needs_review" if is_under_review(current) else f"provider status {found.status}"
+        return ChargeAttemptOutcome(kind="unresolved", payment=current, reason=reason, first=False)
+    if settled.status == "succeeded":
+        return ChargeAttemptOutcome(kind="succeeded", payment=settled)
+    return ChargeAttemptOutcome(kind="declined", payment=settled, fresh=True)
 
 
 async def mark_unresolved(
@@ -305,14 +437,19 @@ def order_id_of(row: Payment) -> str:
     return provider_order_id(key) if key else row.provider_ref
 
 
-async def settle_attempt_by_lookup(*, provider: PaymentProvider, repo: Repo, clock: Clock, row: Payment) -> Payment | None:
-    """EC:A38 -- settle a pending attempt WITHOUT charging, by asking the provider for its orderId."""
+async def settle_attempt_by_lookup(*, provider: PaymentProvider, repo: Repo, clock: Clock, row: Payment,
+                                   expected: Money | None = None, notifier: Notifier | None = None) -> Payment | None:
+    """EC:A38 -- settle a pending attempt WITHOUT charging, by asking the provider for its orderId.
+    EC:A50 -- a mismatching order is held for a person (None)."""
     key = attempt_key_of(row) or row.id
+    notes = notifier or NoopNotifier()
 
     async def run() -> Payment | None:
         fresh = await repo.payments.get(row.id) or row
         if fresh.status in ("succeeded", "failed"):
             return fresh
+        if is_under_review(fresh):
+            return None
         lookup = getattr(provider, "get_payment_by_order_id", None)
         if lookup is None:
             return None
@@ -320,18 +457,11 @@ async def settle_attempt_by_lookup(*, provider: PaymentProvider, repo: Repo, clo
             found = await lookup(order_id_of(fresh))
         except Exception:  # noqa: BLE001 -- no answer yet; retried on a later tick
             return None
-        raw = dict(fresh.raw) if isinstance(fresh.raw, dict) else {}
-        if found is not None:
-            raw["provider"] = found.raw
-            settled = dataclasses.replace(fresh, provider_ref=found.provider_ref or fresh.provider_ref,
-                                          amount=found.amount or fresh.amount, status=found.status, failure=found.failure, raw=raw)
-        else:
-            settled = dataclasses.replace(fresh, status="failed", failure=PaymentFailure(
-                code="order_not_found", provider_code=None, retryable=False, user_message="The provider has no order for this attempt."))
-        if settled.status == "pending":
-            return None
-        await repo.payments.put(settled)
-        return settled
+        if found is None:
+            closed = dataclasses.replace(fresh, status="failed", failure=_not_found_failure())
+            await repo.payments.put(closed)
+            return closed
+        return await _apply_lookup(repo, notes, fresh, found, expected)
 
     held, value = await with_attempt_lease(repo, clock, key, run)
     return value if held else None

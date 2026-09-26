@@ -228,11 +228,16 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
       }
       const stored = await repo.payments.get(payment.id);
       if (stored && stored.status === 'pending') await repo.payments.put({ ...stored, status: 'succeeded', providerRef: payment.providerRef, amount: payment.amount, failure: null });
-      if (lifecycle) {
+      // EC:A51 (A5-4) — the renewal this pays for is the stored attempt's period. The provider's copy has
+      // none (PortOne) or could name another; falling back to the subscription's current period would
+      // grant a period that already ended (a trial conversion paid twice). No stored period: the row is
+      // recorded succeeded and the scheduler's attempt path completes the renewal.
+      const paidPeriod = stored?.period ?? null;
+      if (lifecycle && paidPeriod) {
         await retryOnVersionConflict(async () => {
           const sub = await repo.subscriptions.get(payment.subscriptionId as string);
           if (!sub) return markUnknownProviderRef('subscription', payment.subscriptionId as string, ctx.provider.name);
-          await lifecycle.onRenewalPaid({ sub, payment, policy, ledger: scopedLedger, repo, clock });
+          await lifecycle.onRenewalPaid({ sub, payment: { ...payment, period: paidPeriod }, policy, ledger: scopedLedger, repo, clock });
         });
       }
     } else if (credits) {

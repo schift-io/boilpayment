@@ -27,6 +27,8 @@ export interface SchemaStatusResult {
 export type SchemaPostgres = {
   migrate(input: { connectionString: string; modules?: string[] }): Promise<{ applied: string[] }>;
   schemaStatus(input: { connectionString: string; modules?: string[] }): Promise<SchemaStatusResult>;
+  /** EC:A47 — read-only pre-check query (see check.ts); absent in very old SDK builds. */
+  createPool?(connectionString: string): { query(sql: string, params?: unknown[]): Promise<{ rows: Record<string, unknown>[] }>; end(): Promise<void> };
 };
 
 /**

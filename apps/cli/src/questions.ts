@@ -5,7 +5,7 @@ import { DEFAULT_POLICY } from 'boilpayment-core';
 import { getPath } from './util/path.js';
 import type { WizardConfig } from './wizard-state.js';
 import { PROVIDER_OPTIONS, SITUATION_QUESTIONS, existing, has } from './situation.js';
-import { CREDITS_ADVANCED_QUESTIONS, REFUND_REASON_QUESTIONS, REPORT_QUESTIONS, RESERVATION_QUESTIONS } from './questions-detail.js';
+import { CREDITS_ADVANCED_QUESTIONS, MISSED_PERIOD_QUESTIONS, REFUND_REASON_QUESTIONS, REPORT_QUESTIONS, RESERVATION_QUESTIONS } from './questions-detail.js';
 export { questionDefault } from './situation.js';
 
 export type QuestionType = 'select' | 'multiselect' | 'number' | 'text' | 'confirm';
@@ -446,6 +446,7 @@ export const QUESTIONS: Question[] = [
     default: (def('dunning.retryIntervalHours') as number[]).join(','),
     parse: (raw: string) => raw.split(',').map((x) => Number(x.trim())).filter((n) => Number.isFinite(n) && n > 0),
   },
+  ...MISSED_PERIOD_QUESTIONS,
   {
     id: 'dunning_usage_during_grace',
     policyPath: 'dunning.usageDuringGrace',

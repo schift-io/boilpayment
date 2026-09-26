@@ -10,6 +10,8 @@ const PROVIDER_ENV: Record<string, string[]> = {
     '# Toss 웹훅은 서명이 없어 발신 IP 가 유일한 출처 확인입니다. 비워 두면 모든 웹훅을 거부합니다(EC:E19).',
     '# Toss 가 안내하는 웹훅 발신 IP 를 쉼표로 적습니다. handleWebhook 에는 소켓의 연결 주소(remoteAddress)를 넘깁니다.',
     'TOSS_WEBHOOK_ALLOWED_IPS=',
+    '# 비워 두면 https://api.tosspayments.com. 로컬 목·스테이징 호스트를 쓸 때만 채웁니다.',
+    'TOSS_API_BASE=',
     '# `boilpayment live` 로 자동결제 실 왕복을 검증할 때는 Toss 테스트 환경 전용 더미 카드(4906251234123456,',
     '# 유효기간 30/12, 생년월일 900101)를 씁니다 — BIN(앞 6자리)만 유효하면 되고, 테스트 환경이라 실제',
     '# 출금은 없습니다. 다른 BIN 은 빌링키는 발급돼도 결제 단계에서 NOT_SUPPORTED_CARD_TYPE 로 거부될 수',

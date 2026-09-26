@@ -688,3 +688,61 @@ EC:A45 (webhook) — payment.succeeded with no subscriptionRef whose local row i
                renewal of row.subscriptionId (row recorded succeeded, onRenewalPaid), never top-up.
 EC:A46 (cs) — recoverMissingGrants skips failed rows and pending attempt rows; an open needs_human case is
                returned again without a new notice.
+
+## [EC:A47] Missed periods of a self-scheduled subscription (round-5 audit A5-1)
+
+```pseudo
+catchUpPeriods(sub, plan, policy, now):
+   target = nextPeriod(sub.currentPeriod); if target.end > now: return null      # at most one behind: ordinary renewal
+   skipped = []; previous = sub.currentPeriod
+   while target.end <= now: skipped.push(target); previous = target; target = nextPeriod(target)
+   return { previous, target, skipped }
+
+applyMissedPeriods(sub, plan, policy, ...):             # scheduler (no open attempt) and dunning.runRetry (no attempt rows)
+   cu = catchUpPeriods(...); if cu is null: return none
+   if policy.subscription.missedPeriods == 'needs_human_only':
+      sub -> past_due, graceUntil = null (no grace clock); notify cs.needs_human {kind: missed_periods_parked, missed}
+      return parked                                      # nothing charged; later ticks skip it (past_due, no attempt)
+   sub.currentPeriod = cu.previous                       # skip_and_notify (default)
+   notify cs.needs_human {kind: missed_periods_skipped, skipped, charging: cu.target.start}
+   return skipped(target = cu.target)                    # the caller charges cu.target once, its credits are usable
+```
+An attempt already open or paid for the first missed period is finished first (money may have moved
+for it); the skip only happens when nothing was sent for it. `boilpayment check` lists
+self-scheduled subscriptions that are more than one period behind before the first tick after an upgrade.
+
+## [EC:A48] Attempt lease: compare and set
+
+The lease row carries an owner token. Releasing a stale lease, re-claiming it, and returning it are
+each `operations.compareAndSet(expected = row as read, next)`: a caller whose read is out of date loses,
+so two callers can never both take over one stale lease, and a holder whose lease was taken over cannot
+release the new holder's lease. A Repo without compareAndSet falls back to put (return only when the
+token still matches).
+
+## [EC:A49] Re-driving a pending attempt asks the provider first
+
+```pseudo
+chargeAttemptHeld(input):
+   stored = payments.get(attemptPaymentId(key))
+   if stored is under review (A50): unresolved
+   if stored (a re-drive):
+      if provider has getPaymentByOrderId:
+         found = lookup(orderIdOf(stored))                # throws -> unresolved, never a blind re-send
+         if found: settle from it (A50 checks) -> succeeded | declined | unresolved(pending/mismatch)
+         else: the earlier request never arrived -> send with the same key
+      elif now - stored.occurredAt > 14 days: unresolved (the provider may no longer replay the key)
+   send; on a duplicate-order refusal (DUPLICATED_ORDER_ID, ALREADY_PROCESSED_PAYMENT, ALREADY_PAID):
+      settle by lookup (never a decline); no lookup / not found -> unresolved
+```
+
+## [EC:A50] A looked-up order must match the attempt
+
+`lookupMismatch(found, expected)`: refunded, partially_refunded or disputed; a different currency or
+amount than the attempt row (legacy rows: the plan price); a different customer. Any mismatch keeps the
+row pending with `raw.boilpaymentReview = {reason, found...}` and sends `attempt_lookup_mismatch` once.
+A row under review is never charged, re-driven or granted by the kit; its period waits for a person.
+
+Note (round-5 audit Info I-2): with the defaults `graceDays: 7` and `retryIntervalHours: [24, 72, 120]`
+the third retry would run 216 h (9 days) after the failure, past the grace period, so it never runs;
+grace expiry (EC:A16) ends the subscription first. Pick intervals whose sum stays inside `graceDays`
+when every retry should run.

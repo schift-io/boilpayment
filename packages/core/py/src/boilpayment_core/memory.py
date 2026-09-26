@@ -96,6 +96,14 @@ class OperationMemTable(MemTable[Operation]):
         self._rows[row.key] = claimed
         return claimed
 
+    async def compare_and_set(self, expected: Operation, next_row: Operation) -> bool:
+        """EC:A48 -- write only if status and result are unchanged, with no await in between."""
+        current = self._rows.get(expected.key)
+        if current is None or current.status != expected.status or current.result != expected.result:
+            return False
+        self._rows[expected.key] = dataclasses.replace(next_row, key=expected.key, id=expected.key)
+        return True
+
 
 class InMemoryRepo:
     def __init__(self) -> None:

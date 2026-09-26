@@ -11,6 +11,7 @@ from boilpayment_core import (
     LedgerEntry,
     LedgerReference,
     LedgerStore,
+    Money,
     NewLedgerEntry,
     Notification,
     Notifier,
@@ -39,6 +40,8 @@ from .charge_attempt import (
     iso_z,
 )
 from .internal import price_for_subscription, renewal_plan_id, replace_sub
+from .legacy_attempts import check_legacy_dunning
+from .missed_periods import apply_missed_periods
 from .period import next_period
 from .renewal import OnRenewalPaidInput, on_renewal_paid
 from .retry import retry_on_version_conflict
@@ -433,6 +436,35 @@ async def run_retry(input: RunRetryInput) -> RunRetryResult:
             policy.period.timezone, policy.period.month_end_anchor,
         )
         attempts = await attempts_for(repo, sub, charged_period)
+        if not attempts:
+            # EC:A39 (A5-3) -- an earlier release's dunning charge for this period may already have moved
+            # money (recorded failed, no row): ask before charging again.
+            expected = Money(amount_minor=price.amount_minor, currency=price.currency)
+            legacy = await check_legacy_dunning(provider=provider, repo=repo, clock=clock, sub=sub, period=charged_period,
+                                                price=expected, notifier=notifier)
+            if legacy.kind == "paid" and legacy.payment is not None:
+                item.status = "sent"
+                item.attempts += 1
+                await repo.outbox.put(item)
+                renewed = await on_renewal_paid(OnRenewalPaidInput(
+                    sub=sub, payment=legacy.payment, policy=policy, ledger=ledger, repo=repo, clock=clock,
+                ))
+                return RunRetryResult(outcome="recovered", sub=renewed.sub, grants=[renewed.grant])
+            if legacy.kind == "unverified":
+                item.next_attempt_at = clock.now() + timedelta(hours=1)
+                await repo.outbox.put(item)
+                return RunRetryResult(outcome="unresolved", sub=sub, grants=[])
+            # EC:A47 -- a retry never bills a period that has already ended in full.
+            missed = await apply_missed_periods(sub=sub, plan=plan, policy=policy, repo=repo, notifier=notifier, clock=clock)
+            if missed.kind == "parked" and missed.sub is not None:
+                item.status = "sent"
+                item.attempts += 1
+                await repo.outbox.put(item)
+                return RunRetryResult(outcome="skipped", sub=missed.sub, grants=[])
+            if missed.kind == "skipped" and missed.sub is not None and missed.target is not None:
+                sub = missed.sub
+                charged_period = missed.target
+                attempts = await attempts_for(repo, sub, charged_period)
         earlier = next((p for p in attempts if p.status == "succeeded"), None)
         if earlier is None and any(p.status == "pending" and is_legacy_attempt(p) for p in attempts):
             # EC:A39 -- a legacy row is never re-driven: wait for its lookup.
@@ -446,7 +478,7 @@ async def run_retry(input: RunRetryInput) -> RunRetryResult:
             if earlier is not None
             else await charge_attempt(ChargeAttemptInput(
                 provider=provider, repo=repo, clock=clock, sub=sub, price=price,
-                period=charged_period, attempt_key=attempt_key,
+                period=charged_period, attempt_key=attempt_key, notifier=notifier,
             ))
         )
         if charge.kind == "in_flight":

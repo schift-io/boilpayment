@@ -44,6 +44,9 @@ export type GrantDuringGrace = 'defer_until_paid' | 'grant_anyway';
 export type OnFinalFailure = 'revoke_unpaid_period' | 'revoke_all' | 'keep';
 export type OnRecovery = 'regrant_current_period' | 'regrant_all_missed' | 'no_regrant';
 export type MultipleSubscriptions = 'deny' | 'allow_separate_pools' | 'allow_merged_pool';
+/** EC:A47 — a self-scheduled subscription more than one period behind (cron stopped, an upgrade from a
+ * release that never renewed): charge only the period containing now, or charge nothing and ask a person. */
+export type MissedPeriods = 'skip_and_notify' | 'needs_human_only';
 export type Rollover = 'none' | 'banked' | 'full';
 export type BankReset = 'on_renewal' | 'never' | 'on_cancel';
 export type ConsumeOrder = 'expiring_first' | 'promo_first_then_expiring' | 'paid_first';
@@ -149,7 +152,7 @@ export interface Policy {
     autoApprove: { maxAmountMinor: number; maxCredits: number };
     fraud: { refundVelocity: number; windowDays: number };
   };
-  subscription: { multiplePerCustomer: MultipleSubscriptions };
+  subscription: { multiplePerCustomer: MultipleSubscriptions; missedPeriods: MissedPeriods };
   /** EC:J4 L4 — how long operational rows are kept before a retention job prunes them. */
   retention: { operationDays: number; auditLogDays: number };
 }
@@ -571,6 +574,11 @@ export interface Table<T extends { id: string }, F = Partial<T>> {
 export interface OperationTable extends Table<Operation> {
   /** Atomically acquire an absent or matching failed operation; null means another caller owns it. */
   claim(row: Operation): Promise<Operation | null>;
+  /**
+   * EC:A48 — write `next` only if the stored row still has `expected`'s status and result (compare and
+   * set). False when another writer changed it first. Optional: a Repo without it keeps the plain put.
+   */
+  compareAndSet?(expected: Pick<Operation, 'key' | 'status' | 'result'>, next: Operation): Promise<boolean>;
 }
 export interface Repo {
   customers: Table<Customer>;

@@ -584,7 +584,9 @@ class PortoneProvider:
         try:
             return await self.get_payment(order_id)
         except ProviderError as err:
-            if getattr(err, "http_status", None) == 404:
+            # EC:A52 -- only PortOne's PAYMENT_NOT_FOUND means "no such order"; any other 404 is an error.
+            details = err.details if isinstance(err.details, dict) else {}
+            if getattr(err, "http_status", None) == 404 and details.get("type") == "PAYMENT_NOT_FOUND":
                 return None
             raise
 

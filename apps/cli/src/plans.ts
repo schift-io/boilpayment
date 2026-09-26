@@ -17,7 +17,7 @@ function defaultPlan(config: WizardConfig): PlanConfig {
     creditsPerPeriod: hasCredits ? 1000 : 0,
     usageIncluded: hasUsageQuota ? 1000 : 0,
     trialDays: config.trialEnabled ? 7 : 0,
-    prices: [{ currency: config.providers.includes('toss') ? 'KRW' : 'USD', amountMinor: config.providers.includes('toss') ? 9900 : 1999 }],
+    prices: [{ currency: krDefault(config) ? 'KRW' : 'USD', amountMinor: krDefault(config) ? 9900 : 1999 }],
   };
 }
 
@@ -80,7 +80,7 @@ export async function collectPlans(config: WizardConfig, opts: WizardOptions): P
       { value: 'JPY', label: 'JPY' },
       { value: 'EUR', label: 'EUR' },
     ],
-    initialValue: config.providers.includes('toss') ? 'KRW' : 'USD',
+    initialValue: krDefault(config) ? 'KRW' : 'USD',
   });
   if (p.isCancel(currency)) cancelAndExit();
 
@@ -112,4 +112,13 @@ export async function collectPlans(config: WizardConfig, opts: WizardOptions): P
       prices: [{ currency: String(currency), amountMinor: Number(amount), ...(Object.keys(providerPriceRefs).length ? { providerPriceRefs } : {}) }],
     },
   ];
+}
+
+/**
+ * Round-5 audit Info I-3: Toss, and a project whose only providers are Korean (PortOne alone or with
+ * Toss), default the sample plan to KRW; otherwise a KRW subscription meets a USD-only plan and every
+ * renewal goes to plan_price_missing.
+ */
+function krDefault(config: { providers: string[] }): boolean {
+  return config.providers.includes('toss') || (config.providers.includes('portone') && config.providers.every((p) => p === 'portone' || p === 'toss'));
 }

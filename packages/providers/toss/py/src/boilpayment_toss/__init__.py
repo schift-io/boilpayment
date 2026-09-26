@@ -613,7 +613,9 @@ class TossProvider:
         try:
             raw = await self._request("GET", f"/v1/payments/orders/{quote(order_id, safe='')}")
         except ProviderError as err:
-            if getattr(err, "http_status", None) == 404:
+            # EC:A52 -- only Toss's own NOT_FOUND_PAYMENT means "no such order"; any other 404 is an error.
+            details = err.details if isinstance(err.details, dict) else {}
+            if getattr(err, "http_status", None) == 404 and details.get("code") == "NOT_FOUND_PAYMENT":
                 return None
             raise
         return normalize_toss_payment(raw)

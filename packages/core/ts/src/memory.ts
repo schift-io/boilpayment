@@ -106,6 +106,13 @@ export class OperationMemTable extends MemTable<Operation> {
     this.rows.set(row.key, claimed);
     return claimed;
   }
+  // EC:A48 — compare and set, with no await between the check and the write.
+  async compareAndSet(expected: Pick<Operation, 'key' | 'status' | 'result'>, next: Operation): Promise<boolean> {
+    const current = this.rows.get(expected.key);
+    if (!current || current.status !== expected.status || JSON.stringify(current.result ?? null) !== JSON.stringify(expected.result ?? null)) return false;
+    this.rows.set(expected.key, { ...next, key: expected.key, id: expected.key });
+    return true;
+  }
 }
 
 export class InMemoryRepo implements Repo {

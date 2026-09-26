@@ -220,12 +220,29 @@ export class FakeSelfSchedulingProvider implements PaymentProvider {
       throw new ProviderError(`toss api error (${status})`, { code: status >= 500 ? 'provider_unavailable' : 'card_declined', providerCode: null, retryable: status >= 500, userMessage: 'x' }, {}, status);
     }
     const replay = this.answers.get(input.idempotencyKey);
+    const at = this.now ?? new Date();
+    const firstAt = this.answeredAt.get(input.idempotencyKey);
+    // Toss replays a repeated Idempotency-Key for 15 days; later the same orderId is refused as a
+    // duplicate order (400 DUPLICATED_ORDER_ID) instead of replaying the stored answer.
+    if (replay && firstAt && at.getTime() - firstAt.getTime() > this.replayWindowMs) {
+      throw new ProviderError('duplicated order id', { code: 'unknown', providerCode: 'DUPLICATED_ORDER_ID', retryable: false, userMessage: 'dup' }, { code: 'DUPLICATED_ORDER_ID' }, 400);
+    }
     if (replay) return replay;
     const answer = this.answerFor(input);
     this.answers.set(input.idempotencyKey, answer);
+    this.answeredAt.set(input.idempotencyKey, at);
     if (answer.status === 'succeeded') this.moneyMoved.add(input.idempotencyKey);
+    if (this.loseNextAnswer) { this.loseNextAnswer = false; throw new Error('socket hang up'); } // money moved, answer lost
     return answer;
   }
+  /** Test clock for the idempotency replay window. */
+  now: Date | null = null;
+  replayWindowMs = 15 * 86_400_000;
+  private readonly answeredAt = new Map<string, Date>();
+  /** The next charge moves money but its answer never reaches the caller. */
+  loseNextAnswer = false;
+  /** Test hook: replace what a lookup returns (mismatched amount, customer, refunded state). */
+  lookupOverride: ((orderId: string, found: Payment | null) => Payment | null) | null = null;
 
   /** EC:A38 — lookups by orderId (never charges). `lookupThrows` simulates an unreachable provider. */
   readonly lookups: string[] = [];
@@ -233,7 +250,8 @@ export class FakeSelfSchedulingProvider implements PaymentProvider {
   async getPaymentByOrderId(orderId: string): Promise<Payment | null> {
     this.lookups.push(orderId);
     if (this.lookupThrows) throw new Error('provider unavailable');
-    return [...this.answers.values()].find((a) => a.providerRef === orderId) ?? null;
+    const found = [...this.answers.values()].find((a) => a.providerRef === orderId) ?? null;
+    return this.lookupOverride ? this.lookupOverride(orderId, found) : found;
   }
   /** Test hook: an order an earlier release charged (its orderId was the key itself). */
   seedOrder(orderId: string, status: PaymentStatus, amountMinor = 5000): void {

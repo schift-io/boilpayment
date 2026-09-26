@@ -521,7 +521,9 @@ export class TossProvider implements PaymentProvider {
       const raw = await this.request('GET', `/v1/payments/orders/${encodeURIComponent(orderId)}`);
       return normalizeTossPayment(raw);
     } catch (err) {
-      if (err instanceof ProviderError && err.httpStatus === 404) return null;
+      // EC:A52 — only Toss's own NOT_FOUND_PAYMENT means "no such order"; any other 404 (a proxy, a wrong
+      // base URL, an unknown route) proves nothing and is an error.
+      if (err instanceof ProviderError && err.httpStatus === 404 && (err.details as { code?: unknown } | undefined)?.code === 'NOT_FOUND_PAYMENT') return null;
       throw err;
     }
   }

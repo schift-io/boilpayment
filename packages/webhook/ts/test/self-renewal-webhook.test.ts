@@ -10,7 +10,7 @@ import { FakeProvider, jsonVerify } from './helpers.js';
 
 const period2 = { start: new Date('2026-03-01T00:00:00Z'), end: new Date('2026-04-01T00:00:00Z') };
 
-function setup(remoteStatus: Payment['status']) {
+function setup(remoteStatus: Payment['status'], remotePeriod: Payment['period'] | undefined = undefined) {
   const clock = new FixedClock(new Date('2026-03-01T00:05:00Z'));
   const repo = new InMemoryRepo();
   const ledger = new InMemoryLedger(new SequentialIdGen('led_'));
@@ -26,7 +26,8 @@ function setup(remoteStatus: Payment['status']) {
   };
   const provider = new FakeProvider({
     name: 'portone', verify: jsonVerify('portone'),
-    getPaymentImpl: () => ({ ...row, id: 'remote', customerId: '', subscriptionId: null, status: remoteStatus }),
+    getPaymentImpl: () => ({ ...row, id: 'remote', customerId: '', subscriptionId: null, status: remoteStatus,
+      ...(remotePeriod !== undefined ? { period: remotePeriod } : {}) }),
   });
   const renewed: string[] = [];
   const topups: string[] = [];
@@ -69,5 +70,24 @@ describe('EC:A45 self-scheduled renewal webhook', () => {
     expect(record?.error).toBe('Renewal payment has not succeeded');
     expect(t.renewed).toEqual([]);
     expect(t.topups).toEqual([]);
+  });
+
+  it('EC:A51 (A5-4) pays the period of the stored attempt, even when the provider copy has no period (PortOne)', async () => {
+    const t = setup('succeeded', null);
+    await t.repo.subscriptions.put(t.sub);
+    await t.repo.payments.put(t.row);
+    const record = await t.deliver('evt_paid_3');
+    expect(record?.status).toBe('processed');
+    expect(t.renewed).toEqual(['sub_local:2026-03-01T00:00:00.000Z']);
+  });
+
+  it('EC:A51 a paid event whose attempt row has no period is recorded only; the scheduler completes the renewal', async () => {
+    const t = setup('succeeded', null);
+    await t.repo.subscriptions.put(t.sub);
+    await t.repo.payments.put({ ...t.row, period: null });
+    const record = await t.deliver('evt_paid_4');
+    expect(record?.status).toBe('processed');
+    expect(t.renewed).toEqual([]);
+    expect((await t.repo.payments.get('pay_rn_1'))?.status).toBe('succeeded');
   });
 });

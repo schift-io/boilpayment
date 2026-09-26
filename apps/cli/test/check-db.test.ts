@@ -6,11 +6,13 @@ import type { PaykitConfig } from '../src/config.js';
 // (what it asks, and what it concludes from the answer) without needing a live Postgres. The live
 // paths are exercised for real against a throwaway database; see docs/RELEASE.md.
 const schemaStatus = vi.fn();
+const poolRows: { rows: Record<string, unknown>[] } = { rows: [] };
+const createPool = vi.fn(() => ({ query: vi.fn(async () => poolRows), end: vi.fn(async () => {}) }));
 vi.mock('../src/util/schema-postgres.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/util/schema-postgres.js')>();
   return {
     ...actual,
-    loadSchemaPostgres: vi.fn(async () => ({ migrate: vi.fn(), schemaStatus })),
+    loadSchemaPostgres: vi.fn(async () => ({ migrate: vi.fn(), schemaStatus, createPool })),
   };
 });
 
@@ -87,5 +89,16 @@ describe('checkDatabase', () => {
     schemaStatus.mockResolvedValue(status());
     await checkDatabase('/nonexistent', config({ goods: ['credits'], models: ['subscription'], cs_enabled: false }));
     expect(schemaStatus.mock.calls[0][0].modules).toEqual(['core', 'webhook', 'refund', 'credits', 'cs']);
+  });
+
+  it('EC:A47 lists self-scheduled subscriptions more than one period behind, read-only and advisory', async () => {
+    schemaStatus.mockResolvedValue(status());
+    poolRows.rows = [{ id: 'sub_old', provider: 'portone', period_start: new Date('2026-01-01T00:00:00Z'), period_end: new Date('2026-02-01T00:00:00Z') }];
+    const report = await checkDatabase('/nonexistent', config());
+    expect(report.ok).toBe(true);
+    const text = report.lines.join('\n');
+    expect(text).toContain('sub_old');
+    expect(text).toContain('EC:A47');
+    poolRows.rows = [];
   });
 });

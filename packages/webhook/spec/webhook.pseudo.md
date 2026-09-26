@@ -490,3 +490,11 @@ verifyWebhook({headers, rawBody, receivedAt?}):
 ```
 
 이전 값은 이미 저장된 행의 재처리 때만 쓴다. 유출로 교체한 옛 값이 목록에 남아 있어도 새 이벤트는 서명할 수 없다.
+
+
+## [EC:A51] Self-scheduled renewal webhook pays the stored attempt's period
+
+In the A45 branch the payment passed to `onRenewalPaid` carries `period = stored.period` (the local
+attempt row's period). The provider's copy is not used (PortOne's has none; falling back to
+`sub.currentPeriod` would grant a period that already ended, e.g. twice for a trial conversion). A
+stored row without a period is only recorded succeeded; the scheduler's attempt path completes it.

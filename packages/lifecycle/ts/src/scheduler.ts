@@ -6,7 +6,8 @@ import { nextPeriod } from './period.js';
 import { retryOnVersionConflict } from './retry.js';
 import { priceForSubscription, renewalPlanId } from './internal.js';
 import { attemptKeyOf, attemptsFor, chargeAttempt, isLegacyAttempt, markUnresolved, renewalAttemptKey } from './charge-attempt.js';
-import { checkLegacyDunning, settleOrphanAttempts } from './legacy-attempts.js';
+import { checkLegacyDunning, settleLegacyEnded, settleOrphanAttempts } from './legacy-attempts.js';
+import { applyMissedPeriods } from './missed-periods.js';
 
 export interface DueSubscriptionsInput {
   repo: Repo;
@@ -99,6 +100,12 @@ export async function tick(input: SchedulerTickInput): Promise<SchedulerTickResu
 
   // EC:A38 — attempts left pending by subscriptions that ended meanwhile are settled by lookup.
   const orphans = await settleOrphanAttempts({ provider, repo, ledger, policy, clock, notifier });
+  // EC:A39 (A5-3) — an ended subscription whose earlier-release dunning charge may have moved money.
+  try {
+    await settleLegacyEnded({ provider, repo, ledger, policy, clock, notifier });
+  } catch (err) {
+    errors.push({ subscriptionId: '*', code: 'legacy_settlement_error', message: err instanceof Error ? err.message : String(err) });
+  }
   for (const u of orphans.unresolved) {
     errors.push({ subscriptionId: u.subscriptionId, code: 'renewal_charge_unresolved', message: `attempt ${u.paymentId} still has no answer from the provider` });
   }
@@ -129,23 +136,23 @@ async function renewOne(input: SchedulerTickInput, dueSub: Subscription, notifie
       const result = await onPaymentFailed({ sub, policy, repo, notifier, clock });
       return { kind: 'failed' as const, sub: result.sub };
     }
-    const chargedPeriod = nextPeriod(sub.currentPeriod, plan.interval ?? 'month', sub.anchorDay, policy.period.timezone, policy.period.monthEndAnchor);
+    let chargedPeriod = nextPeriod(sub.currentPeriod, plan.interval ?? 'month', sub.anchorDay, policy.period.timezone, policy.period.monthEndAnchor);
 
     // EC:A34 — one (subscription, period) is charged at most once. A succeeded attempt (the
     // scheduler's or a dunning retry's) finishes the renewal; an attempt whose outcome is unknown is
     // re-driven with its own key; a new charge is started only for an active subscription.
-    const attempts = await attemptsFor(repo, sub, chargedPeriod);
+    let attempts = await attemptsFor(repo, sub, chargedPeriod);
     const paid = attempts.find((p) => p.status === 'succeeded');
     if (paid) {
       const result = await onRenewalPaid({ sub, payment: paid, policy, ledger, repo, clock });
       return { kind: 'charged' as const, sub: result.sub };
     }
     const legacyOpen = attempts.some((p) => p.status !== 'failed' && isLegacyAttempt(p));
-    const open = attempts.find((p) => p.status !== 'failed' && !isLegacyAttempt(p));
+    let open = attempts.find((p) => p.status !== 'failed' && !isLegacyAttempt(p));
     if (!open && !legacyOpen && sub.status !== 'active') return null; // every attempt answered: dunning owns the next charge
     if (!open) {
       // EC:A39 — a dunning charge of an earlier release (no row) may already have paid this period.
-      const legacy = await checkLegacyDunning({ provider, repo, clock, sub, period: chargedPeriod });
+      const legacy = await checkLegacyDunning({ provider, repo, clock, sub, period: chargedPeriod, price, notifier });
       if (legacy.kind === 'paid') {
         const result = await onRenewalPaid({ sub, payment: legacy.payment, policy, ledger, repo, clock });
         return { kind: 'charged' as const, sub: result.sub };
@@ -155,32 +162,49 @@ async function renewOne(input: SchedulerTickInput, dueSub: Subscription, notifie
           subscriptionId: sub.id, orderIds: legacy.orderIds });
       }
     }
-    const attemptKey = (open && attemptKeyOf(open)) || renewalAttemptKey(sub, chargedPeriod);
-    const charge = await chargeAttempt({ provider, repo, clock, sub, price, period: chargedPeriod, attemptKey, correlationId });
+    let renewing = sub;
+    if (!open) {
+      // EC:A47 (A5-1) — more than one period behind: never bill the missed periods one tick at a time.
+      const missed = await applyMissedPeriods({ sub, plan, policy, repo, notifier, clock });
+      if (missed.kind === 'parked') return { kind: 'failed' as const, sub: missed.sub };
+      if (missed.kind === 'skipped') {
+        renewing = missed.sub;
+        chargedPeriod = missed.target;
+        attempts = await attemptsFor(repo, renewing, chargedPeriod);
+        const paidTarget = attempts.find((p) => p.status === 'succeeded');
+        if (paidTarget) {
+          const result = await onRenewalPaid({ sub: renewing, payment: paidTarget, policy, ledger, repo, clock });
+          return { kind: 'charged' as const, sub: result.sub };
+        }
+        open = attempts.find((p) => p.status !== 'failed' && !isLegacyAttempt(p));
+      }
+    }
+    const attemptKey = (open && attemptKeyOf(open)) || renewalAttemptKey(renewing, chargedPeriod);
+    const charge = await chargeAttempt({ provider, repo, clock, sub: renewing, price, period: chargedPeriod, attemptKey, correlationId, notifier });
     switch (charge.kind) {
       case 'in_flight':
         return null; // EC:A37 — another worker is charging this attempt right now
       case 'succeeded': {
-        const result = await onRenewalPaid({ sub, payment: charge.payment, policy, ledger, repo, clock });
+        const result = await onRenewalPaid({ sub: renewing, payment: charge.payment, policy, ledger, repo, clock });
         return { kind: 'charged' as const, sub: result.sub };
       }
       case 'declined': {
-        if (sub.status !== 'active') {
+        if (renewing.status !== 'active') {
           // EC:A36 A41 — the scheduler's own attempt, unresolved until now, turned out declined: dunning
           // takes over (grace restarts from today, smart retries are scheduled), exactly once.
-          if (!charge.fresh || attemptKeyOf(charge.payment) !== renewalAttemptKey(sub, chargedPeriod)) return { kind: 'failed' as const, sub };
-          const result = await onPaymentFailed({ sub, policy, repo, notifier, clock });
+          if (!charge.fresh || attemptKeyOf(charge.payment) !== renewalAttemptKey(renewing, chargedPeriod)) return { kind: 'failed' as const, sub: renewing };
+          const result = await onPaymentFailed({ sub: renewing, policy, repo, notifier, clock });
           return { kind: 'failed' as const, sub: result.sub };
         }
-        const result = await onPaymentFailed({ sub, policy, repo, notifier, clock });
+        const result = await onPaymentFailed({ sub: renewing, policy, repo, notifier, clock });
         return { kind: 'failed' as const, sub: result.sub };
       }
       case 'unresolved': {
         // EC:A36 — past the period end with no answer: grace instead of indefinite access, one notice,
         // and the error is reported every tick until the provider answers.
-        await markUnresolved({ sub, repo, notifier, clock, graceDays: policy.dunning.graceDays, payment: charge.payment, reason: charge.reason });
+        await markUnresolved({ sub: renewing, repo, notifier, clock, graceDays: policy.dunning.graceDays, payment: charge.payment, reason: charge.reason });
         throw new PaymentKitError(`Renewal charge requires reconciliation: ${charge.reason}`, 'scheduler_charge_unresolved', {
-          subscriptionId: sub.id, paymentId: charge.payment.id, status: charge.payment.status, attemptKey, reason: charge.reason,
+          subscriptionId: renewing.id, paymentId: charge.payment.id, status: charge.payment.status, attemptKey, reason: charge.reason,
         });
       }
     }

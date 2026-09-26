@@ -19,6 +19,8 @@ import { priceForSubscription, renewalPlanId } from './internal.js';
 import { attemptKeyOf, attemptsFor, chargeAttempt, dunningAttemptKey, isLegacyAttempt } from './charge-attempt.js';
 import { nextPeriod } from './period.js';
 import { onRenewalPaid } from './renewal.js';
+import { checkLegacyDunning } from './legacy-attempts.js';
+import { applyMissedPeriods } from './missed-periods.js';
 
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
@@ -316,8 +318,39 @@ export async function runRetry(input: RunRetryInput): Promise<RunRetryResult> {
     // earlier one whose local steps failed) completes the renewal through onRenewalPaid, which grants
     // THAT period (usable, not already expired) and advances the subscription — so the next tick has
     // nothing left to charge for it (EC:A34 N1).
-    const chargedPeriod = nextPeriod(sub.currentPeriod, plan.interval ?? 'month', sub.anchorDay, policy.period.timezone, policy.period.monthEndAnchor);
-    const attempts = await attemptsFor(repo, sub, chargedPeriod);
+    let chargedPeriod = nextPeriod(sub.currentPeriod, plan.interval ?? 'month', sub.anchorDay, policy.period.timezone, policy.period.monthEndAnchor);
+    let attempts = await attemptsFor(repo, sub, chargedPeriod);
+    let retrying = sub;
+    if (!attempts.length) {
+      // EC:A39 (A5-3) — an earlier release's dunning charge for this period (no row, recorded failed)
+      // may already have moved money: ask before charging again.
+      const legacy = await checkLegacyDunning({ provider, repo, clock, sub, period: chargedPeriod, price, notifier });
+      if (legacy.kind === 'paid') {
+        item.status = 'sent';
+        item.attempts += 1;
+        await repo.outbox.put(item);
+        const result = await onRenewalPaid({ sub, payment: legacy.payment, policy, ledger, repo, clock });
+        return { outcome: 'recovered' as const, sub: result.sub, grants: [result.grant] };
+      }
+      if (legacy.kind === 'unverified') {
+        item.nextAttemptAt = new Date(clock.now().getTime() + HOUR_MS);
+        await repo.outbox.put(item);
+        return { outcome: 'unresolved' as const, sub, grants: [] };
+      }
+      // EC:A47 — a retry never bills a period that has already ended in full (long grace, stopped cron).
+      const missed = await applyMissedPeriods({ sub, plan, policy, repo, notifier, clock });
+      if (missed.kind === 'parked') {
+        item.status = 'sent';
+        item.attempts += 1;
+        await repo.outbox.put(item);
+        return { outcome: 'skipped' as const, sub: missed.sub, grants: [] };
+      }
+      if (missed.kind === 'skipped') {
+        retrying = missed.sub;
+        chargedPeriod = missed.target;
+        attempts = await attemptsFor(repo, retrying, chargedPeriod);
+      }
+    }
     const earlier = attempts.find((p) => p.status === 'succeeded');
     // EC:A39 — a legacy row (a charge an earlier release made) is never re-driven: wait for its lookup.
     if (!earlier && attempts.some((p) => p.status === 'pending' && isLegacyAttempt(p))) {
@@ -326,10 +359,10 @@ export async function runRetry(input: RunRetryInput): Promise<RunRetryResult> {
       return { outcome: 'unresolved' as const, sub, grants: [] };
     }
     const open = attempts.find((p) => p.status !== 'failed' && p.status !== 'succeeded');
-    const attemptKey = (open && attemptKeyOf(open)) || dunningAttemptKey(sub, chargedPeriod, payload.attempt);
+    const attemptKey = (open && attemptKeyOf(open)) || dunningAttemptKey(retrying, chargedPeriod, payload.attempt);
     const charge = earlier
       ? { kind: 'succeeded' as const, payment: earlier }
-      : await chargeAttempt({ provider, repo, clock, sub, price, period: chargedPeriod, attemptKey });
+      : await chargeAttempt({ provider, repo, clock, sub: retrying, price, period: chargedPeriod, attemptKey, notifier });
     if (charge.kind === 'in_flight') {
       // EC:A37 — another worker holds this attempt: look again shortly, without counting an attempt.
       item.nextAttemptAt = new Date(clock.now().getTime() + HOUR_MS);
@@ -341,7 +374,7 @@ export async function runRetry(input: RunRetryInput): Promise<RunRetryResult> {
     if (charge.kind === 'succeeded') {
       item.status = 'sent';
       await repo.outbox.put(item);
-      const result = await onRenewalPaid({ sub, payment: charge.payment, policy, ledger, repo, clock });
+      const result = await onRenewalPaid({ sub: retrying, payment: charge.payment, policy, ledger, repo, clock });
       return { outcome: 'recovered' as const, sub: result.sub, grants: [result.grant] };
     }
 

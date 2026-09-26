@@ -26,7 +26,10 @@ from boilpayment_webhook import default_handlers, process, receive
 PERIOD2 = Period(start=datetime(2026, 3, 1, tzinfo=UTC), end=datetime(2026, 4, 1, tzinfo=UTC))
 
 
-def _setup(remote_status: str):
+_KEEP = object()
+
+
+def _setup(remote_status: str, remote_period=_KEEP):
     clock = FixedClock(datetime(2026, 3, 1, 0, 5, tzinfo=UTC))
     repo = InMemoryRepo()
     sub = Subscription(
@@ -39,7 +42,8 @@ def _setup(remote_status: str):
         amount=Money(amount_minor=5000, currency="KRW"), status="pending", kind="subscription", period=PERIOD2,
         occurred_at=clock.now(), raw={"boilpaymentAttemptKey": "charge:sub_local:2026-03-01T00:00:00.000Z"},
     )
-    remote = dataclasses.replace(row, id="remote", customer_id="", subscription_id=None, status=remote_status)
+    remote = dataclasses.replace(row, id="remote", customer_id="", subscription_id=None, status=remote_status,
+                                 period=row.period if remote_period is _KEEP else remote_period)
     provider = FakeProvider(verify=json_verify("portone"), name="portone", get_payment_impl=lambda ref: remote)
     renewed: list[str] = []
     topups: list[str] = []
@@ -52,7 +56,7 @@ def _setup(remote_status: str):
         dunning = FakeDunning()
 
         async def on_renewal_paid(self, *, sub, payment, policy, ledger, repo, clock):
-            renewed.append(f"{sub.id}:{payment.period.start.isoformat()}")
+            renewed.append(f"{sub.id}:{payment.period.start.isoformat() if payment.period else None}")
 
     class FakeCredits:
         async def topup(self, **kwargs):
@@ -95,5 +99,30 @@ def test_ec_a45_not_succeeded_fails_record() -> None:
         record = await deliver("evt_paid_2")
         assert record.status == "failed"
         assert renewed == [] and topups == []
+
+    asyncio.run(run())
+
+
+def test_ec_a51_pays_the_stored_attempt_period_when_provider_has_none() -> None:
+    async def run() -> None:
+        repo, sub, row, renewed, _topups, deliver = _setup("succeeded", None)
+        await repo.subscriptions.put(sub)
+        await repo.payments.put(row)
+        record = await deliver("evt_paid_3")
+        assert record.status == "processed"
+        assert renewed == ["sub_local:2026-03-01T00:00:00+00:00"]
+
+    asyncio.run(run())
+
+
+def test_ec_a51_no_stored_period_records_only() -> None:
+    async def run() -> None:
+        repo, sub, row, renewed, _topups, deliver = _setup("succeeded", None)
+        await repo.subscriptions.put(sub)
+        await repo.payments.put(dataclasses.replace(row, period=None))
+        record = await deliver("evt_paid_4")
+        assert record.status == "processed"
+        assert renewed == []
+        assert (await repo.payments.get("pay_rn_1")).status == "succeeded"
 
     asyncio.run(run())

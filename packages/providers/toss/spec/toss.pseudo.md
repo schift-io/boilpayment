@@ -322,3 +322,10 @@ construct: for entry in allowedWebhookIps: parse as address or CIDR (IPv4/IPv6);
 receipt:   addr = remoteAddress; if addr is ::ffff:a.b.c.d: addr = a.b.c.d
            allowed iff addr parses and falls in some entry of the same family
 ```
+
+
+## [EC:A52] getPaymentByOrderId: only the provider's own "not found" is null
+
+`getPaymentByOrderId(orderId)` returns null only for a 404 whose body code is `NOT_FOUND_PAYMENT`. Any other 404
+(an HTML page from a proxy, a wrong base URL, an unknown route) is thrown, so the attempt stays
+unresolved instead of being closed as "never arrived" and charged again.

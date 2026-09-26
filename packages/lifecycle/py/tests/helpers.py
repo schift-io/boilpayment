@@ -206,6 +206,12 @@ class FakeSelfSchedulingProvider:
         # Idempotency like Toss: a repeated Idempotency-Key replays the stored answer.
         self._answers: dict[str, Payment] = {}
         self.money_moved: set[str] = set()
+        # EC:A49 test hooks (see helpers.ts): replay window, lost answers, lookup overrides.
+        self.now: Any = None
+        self.replay_window_seconds = 15 * 86_400
+        self._answered_at: dict[str, Any] = {}
+        self.lose_next_answer = False
+        self.lookup_override: Any = None
 
     def settle(self, idempotency_key: str, status: str) -> None:
         """Test hook: the provider later settles an earlier answer (e.g. pending -> succeeded)."""
@@ -270,12 +276,21 @@ class FakeSelfSchedulingProvider:
                 code="provider_unavailable" if status >= 500 else "card_declined", provider_code=None,
                 retryable=status >= 500, user_message="x"), {}, http_status=status)
         key = kwargs["idempotency_key"]
+        first_at = self._answered_at.get(key)
+        if key in self._answers and first_at is not None and self.now is not None and (self.now - first_at).total_seconds() > self.replay_window_seconds:
+            from boilpayment_core import PaymentFailure, ProviderError
+            raise ProviderError("duplicated order id", PaymentFailure(code="unknown", provider_code="DUPLICATED_ORDER_ID", retryable=False,
+                                                                       user_message="dup"), {"code": "DUPLICATED_ORDER_ID"}, http_status=400)
         if key in self._answers:
             return self._answers[key]
         answer = self._answer_for(kwargs, amount)
         self._answers[key] = answer
+        self._answered_at[key] = self.now
         if answer.status == "succeeded":
             self.money_moved.add(key)
+        if self.lose_next_answer:
+            self.lose_next_answer = False
+            raise RuntimeError("socket hang up")  # money moved, answer lost
         return answer
 
     # EC:A38 -- lookups by orderId (never charges); lookup_throws simulates an unreachable provider.
@@ -288,7 +303,8 @@ class FakeSelfSchedulingProvider:
         self.lookups.append(order_id)
         if self.lookup_throws:
             raise RuntimeError("provider unavailable")
-        return next((a for a in self._answers.values() if a.provider_ref == order_id), None)
+        found = next((a for a in self._answers.values() if a.provider_ref == order_id), None)
+        return self.lookup_override(order_id, found) if self.lookup_override is not None else found
 
     def seed_order(self, order_id: str, status: str, amount_minor: int = 5000) -> None:
         """Test hook: an order an earlier release charged (its orderId was the key itself)."""

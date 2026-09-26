@@ -17,6 +17,13 @@ const MODULE_FILES: { file: string; when: (c: PaykitConfig) => boolean }[] = [
   { file: '0006_cs.sql', when: () => true },
   { file: '0007_subscription_provider_ref_nullable.sql', when: () => true },
   { file: '0008_iap.sql', when: (c) => c.providers.some((p) => p === 'apple' || p === 'google_play') }, // EC:N1
+  // Round-5 audit Info I-1: the later module updates (same gating as schema-postgres MODULE_UPDATES), so a
+  // project that applies paykit/migrations/ by hand reaches the schema this build verifies at boot.
+  { file: '0009_ledger_idempotency_per_customer.sql', when: (c) => c.goods.includes('credits') }, // EC:B20
+  { file: '0010_usage_idempotency_per_customer.sql', when: (c) => c.models.includes('usage') || c.goods.includes('usage_quota') },
+  { file: '0011_subscription_status_paused_incomplete.sql', when: () => true }, // EC:A27
+  { file: '0012_subscription_currency.sql', when: () => true }, // EC:A28
+  { file: '0013_ledger_consume_key.sql', when: (c) => c.goods.includes('credits') }, // EC:B21
 ];
 
 async function dirHasSqlFiles(dir: string): Promise<boolean> {

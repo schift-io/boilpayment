@@ -474,6 +474,17 @@ class OperationsTable:
             claimed = await cur.fetchone()
             return _row_to_operation(claimed) if claimed else None
 
+    async def compare_and_set(self, expected: Operation, next_row: Operation) -> bool:
+        """EC:A48 -- update only a row still carrying the expected status and result (one statement)."""
+        async with atomic(self._dsn) as conn, conn.cursor() as cur:
+            await cur.execute(
+                """update operations set status=%s, result=%s, error=%s, completed_at=%s
+                where key=%s and status=%s and result is not distinct from %s::jsonb returning key""",
+                (next_row.status, jsonb(json_safe(next_row.result)), next_row.error, next_row.completed_at,
+                 expected.key, expected.status, jsonb(json_safe(expected.result))),
+            )
+            return (await cur.fetchone()) is not None
+
     async def get(self, id: str) -> Operation | None:
         async with connection(self._dsn) as conn, conn.cursor() as cur:
             await cur.execute("select * from operations where key = %s", (id,))

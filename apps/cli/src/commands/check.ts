@@ -4,7 +4,7 @@ import pc from 'picocolors';
 import { readConfig } from '../config.js';
 import type { PaykitConfig } from '../config.js';
 import { loadEnvFile } from '../util/env-file.js';
-import { loadSchemaPostgres, modulesFor } from '../util/schema-postgres.js';
+import { type SchemaPostgres, loadSchemaPostgres, modulesFor } from '../util/schema-postgres.js';
 import { detectModuleSystem, ESM_REQUIRED_MESSAGE, ESM_MISSING_PACKAGE_JSON_MESSAGE } from '../util/module-system.js';
 
 export interface CheckWarning {
@@ -165,8 +165,39 @@ export async function checkDatabase(dir: string, config: PaykitConfig): Promise<
     lines.push('    적용 전에는 verifySchema() 가 부팅을 거부합니다 (INTEGRATION.md "버전을 올릴 때").');
   }
   if (status.ok) lines.push(pc.green('스키마가 이 빌드와 일치합니다.'));
+  if (status.ok) lines.push(...(await missedPeriodsPrecheck(sp, url)));
 
   return { lines, ok: status.ok };
+}
+
+/**
+ * EC:A47 — before the first scheduler tick after an upgrade (or after the cron was stopped), list the
+ * self-scheduled subscriptions (Toss, PortOne) whose current period ended more than one period ago.
+ * The next tick applies `policy.subscription.missedPeriods` to each (default: charge only the period
+ * containing now, skip the rest, one case). Read-only; advisory, it never fails the check.
+ */
+export async function missedPeriodsPrecheck(sp: SchemaPostgres, url: string): Promise<string[]> {
+  if (typeof sp.createPool !== 'function') return [];
+  const pool = sp.createPool(url);
+  try {
+    const res = await pool.query(
+      `select id, provider, period_start, period_end from subscriptions
+       where provider in ('toss', 'portone') and status = 'active'
+         and period_end + (period_end - period_start) <= now()
+       order by period_end limit 50`,
+    );
+    if (res.rows.length === 0) return [pc.green('자체 스케줄 구독 중 두 기간 이상 밀린 구독 없음 (EC:A47).')];
+    const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : String(v));
+    return [
+      pc.yellow(`두 기간 이상 밀린 자체 스케줄 구독 ${res.rows.length}건 (EC:A47, 최대 50건 표시):`),
+      ...res.rows.map((r) => `  ${String(r.id)}  ${String(r.provider)}  기간 끝 ${iso(r.period_end)}`),
+      '  다음 schedulerTick 이 policy.subscription.missedPeriods 를 적용합니다(기본: 지금 기간만 1회 청구, 밀린 기간은 건너뛰고 담당자 알림).',
+    ];
+  } catch (err) {
+    return [pc.yellow(`밀린 구독 점검을 건너뜀: ${(err as Error).message}`)];
+  } finally {
+    await pool.end();
+  }
 }
 
 export async function runCheck(dir: string): Promise<void> {

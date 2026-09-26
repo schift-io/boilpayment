@@ -462,7 +462,8 @@ export class PortoneProvider implements PaymentProvider {
     try {
       return await this.getPayment(orderId);
     } catch (err) {
-      if (err instanceof ProviderError && err.httpStatus === 404) return null;
+      // EC:A52 — only PortOne's PAYMENT_NOT_FOUND means "no such order"; any other 404 is an error.
+      if (err instanceof ProviderError && err.httpStatus === 404 && (err.details as { type?: unknown } | undefined)?.type === 'PAYMENT_NOT_FOUND') return null;
       throw err;
     }
   }
