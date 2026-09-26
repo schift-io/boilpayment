@@ -58,6 +58,8 @@ export interface PaykitConfig {
   cs: { enabled: boolean; widget: boolean };
   /** EC:C10 — generate kit.reservations (reserve/commit/release) and cron.sweepReservations. Needs credits. */
   reservations?: boolean;
+  /** EC:I10 — generate kit.reports.settlement (monthly settlement totals). */
+  reports?: boolean;
   plans: PlanConfig[];
 }
 

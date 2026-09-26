@@ -507,6 +507,17 @@ record({customerId, reason, text?, case?, repo?, clock?}):
     return {customerId, reason, text, recordedAt: clock.now() if clock else None}
 ```
 
+## [EC:I10] settlementReport — 월 정산 집계 (읽기 전용)
+
+```pseudo
+settlementReport({repo, ledger, from, to}):          # window [from, to); from >= to -> error
+  payments: repo.payments where from <= occurredAt < to, grouped (currency, kind, status): count, sum amountMinor
+  refunds:  repo.refunds where status = succeeded and from <= createdAt < to, grouped by currency
+  net:      per currency, payments with status succeeded|partially_refunded minus refunds
+  credits:  for each customer, ledger.entries(since from) with createdAt < to, grouped (kind, source): count, signed sum
+  every list sorted by its group key; money is never summed across currencies; nothing is written
+```
+
 ## [EC:I9] timeline
 
 The paid CS product's job is answering "what happened to my payment / where are my credits" in one

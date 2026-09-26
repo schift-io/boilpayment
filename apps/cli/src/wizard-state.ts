@@ -23,5 +23,6 @@ export function toPaykitConfig(wc: WizardConfig): PaykitConfig {
   if (!wc.situation?.existingCustomers) delete out.situation;
   // EC:C10 — reservations off leaves the config as it was before the question existed.
   if (!wc.reservations) delete out.reservations;
+  if (!wc.reports) delete out.reports; // EC:I10 — same: off leaves the config as before
   return out as unknown as PaykitConfig;
 }

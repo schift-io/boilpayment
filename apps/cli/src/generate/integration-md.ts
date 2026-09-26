@@ -214,6 +214,7 @@ export function generateIntegrationMd(config: PaykitConfig): string {
   rows.push('| 규칙에 따른 환불 | `support.requestRefund({ customerId, paymentId, requestId, requestedAmount })` |');
   if (hasCredits) rows.push('| 미지급 복구 | `support.recoverMissingGrant({ customerId, paymentId })` |');
   const hasReservations = hasCredits && config.reservations === true;
+  if (config.reports === true) rows.push(py(config) && !ts(config) ? '| 월 정산 집계 (EC:I10) | `reports["settlement"](start=..., end=...)` |' : '| 월 정산 집계 (EC:I10) | `reports.settlement({ from, to })` |');
   if (hasReservations) {
     rows.push('| 작업 예산 잡기 (EC:C10) | `reservations.reserve({ customerId, jobId, amount })` |');
     rows.push('| 작업 성공: 쓴 만큼 청구 | `reservations.commit({ customerId, jobId, amount })` |');

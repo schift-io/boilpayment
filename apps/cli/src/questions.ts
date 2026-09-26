@@ -5,6 +5,7 @@ import { DEFAULT_POLICY } from 'boilpayment-core';
 import { getPath } from './util/path.js';
 import type { WizardConfig } from './wizard-state.js';
 import { PROVIDER_OPTIONS, SITUATION_QUESTIONS, existing, has } from './situation.js';
+import { CREDITS_ADVANCED_QUESTIONS, REFUND_REASON_QUESTIONS, REPORT_QUESTIONS, RESERVATION_QUESTIONS } from './questions-detail.js';
 export { questionDefault } from './situation.js';
 
 export type QuestionType = 'select' | 'multiselect' | 'number' | 'text' | 'confirm';
@@ -249,60 +250,7 @@ export const QUESTIONS: Question[] = [
     default: 0,
     parse: (raw: string) => (Number(raw) > 0 ? Number(raw) : null),
   },
-  {
-    id: 'credits_advanced',
-    configPath: 'creditsAdvanced',
-    ec: ['B19'],
-    type: 'confirm',
-    group: 'credits',
-    when: hasCredits,
-    message: '크레딧 고급 옵션 (Advanced credit options — 프로모션·수동·재지급 크레딧의 출처별 기본 만료) 을 설정할까요?',
-    default: false,
-  },
-  {
-    id: 'credits_expiry_days_promo',
-    policyPath: 'credits.expiryDays.promo',
-    ec: ['B19'],
-    type: 'number',
-    group: 'credits',
-    when: (c) => hasCredits(c) && !!c.creditsAdvanced,
-    message: '프로모션 크레딧의 기본 만료일 수 (0 = 무만료, 지급 시 만료일을 따로 주면 그 값이 우선)',
-    default: 0,
-    parse: (raw: string) => (Number(raw) > 0 ? Number(raw) : null),
-  },
-  {
-    id: 'credits_expiry_days_trial',
-    policyPath: 'credits.expiryDays.trial',
-    ec: ['B19'],
-    type: 'number',
-    group: 'credits',
-    when: (c) => hasCredits(c) && !!c.creditsAdvanced,
-    message: '트라이얼 직접 지급 크레딧의 기본 만료일 수 (0 = 무만료, 지급 시 만료일을 따로 주면 그 값이 우선)',
-    default: 0,
-    parse: (raw: string) => (Number(raw) > 0 ? Number(raw) : null),
-  },
-  {
-    id: 'credits_expiry_days_manual',
-    policyPath: 'credits.expiryDays.manual',
-    ec: ['B19'],
-    type: 'number',
-    group: 'credits',
-    when: (c) => hasCredits(c) && !!c.creditsAdvanced,
-    message: '운영자 수동 지급 크레딧의 기본 만료일 수 (0 = 무만료, 지급 시 만료일을 따로 주면 그 값이 우선)',
-    default: 0,
-    parse: (raw: string) => (Number(raw) > 0 ? Number(raw) : null),
-  },
-  {
-    id: 'credits_expiry_days_regrant',
-    policyPath: 'credits.expiryDays.regrant',
-    ec: ['B19'],
-    type: 'number',
-    group: 'credits',
-    when: (c) => hasCredits(c) && !!c.creditsAdvanced,
-    message: 'CS 재지급 크레딧의 기본 만료일 수 (0 = 무만료, 지급 시 만료일을 따로 주면 그 값이 우선)',
-    default: 0,
-    parse: (raw: string) => (Number(raw) > 0 ? Number(raw) : null),
-  },
+  ...CREDITS_ADVANCED_QUESTIONS,
   {
     id: 'credits_negative_offset',
     policyPath: 'credits.negativeOffset',
@@ -660,49 +608,7 @@ export const QUESTIONS: Question[] = [
     message: '고객당 연간 환불 허용 횟수 (Max refunds per year, 어뷰징 방지)',
     default: def('refund.maxPerCustomerPerYear'),
   },
-  {
-    id: 'refund_reason_technical_failure',
-    policyPath: 'refund.reasons.technicalFailure',
-    ec: ['D16'],
-    type: 'select',
-    group: 'refund',
-    when: (c) => !!c.refundAdvanced,
-    message: '환불 사유가 기술 실패(우리 쪽 오류)일 때 (Refund reason: technical failure)',
-    options: [
-      { value: 'rules', label: '위 금액 규칙대로', hint: '사유를 보지 않습니다' },
-      { value: 'full', label: '남은 결제 전액 환불', hint: '환불 창·방식·연간 제한과 무관, 남은 크레딧만 회수' },
-    ],
-    default: def('refund.reasons.technicalFailure'),
-  },
-  {
-    id: 'refund_reason_dissatisfied',
-    policyPath: 'refund.reasons.dissatisfied',
-    ec: ['D16'],
-    type: 'select',
-    group: 'refund',
-    when: (c) => !!c.refundAdvanced,
-    message: '환불 사유가 결과 불만족일 때 (Refund reason: dissatisfied)',
-    options: [
-      { value: 'rules', label: '위 금액 규칙대로' },
-      { value: 'evidence_required', label: '증빙(작업 id 등)이 있으면 규칙대로, 없으면 담당자 확인' },
-      { value: 'needs_human', label: '항상 담당자 확인' },
-    ],
-    default: def('refund.reasons.dissatisfied'),
-  },
-  {
-    id: 'refund_reason_user_error',
-    policyPath: 'refund.reasons.userError',
-    ec: ['D16'],
-    type: 'select',
-    group: 'refund',
-    when: (c) => !!c.refundAdvanced,
-    message: '환불 사유가 사용자 과실일 때 (Refund reason: user error)',
-    options: [
-      { value: 'rules', label: '위 금액 규칙대로' },
-      { value: 'deny', label: '거절' },
-    ],
-    default: def('refund.reasons.userError'),
-  },
+  ...REFUND_REASON_QUESTIONS,
 
   // 12. 이용량: C1 C2 C5 (usage 선택 시)
   {
@@ -750,26 +656,7 @@ export const QUESTIONS: Question[] = [
     message: '무료 티어 포함 사용량 (Included quantity, 주기당)',
     default: def('usage.includedQuantity'),
   },
-  {
-    id: 'reservations',
-    configPath: 'reservations',
-    ec: ['C10'],
-    type: 'confirm',
-    group: 'usage',
-    when: hasCredits,
-    message: '오래 걸리는 작업(영상 처리, 대량 변환 등)에 크레딧을 미리 잡아 두고, 성공하면 쓴 만큼만 청구할까요? (Reservations)',
-    default: false,
-  },
-  {
-    id: 'usage_reservation_ttl_minutes',
-    policyPath: 'usage.reservationTtlMinutes',
-    ec: ['C10'],
-    type: 'number',
-    group: 'usage',
-    when: (c) => hasCredits(c) && c.reservations === true,
-    message: '작업 예약 만료 (Reservation TTL, 분). 오래 걸리는 작업 전에 잡아 둔 크레딧을 이 시간 안에 확정하거나 풀지 않으면 자동으로 풉니다',
-    default: def('usage.reservationTtlMinutes'),
-  },
+  ...RESERVATION_QUESTIONS,
 
   // 14. 현금영수증(KR): K2 K3 K5 — provider 에 toss/portone 선택 시만
   {
@@ -813,6 +700,7 @@ export const QUESTIONS: Question[] = [
   },
 
   // 15. CS: E1(regrant mode) I1 I2 — CS 애드온 활성화 시
+  ...REPORT_QUESTIONS,
   {
     id: 'cs_enabled',
     configPath: 'cs.enabled',

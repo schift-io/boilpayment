@@ -42,6 +42,7 @@ from boilpayment_cs import (
     open_case,
     reconcile,
     refund_assist,
+    settlement_report,
     timeline,
     widget,
 )
@@ -616,6 +617,39 @@ async def main() -> None:
 
     # -- metrics snapshot --
     print("\n[metrics] snapshot:", json.dumps(_to_dict(metrics.snapshot()), indent=2))
+
+    # EC:I10 -- settlement report on its own fixture
+    s_clock = FixedClock(datetime(2026, 1, 10, tzinfo=UTC))
+    s_repo, s_ledger = InMemoryRepo(), InMemoryLedger(SequentialIdGen("s_"), s_clock)
+    await s_repo.customers.put(Customer(id="sc", email=None, provider_refs=[], status="active", created_at=s_clock.now()))
+    for pid, prov, amount, cur in (("sp1", "stripe", 1000, "USD"), ("sp2", "toss", 9900, "KRW")):
+        await s_repo.payments.put(
+            Payment(
+                id=pid, customer_id="sc", provider=prov, provider_ref=f"pi_{pid[1:]}", subscription_id=None,
+                amount=Money(amount_minor=amount, currency=cur), status="succeeded", kind="topup", period=None,
+                occurred_at=s_clock.now(), failure=None,
+            )
+        )
+    await s_repo.refunds.put(
+        Refund(
+            id="sr1", payment_id="sp1", customer_id="sc", amount=Money(amount_minor=300, currency="USD"), status="succeeded",
+            provider_ref="re_s1", credits_revoked=0, rule_id="D2", reason=None, failure=None, created_at=s_clock.now(),
+        )
+    )
+    await s_ledger.append(
+        NewLedgerEntry(
+            customer_id="sc", pool="paid", kind="grant", amount=100, unit_price_minor=10, currency="USD",
+            source="topup", idempotency_key="sg", actor="s",
+        )
+    )
+    rep = await settlement_report(
+        repo=s_repo, ledger=s_ledger, start=datetime(2026, 1, 1, tzinfo=UTC), end=datetime(2026, 2, 1, tzinfo=UTC)
+    )
+    print(
+        "[settlement I10] net:", ",".join(f"{n.currency}={n.amount_minor}" for n in rep.net),
+        "refunds:", ",".join(f"{r.currency}x{r.count}={r.amount_minor}" for r in rep.refunds),
+        "credits:", ",".join(f"{c.kind}/{c.source}={c.amount}" for c in rep.credits),
+    )
 
     print("\nsmoke: OK")
 

@@ -10,6 +10,7 @@
 //     so their Input dataclasses hang off the submodule object itself (`dunning.OnGraceExpiredInput(...)`).
 import type { PaykitConfig } from '../config.js';
 import { hasReasonRules, supportPy } from './support.js';
+import { extrasFunctionsPy, extrasImportsPy } from './py-extras.js';
 
 function providerImportsPy(config: PaykitConfig): string[] {
   const lines: string[] = [];
@@ -46,6 +47,7 @@ export function generateIndexPy(config: PaykitConfig): string {
   const hasCredits = config.goods.includes('credits');
   const hasSubscription = config.models.includes('subscription');
   const hasReservations = hasCredits && config.reservations === true; // EC:C10
+  const hasReports = config.reports === true; // EC:I10
   const hasUsage = config.models.includes('usage') || config.goods.includes('usage_quota');
   const selfSchedulingProviders = config.providers.filter(
     (pr) => pr === 'toss' || (pr === 'portone' && config.infra.scheduler === 'self'),
@@ -114,9 +116,7 @@ export function generateIndexPy(config: PaykitConfig): string {
   if (hasUsage) {
     l.push(`from boilpayment.usage import UsageEventInput, check as check_usage, settle_due_periods, flush_outbox, record as record_usage`);
   }
-  if (hasReservations) {
-    l.push(`from boilpayment.usage import commit as commit_reservation, list_reservations, release as release_reservation, reserve as reserve_budget, sweep_reservations`);
-  }
+  l.push(...extrasImportsPy(hasReservations, hasReports));
   l.push(`from boilpayment.webhook import default_handlers, process as process_webhook, receive as receive_webhook`);
   const notifyImports: string[] = [];
   if (config.infra.notify.email === 'resend') notifyImports.push('resend');
@@ -343,25 +343,7 @@ export function generateIndexPy(config: PaykitConfig): string {
     l.push(`        return await check_usage(policy=policy, repo=repo, ledger=ledger, clock=clock, **kwargs)`);
     l.push('');
   }
-  if (hasReservations) {
-    l.push(`    async def _reserve(*, customer_id: str, job_id: str, amount: int):`);
-    l.push(`        """EC:C10 — hold budget before long-running work starts."""`);
-    l.push(`        return await reserve_budget(customer_id=customer_id, job_id=job_id, amount=amount, policy=policy, ledger=ledger, clock=clock)`);
-    l.push('');
-    l.push(`    async def _commit(*, customer_id: str, job_id: str, amount: int):`);
-    l.push(`        """EC:C10 — the job succeeded: charge what it used (<= reserved)."""`);
-    l.push(`        return await commit_reservation(customer_id=customer_id, job_id=job_id, amount=amount, policy=policy, ledger=ledger, clock=clock)`);
-    l.push('');
-    l.push(`    async def _release(*, customer_id: str, job_id: str):`);
-    l.push(`        """EC:C10 — the job failed or was cancelled: charge nothing."""`);
-    l.push(`        return await release_reservation(customer_id=customer_id, job_id=job_id, ledger=ledger)`);
-    l.push('');
-    l.push(`    async def _list_reservations(customer_id: str):`);
-    l.push(`        return await list_reservations(customer_id=customer_id, ledger=ledger)`);
-    l.push('');
-    l.push(`    reservations = {"reserve": _reserve, "commit": _commit, "release": _release, "list": _list_reservations}`);
-    l.push('');
-  }
+  l.push(...extrasFunctionsPy(hasReservations, hasReports));
   l.push(`    async def refund(extra: dict[str, Any] | None = None, **kwargs: Any):`);
   l.push(`        """EC:D* — policy-driven refund evaluation. Caller executes with a resolved provider."""`);
   l.push(`        decision = await evaluate_refund(EvaluateInput(policy=policy, ledger=ledger, repo=repo, clock=clock, **kwargs))`);
@@ -491,6 +473,7 @@ export function generateIndexPy(config: PaykitConfig): string {
   l.push(`        "refund": refund,`);
   l.push(`        "support": support,`);
   if (hasReservations) l.push(`        "reservations": reservations,`);
+  if (hasReports) l.push(`        "reports": reports,`);
   l.push(`        "cron": cron,`);
   l.push(`        "providers": providers,`);
   l.push(`        "notifier": notifier,`);

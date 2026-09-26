@@ -8,7 +8,7 @@ import {
 } from 'boilpayment-core';
 import { evaluate as refundEvaluate, execute as refundExecute } from '../../../refund/ts/src/index.js';
 import {
-  dispute, explain, HttpLicenseReporter, Metrics, openCase, reconcile, refundAssist, regrant, timeline, widget,
+  dispute, explain, HttpLicenseReporter, Metrics, openCase, reconcile, refundAssist, regrant, settlementReport, timeline, widget,
 } from '../src/index.js';
 
 // ── EC:I5 fake HTTP server for HttpLicenseReporter — records requests, can be told to fail once ──
@@ -204,6 +204,17 @@ async function main() {
 
   // ── metrics snapshot ──
   console.log('\n[metrics] snapshot:', JSON.stringify(metrics.snapshot(), null, 2));
+
+  // EC:I10 — settlement report on its own fixture
+  const sClock = new FixedClock(new Date('2026-01-10T00:00:00Z'));
+  const sRepo = new InMemoryRepo(); const sLedger = new InMemoryLedger(new SequentialIdGen('s_'), sClock);
+  await sRepo.customers.put({ id: 'sc', email: null, providerRefs: [], status: 'active', createdAt: sClock.now() });
+  await sRepo.payments.put({ id: 'sp1', customerId: 'sc', provider: 'stripe', providerRef: 'pi_s1', subscriptionId: null, amount: { amountMinor: 1000, currency: 'USD' }, status: 'succeeded', kind: 'topup', period: null, occurredAt: sClock.now(), failure: null });
+  await sRepo.payments.put({ id: 'sp2', customerId: 'sc', provider: 'toss', providerRef: 'pi_s2', subscriptionId: null, amount: { amountMinor: 9900, currency: 'KRW' }, status: 'succeeded', kind: 'topup', period: null, occurredAt: sClock.now(), failure: null });
+  await sRepo.refunds.put({ id: 'sr1', paymentId: 'sp1', customerId: 'sc', amount: { amountMinor: 300, currency: 'USD' }, status: 'succeeded', providerRef: 're_s1', creditsRevoked: 0, ruleId: 'D2', reason: null, failure: null, createdAt: sClock.now() });
+  await sLedger.append({ customerId: 'sc', pool: 'paid', kind: 'grant', amount: 100, unitPriceMinor: 10, currency: 'USD', expiresAt: null, source: 'topup', reference: {}, idempotencyKey: 'sg', actor: 's', reason: null });
+  const rep = await settlementReport({ repo: sRepo, ledger: sLedger, from: new Date('2026-01-01T00:00:00Z'), to: new Date('2026-02-01T00:00:00Z') });
+  console.log('[settlement I10] net:', rep.net.map((n) => `${n.currency}=${n.amountMinor}`).join(','), 'refunds:', rep.refunds.map((r) => `${r.currency}x${r.count}=${r.amountMinor}`).join(','), 'credits:', rep.credits.map((c) => `${c.kind}/${c.source}=${c.amount}`).join(','));
 
   console.log('\nsmoke: OK');
 }

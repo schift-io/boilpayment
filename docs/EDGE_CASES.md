@@ -181,6 +181,7 @@
 | I7 | 동일 케이스 중복 오픈 | (구현 규칙) | `(customer_id, kind, reference_id)` UNIQUE while open | P0 |
 | I8 | 케이스 처리 중 정책 변경 | (구현 규칙) | 케이스에 `policy_snapshot` 저장. 오픈 당시 정책으로 판정 | P0 |
 | I9 | "이 결제/이 고객에 무슨 일이 있었나" 증거 트레일 | (구현 규칙) | `cs.timeline` — `payments`·`ledger_entries`·`webhook_events`·`refunds`·`cs_cases`·`operations`(+`notifications` duck-type) 를 하나의 시간순 이벤트로 재구성. 순수 읽기, 새 저장소 없음, 감사로그(L) 비의존. **(2026-09-09 갭 해소)** `WebhookEventRecord` 에 `customerId`/`paymentId`/`subscriptionId`(webhook.receive/process 가 provider+providerRef 로 로컬 조회해 채움, EC:E3 준수) · `Operation` 에 `attempts`(runIdempotent 매 replay/재시도마다 증가) 추가 — 스코프 질의 가능. `CsCase.escalatedAt` 도 추가(optional, packages/cs 가 채움) | P0 |
+| I10 | 월 정산·세금계산서용 집계 ("이번 달 얼마 받고 얼마 돌려줬나") | (구현 규칙) | `cs.settlementReport({ from, to })` — 창 [from, to) 안의 결제(`occurredAt`)를 통화·종류·상태별로, 성공 환불을 통화별로, 통화별 순액(성공·부분환불 결제 − 성공 환불), 원장 행을 종류·출처별로 센다. 통화끼리는 절대 합치지 않는다. 읽기만 한다. Postgres 저장소는 환불·원장 행의 시각을 기록 시점(DB 시계)으로 남기므로 그 기준으로 창에 들어간다 | cs | P0 |
 
 ## J. 연산 멱등성
 
