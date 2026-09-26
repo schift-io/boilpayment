@@ -34,6 +34,10 @@ Rounding = Literal["floor", "ceil", "round"]
 
 def money(amount_minor: int, currency: str) -> Money:
     """EC:J7 -- amounts are safe integers (|n| <= 2^53 - 1), the same bound as the TS kit."""
+    # EC:J10 -- the same values the TS kit accepts: an integral float (JSON 50000.0) is the integer it
+    # holds, a fractional/NaN/infinite float or a bool is refused.
+    if isinstance(amount_minor, float) and amount_minor.is_integer() and abs(amount_minor) <= MAX_SAFE_INTEGER:
+        amount_minor = int(amount_minor)
     if not isinstance(amount_minor, int) or isinstance(amount_minor, bool):
         raise TypeError(f"amount_minor must be an integer, got {amount_minor!r}")
     if abs(amount_minor) > MAX_SAFE_INTEGER:

@@ -24,6 +24,8 @@ export function currencyExponent(currency: string): 0 | 2 | 3 {
 export type Rounding = 'floor' | 'ceil' | 'round';
 
 /** EC:J7 — amounts are safe integers (|n| <= 2^53 - 1); anything larger loses cents silently. */
+// EC:J10 — an integral number (JSON 50000.0 parses to 50000) is accepted; fractions, NaN, infinities
+// and unsafe integers are refused. Python's money() accepts and refuses the same values.
 export function money(amountMinor: number, currency: string): Money {
   if (!Number.isSafeInteger(amountMinor)) {
     throw new Error(`amountMinor must be a safe integer, got ${amountMinor}`);

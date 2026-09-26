@@ -18,9 +18,15 @@ from boilpayment_core import (
     Refund,
     Repo,
 )
+from boilpayment_core.money import round_half_away_from_zero
 
 from .util import weighted_avg_unit_price
 
+
+def credits_for_amount(amount_minor: int, unit_price: float) -> int:
+    """EC:J9 -- credits an external refund of `amount_minor` stands for, rounded half away from zero
+    (the same as the TS kit; built-in round() is half-to-even)."""
+    return round_half_away_from_zero(amount_minor / unit_price) if unit_price > 0 else 0
 
 class ReconcileMismatchCaseOpener(Protocol):
     """Injected instead of importing `boilpayment_cs` directly (EC:D8)."""
@@ -201,9 +207,7 @@ async def on_external_refund(input: OnExternalRefundInput) -> Refund:
         raw_credits = (
             pending_credits
             if pending
-            else round(amount_minor / unit_price)
-            if unit_price > 0
-            else 0
+            else credits_for_amount(amount_minor, unit_price)
         )
         balance = await ledger.balance(
             payment.customer_id, "paid", now=clock.now()

@@ -457,3 +457,11 @@ proration_fraction(period, now, denominator):   # Python, TS prorationFraction �
    den = round_half_away_from_zero(totalDays * DAY_MS)
    num = clamp(epoch_ms(period.end) - epoch_ms(now), 0, den)          # epoch_ms = floor to whole ms
 ```
+
+## [EC:J9] [EC:J10] 반올림과 정수값 실수의 언어 간 일치
+
+```pseudo
+applyRounding(raw, round_credits) = roundHalfAwayFromZero(raw)          # TS Math.round / py round 금지
+creditsForAmount(amountMinor, unitPrice) = unitPrice > 0 ? roundHalfAwayFromZero(amountMinor / unitPrice) : 0
+money(n): n 이 정수값 숫자(50000.0 포함)이고 |n| <= 2^53-1 이면 정수로 받고, 그 밖은 거부
+```

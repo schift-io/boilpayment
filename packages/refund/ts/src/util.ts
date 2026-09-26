@@ -1,6 +1,7 @@
 // Local helpers. EC:G2 proration_ratio itself lives in `core` (shared, canonical) — re-exported
 // here so evaluate.ts has one import surface; not duplicated.
 import type { LedgerEntry, RefundRounding } from 'boilpayment-core';
+import { roundHalfAwayFromZero } from 'boilpayment-core';
 
 export { prorationRatio } from 'boilpayment-core';
 
@@ -14,7 +15,7 @@ export function daysBetween(from: Date, to: Date): number {
 /** EC:D4 — rounding direction for amount → credits conversion. */
 export function applyRounding(raw: number, rounding: RefundRounding): number {
   if (rounding === 'ceil_credits') return Math.ceil(raw);
-  if (rounding === 'round_credits') return Math.round(raw);
+  if (rounding === 'round_credits') return roundHalfAwayFromZero(raw); // EC:J9 same .5 rule as Python
   return Math.floor(raw);
 }
 

@@ -27,6 +27,7 @@ from boilpayment_core import (
     Repo,
     Subscription,
 )
+from boilpayment_core.money import round_half_away_from_zero
 
 from .cases import ACTIVE_STATUSES, EscalateInput, OnCaseEvent, escalate
 
@@ -418,7 +419,7 @@ async def due(input: DueInput) -> list[DueCase]:
                     repo=input.repo,
                     clock=input.clock,
                     notifier=input.notifier,
-                    reason=f"evidence due in {max(0, round(hours_remaining))}h, checklist incomplete",
+                    reason=f"evidence due in {max(0, round_half_away_from_zero(hours_remaining))}h, checklist incomplete",
                     on_case_event=input.on_case_event,
                 )
             )

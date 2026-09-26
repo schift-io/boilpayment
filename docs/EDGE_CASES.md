@@ -222,6 +222,8 @@
 | J6 | 통화별 소수 자릿수 (KRW·JPY 외의 0 자리 통화, KWD·BHD 같은 3 자리 통화) | (구현 규칙) | ISO 4217 지수 표(`currencyExponent`: 0/2/3)를 표시·변환 전부에서 쓴다(타임라인, 인앱결제 금액 환산) | core + cs | P1 |
 | J7 | 금액 계산이 부동소수점으로 한 단위 모자라거나(8.7/30 일 남은 100 차액 → 28), TS 와 Python 이 .5 를 다르게 반올림(Math.round vs round), 2^53 을 넘는 정수가 조용히 깨짐 | (구현 규칙) | 금액은 안전 정수(절댓값 2^53-1 이하)만 받는다. 비례 금액은 `prorationFraction`(ms 정수 분수) × `scaleMinor`(정수 유리수, 반올림 방식 명시)로 계산한다. 반올림 `round` 는 두 언어 모두 0 에서 먼 쪽 | core + lifecycle + refund | P0 |
 | J8 | 결제사 응답·웹훅의 금액이 정수가 아니거나 2^53 을 넘음, Python 반올림이 TS 와 다른 경계값(0.49999999999999994, 2^52 근처), Python 비례 분모의 banker's rounding·마이크로초 | (구현 규칙) | 결제사 어댑터(Stripe, Polar, Toss, PortOne)의 금액은 core `money()` 를 거쳐 안전 정수가 아니면 거절한다(Py 가 1.5 를 1 로 자르던 것도 거절). Python `round_half_away_from_zero` 는 소수부를 정확히 비교하고, `proration_fraction` 은 TS 처럼 0 에서 먼 반올림과 epoch 밀리초 정수를 쓴다 | core + providers | P0 |
+| J9 | 환불 크레딧 환산의 .5 경계가 TS(`Math.round`, 3)와 Python(`round`, 2)에서 다름 | `policy.refund.rounding` | `round_credits` 와 외부 환불의 크레딧 환산은 두 언어 모두 0 에서 먼 쪽으로 반올림한다(core `roundHalfAwayFromZero`). 이전에는 감사 값 6003 개 중 1480 개가 1 크레딧씩 달랐다 | refund | P0 |
+| J10 | Python `money()` 가 JSON `50000.0` 같은 정수값 실수를 거부하고 TS 는 받음 | (구현 규칙) | 두 언어 모두 정수값인 숫자는 받고(Python 은 `int` 로 바꿈), 소수·NaN·무한대·bool·안전 정수 밖은 거부한다 | core | P0 |
 
 ---
 

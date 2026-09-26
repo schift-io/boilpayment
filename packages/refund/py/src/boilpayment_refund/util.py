@@ -6,6 +6,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from boilpayment_core import LedgerEntry, RefundRounding, proration_ratio
+from boilpayment_core.money import round_half_away_from_zero
 
 __all__ = [
     "apply_rounding",
@@ -29,7 +30,8 @@ def apply_rounding(raw: float, rounding: RefundRounding) -> int:
     if rounding == "ceil_credits":
         return math.ceil(raw)
     if rounding == "round_credits":
-        return round(raw)
+        # EC:J9 -- half away from zero like the TS kit; built-in round() is half-to-even.
+        return round_half_away_from_zero(raw)
     return math.floor(raw)
 
 

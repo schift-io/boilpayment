@@ -1,3 +1,4 @@
+import { roundHalfAwayFromZero } from 'boilpayment-core';
 // spec/refund.pseudo.md — EC:D8 D18
 import { Clock, IdGen, LedgerStore, NormalizedEvent, PaymentKitError, Refund, Repo } from 'boilpayment-core';
 import { weightedAvgUnitPrice } from './util.js';
@@ -20,6 +21,11 @@ export interface OnExternalRefundInput {
    *  webhook.process's own ledger wrapping. Merged into `reference.correlationId` on the revoke
    *  entry this call writes. */
   correlationId?: string;
+}
+
+/** EC:J9 — credits an external refund of `amountMinor` stands for, rounded half away from zero (same as Python). */
+export function creditsForAmount(amountMinor: number, unitPrice: number): number {
+  return unitPrice > 0 ? roundHalfAwayFromZero(amountMinor / unitPrice) : 0;
 }
 
 /** EC:onExternalRefund — refund.onExternalRefund({event, ledger, repo, cs, clock, ids}) */
@@ -102,7 +108,7 @@ export async function onExternalRefund(input: OnExternalRefundInput): Promise<Re
       .filter((e) => e.reference.paymentId === payment.id && e.source === 'refund')
       .reduce((sum, e) => sum + -e.amount, 0);
     const unitPrice = weightedAvgUnitPrice(grants);
-    const rawCredits = pending ? pendingCredits : unitPrice > 0 ? Math.round(amountMinor / unitPrice) : 0;
+    const rawCredits = pending ? pendingCredits : creditsForAmount(amountMinor, unitPrice);
     const balance = await ledger.balance(payment.customerId, 'paid', clock.now()); // FINDINGS#1 class: always thread the injected clock
     const creditsToRevoke = pending ? pendingCredits : Math.max(0, Math.min(rawCredits, totalGranted - alreadyRevoked, balance.available));
 
