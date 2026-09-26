@@ -432,3 +432,14 @@ The optional `RefundLookupProvider` capability returns `Refund | null` from
 It must read the provider's authoritative cancellation and match the exact refund reference.
 It does not change the mandatory `PaymentProvider` interface or assume all providers offer
 this lookup.
+
+## [EC:J6] [EC:J7] Currency exponents and exact money math
+
+```pseudo
+currencyExponent(c): 0 for ZERO_DECIMAL (BIF CLP DJF GNF ISK JPY KMF KRW PYG RWF UGX UYI VND VUV XAF XOF XPF),
+                     3 for BHD IQD JOD KWD LYD OMR TND, else 2
+money(n, c): require |n| <= 2^53 - 1 (safe integer)
+scaleMinor(amount, num, den, rounding): exact integer amount*num/den; floor | ceil | round (half away from zero)
+prorationFraction(period, now, denominator) -> { num: remaining ms clamped, den: total ms }
+roundHalfAwayFromZero(x): the same .5 rule in TS and Python
+```

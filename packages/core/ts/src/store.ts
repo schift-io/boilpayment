@@ -5,7 +5,7 @@
 // verifies it with the store and returns the facts below. cs.registerStorePurchase records and grants.
 import { createHash } from 'node:crypto';
 import type { Payment, PaymentProvider, Subscription } from './types.js';
-import { ZERO_DECIMAL_CURRENCIES } from './money.js';
+import { currencyExponent } from './money.js';
 
 export type StoreProviderName = 'apple' | 'google_play';
 export const STORE_PROVIDERS: readonly StoreProviderName[] = ['apple', 'google_play'];
@@ -85,11 +85,11 @@ export function storeAccountToken(customerId: string): string {
 
 /** Store amounts: Apple reports milliunits, Google units + nanos. Converted to minor units. */
 export function minorUnitsFromDecimal(units: number, nanos: number, currency: string): number {
-  const exp = ZERO_DECIMAL_CURRENCIES.includes(currency.toUpperCase()) ? 0 : 2;
+  const exp = currencyExponent(currency); // EC:J6
   return Math.round(units * 10 ** exp + nanos / 10 ** (9 - exp));
 }
 
 export function minorUnitsFromMilliunits(milliunits: number, currency: string): number {
-  const exp = ZERO_DECIMAL_CURRENCIES.includes(currency.toUpperCase()) ? 0 : 2;
+  const exp = currencyExponent(currency); // EC:J6
   return Math.round((milliunits * 10 ** exp) / 1000);
 }

@@ -22,7 +22,9 @@ from boilpayment_core import (
     Subscription,
     deserialize_ledger_entry,
     deserialize_subscription,
+    proration_fraction,
     run_idempotent,
+    scale_minor,
     serialize_ledger_entry,
     serialize_subscription,
 )
@@ -163,10 +165,9 @@ async def _do_upgrade(input: UpgradeInput) -> UpgradeResult:
         price_delta_minor = (new_price.amount_minor if new_price else 0) - (
             old_price.amount_minor if old_price else 0
         )
-        money_ratio = proration_ratio(
-            sub.current_period, now, policy.proration.denominator
-        )
-        prorated_money_delta = math.floor(price_delta_minor * money_ratio)
+        # EC:J7 -- exact integer proration (a float ratio can land one minor unit short).
+        num, den = proration_fraction(sub.current_period, now, policy.proration.denominator)
+        prorated_money_delta = scale_minor(price_delta_minor, num, den, "floor")
         if prorated_money_delta > 0 and new_price is not None:
             # EC:J5 — deterministic (not clock.now()-derived): a retry of this same upgrade
             # operation must reuse the same provider-side charge idempotency key.

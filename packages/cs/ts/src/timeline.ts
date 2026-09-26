@@ -6,7 +6,7 @@
 // no dependency on the audit-log layer another agent is building concurrently.
 import {
   Clock, CsCase, CsCaseStatus, LedgerEntry, LedgerKind, LedgerStore, Money, Payment, PaymentStatus,
-  Pool, Refund, Repo, Subscription, WebhookEventRecord, WebhookEventStatus, ZERO_DECIMAL_CURRENCIES,
+  Pool, Refund, Repo, Subscription, WebhookEventRecord, WebhookEventStatus, currencyExponent,
 } from 'boilpayment-core';
 
 // ── Public types ─────────────────────────────────────────────────────────────────────────
@@ -75,11 +75,11 @@ const DEFAULT_LIMIT = 500;
 const CURRENCY_SYMBOLS: Record<string, string> = { USD: '$', KRW: '₩', JPY: '¥', EUR: '€', GBP: '£' };
 
 function formatMoney(m: Money): string {
-  const zeroDecimal = ZERO_DECIMAL_CURRENCIES.includes(m.currency);
-  const amount = zeroDecimal ? m.amountMinor : m.amountMinor / 100;
+  const exp = currencyExponent(m.currency); // EC:J6 — ISO 4217 minor units (0, 2 or 3)
+  const amount = m.amountMinor / 10 ** exp;
   const formatted = amount.toLocaleString('en-US', {
-    minimumFractionDigits: zeroDecimal ? 0 : 2,
-    maximumFractionDigits: zeroDecimal ? 0 : 2,
+    minimumFractionDigits: exp,
+    maximumFractionDigits: exp,
   });
   const symbol = CURRENCY_SYMBOLS[m.currency];
   return symbol ? `${symbol}${formatted}` : `${formatted} ${m.currency}`;

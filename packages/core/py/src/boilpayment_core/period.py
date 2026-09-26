@@ -130,6 +130,19 @@ def period_containing(
     return period
 
 
+def proration_fraction(
+    period: Period, now: datetime, denominator: ProrationDenominator
+) -> tuple[int, int]:
+    """EC:J7 -- the same remaining fraction as proration_ratio, as exact integers (milliseconds),
+    for money math via scale_minor: (num, den) with 0 <= num <= den."""
+    total_days = 30.0 if denominator == "fixed_30" else days_in_period(period)
+    if total_days <= 0:
+        return 0, 1
+    den = round(total_days * _DAY_MS)
+    remaining = round((period.end - now).total_seconds() * 1000)
+    return min(den, max(0, remaining)), den
+
+
 def proration_ratio(
     period: Period, now: datetime, denominator: ProrationDenominator
 ) -> float:

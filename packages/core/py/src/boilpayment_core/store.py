@@ -12,7 +12,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Literal, Protocol, runtime_checkable
 
-from .money import ZERO_DECIMAL_CURRENCIES
+from .money import currency_exponent
 from .types import Payment, Subscription
 
 StoreProviderName = Literal["apple", "google_play"]
@@ -87,7 +87,7 @@ def store_account_token(customer_id: str) -> str:
 
 
 def _exp(currency: str) -> int:
-    return 0 if currency.upper() in ZERO_DECIMAL_CURRENCIES else 2
+    return currency_exponent(currency)  # EC:J6
 
 
 def _round_half_up(x: float) -> int:

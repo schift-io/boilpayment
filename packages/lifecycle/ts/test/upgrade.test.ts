@@ -154,3 +154,23 @@ describe('EC:J1-J5 upgrade operation idempotency', () => {
     ).rejects.toMatchObject({ code: 'idempotency_key_reused' });
   });
 });
+
+describe('[EC:J7] self-scheduled upgrade proration is exact', () => {
+  it('[EC:J7] 8.7 of 30 days remaining on a 100 price delta charges 29', async () => {
+    const DAY = 86_400_000;
+    const now = new Date('2024-01-16T00:00:00.000Z');
+    const clock = new FixedClock(now);
+    const ledger = new InMemoryLedger(new SequentialIdGen('led_'));
+    const repo = new InMemoryRepo();
+    const ids = new SequentialIdGen('id_');
+    const a: Plan = { ...planA, prices: [{ currency: 'USD', amountMinor: 1000 }] };
+    const b: Plan = { ...planB, prices: [{ currency: 'USD', amountMinor: 1100 }] };
+    await repo.plans.put(a);
+    await repo.plans.put(b);
+    const sub = mkSub({ provider: 'toss', providerRef: null, billingKey: 'bk', currentPeriod: { start: new Date(now.getTime() - 21.3 * DAY), end: new Date(now.getTime() + 8.7 * DAY) } });
+    await repo.subscriptions.put(sub);
+    const provider = new FakeSelfSchedulingProvider();
+    await upgrade({ sub, newPlan: b, policy: resolvePolicy({ proration: { denominator: 'fixed_30' } }), provider, ledger, repo, clock, ids });
+    expect(provider.lastCharge?.amountMinor).toBe(29);
+  });
+});

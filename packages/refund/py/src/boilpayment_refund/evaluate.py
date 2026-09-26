@@ -14,6 +14,9 @@ from boilpayment_core import (
     RefundDecision,
     Repo,
     Subscription,
+    proration_fraction,
+    round_half_away_from_zero,
+    scale_minor,
 )
 
 from .reason import RefundReasonInput, rule_for_reason
@@ -173,7 +176,7 @@ async def evaluate(input: EvaluateInput) -> RefundDecision:
 
         def compute_unused() -> tuple[int, int]:
             unused = max(0, total_granted - consumed)
-            return round(unused * unit_price), unused
+            return round_half_away_from_zero(unused * unit_price), unused  # EC:J7 same .5 rule as TS
 
         def compute_time_prorated() -> tuple[int, int, str | None]:
             if payment.period is None:
@@ -181,7 +184,9 @@ async def evaluate(input: EvaluateInput) -> RefundDecision:
                     "refund.evaluate: time_prorated requires payment.period"
                 )
             ratio = proration_ratio(payment.period, now, policy.proration.denominator)
-            amount = round(payment.amount.amount_minor * ratio)
+            # EC:J7 -- exact integer proration (a float ratio can land one minor unit short).
+            num, den = proration_fraction(payment.period, now, policy.proration.denominator)
+            amount = scale_minor(payment.amount.amount_minor, num, den, "round")
             elapsed_ratio = 1 - ratio
             consumed_ratio = (consumed / total_granted) if total_granted > 0 else 0
             if (
@@ -269,10 +274,9 @@ async def evaluate(input: EvaluateInput) -> RefundDecision:
         # EC:D16 -- a full refund for our technical failure is not reduced by what was already used.
         behavior = "clamp_to_zero" if ruling.full else policy.refund.revoke_shortfall
         if behavior == "clamp_and_reduce_refund":
-            ratio = (
-                (available / credits_to_revoke) if credits_to_revoke > 0 else 1
-            )
-            amount_minor = int(amount_minor * ratio)  # floor
+            # EC:J7 -- exact integer clamp instead of a float ratio.
+            if credits_to_revoke > 0:
+                amount_minor = scale_minor(amount_minor, available, credits_to_revoke, "floor")
             reason += f"; B13 clamp_and_reduce_refund: balance {available} < {credits_to_revoke} -> amount {amount_minor} minor, {available} credits"
             credits_to_revoke = available
         elif behavior == "clamp_to_zero":

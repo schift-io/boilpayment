@@ -17,6 +17,7 @@ import {
   serializeLedgerEntry,
   serializeSubscription,
 } from 'boilpayment-core';
+import { prorationFraction, scaleMinor } from 'boilpayment-core';
 import { nextPeriod, prorationRatio } from './period.js';
 import { priceForSubscription, requirePriceForSubscription, resolvePriceRef, scopeProvider } from './internal.js';
 
@@ -93,8 +94,9 @@ export async function upgrade(input: UpgradeInput): Promise<UpgradeResult> {
         const oldPrice = priceForSubscription(oldPlan, sub) ?? undefined;
         const newPrice = requirePriceForSubscription(newPlan, sub);
         const priceDeltaMinor = (newPrice?.amountMinor ?? 0) - (oldPrice?.amountMinor ?? 0);
-        const moneyRatio = prorationRatio(sub.currentPeriod, now, policy.proration.denominator);
-        const proratedMoneyDelta = Math.floor(priceDeltaMinor * moneyRatio);
+        // EC:J7 — exact integer proration (a float ratio can land one minor unit short).
+        const frac = prorationFraction(sub.currentPeriod, now, policy.proration.denominator);
+        const proratedMoneyDelta = scaleMinor(priceDeltaMinor, frac.num, frac.den, 'floor');
         if (proratedMoneyDelta > 0 && newPrice) {
           // EC:J5 — deterministic (not clock.now()-derived): a retry of this same upgrade operation
           // must reuse the same provider-side charge idempotency key.

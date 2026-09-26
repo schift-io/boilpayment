@@ -95,10 +95,10 @@ async function main() {
 
   // ── (3) Toss verifyWebhook: allowed ip vs disallowed ip ──
   const rawBody = JSON.stringify(WEBHOOK_FIXTURE);
-  const allowedEvent = await provider.verifyWebhook({ headers: { 'x-paykit-remote-ip': '203.0.113.10' }, rawBody });
+  const allowedEvent = await provider.verifyWebhook({ headers: {}, rawBody, remoteAddress: '203.0.113.10' });
   console.log('verifyWebhook (allowed ip) ->', JSON.stringify(allowedEvent));
   try {
-    await provider.verifyWebhook({ headers: { 'x-paykit-remote-ip': '198.51.100.1' }, rawBody });
+    await provider.verifyWebhook({ headers: {}, rawBody, remoteAddress: '198.51.100.1' });
     console.log('UNEXPECTED: disallowed ip did not throw');
   } catch (e) {
     console.log('verifyWebhook (disallowed ip) -> threw', e instanceof WebhookSignatureError ? 'WebhookSignatureError' : e);

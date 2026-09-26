@@ -124,6 +124,18 @@ export function prorationRatio(period: Period, now: Date, denominator: Proration
   return Math.min(1, Math.max(0, remainingDays / totalDays));
 }
 
+/**
+ * EC:J7 — the same remaining fraction as prorationRatio, as exact integers (milliseconds), for
+ * money math via scaleMinor: `num / den` with 0 <= num <= den.
+ */
+export function prorationFraction(period: Period, now: Date, denominator: ProrationDenominator): { num: number; den: number } {
+  const totalDays = denominator === 'fixed_30' ? 30 : daysInPeriod(period);
+  if (totalDays <= 0) return { num: 0, den: 1 };
+  const den = Math.round(totalDays * DAY_MS);
+  const num = Math.min(den, Math.max(0, period.end.getTime() - now.getTime()));
+  return { num, den };
+}
+
 /** EC:G2 — fraction of `period` elapsed at `now`, clamped to [0, 1]. */
 export function elapsedRatio(period: Period, now: Date, denominator: ProrationDenominator): number {
   return 1 - prorationRatio(period, now, denominator);

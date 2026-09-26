@@ -2,6 +2,7 @@
 import type {
   Clock, LedgerEntry, LedgerStore, Payment, Policy, RefundDecision, Repo, Subscription,
 } from 'boilpayment-core';
+import { prorationFraction, roundHalfAwayFromZero, scaleMinor } from 'boilpayment-core';
 import { applyRounding, daysBetween, prorationRatio, weightedAvgUnitPrice } from './util.js';
 import { ruleForReason } from './reason.js';
 import type { RefundReasonInput } from './reason.js';
@@ -118,12 +119,14 @@ export async function evaluate(input: EvaluateInput): Promise<RefundDecision> {
 
     const computeUnused = (): { amount: number; credits: number } => {
       const unused = Math.max(0, totalGranted - consumed);
-      return { amount: Math.round(unused * unitPrice), credits: unused };
+      return { amount: roundHalfAwayFromZero(unused * unitPrice), credits: unused }; // EC:J7 same .5 rule as Python
     };
     const computeTimeProrated = (): { amount: number; credits: number; denied: string | null } => {
       if (!payment.period) throw new Error('refund.evaluate: time_prorated requires payment.period');
       const ratio = prorationRatio(payment.period, now, policy.proration.denominator);
-      const amount = Math.round(payment.amount.amountMinor * ratio);
+      // EC:J7 — exact integer proration (a float ratio can land one minor unit short).
+      const frac = prorationFraction(payment.period, now, policy.proration.denominator);
+      const amount = scaleMinor(payment.amount.amountMinor, frac.num, frac.den, 'round');
       const elapsedRatio = 1 - ratio;
       const consumedRatio = totalGranted > 0 ? consumed / totalGranted : 0;
       if (consumedRatio > elapsedRatio && policy.refund.overuseBehavior === 'deny') {
@@ -200,8 +203,8 @@ export async function evaluate(input: EvaluateInput): Promise<RefundDecision> {
     // EC:D16 — a full refund for our technical failure is not reduced by what the customer already used.
     const behavior = ruling.full ? 'clamp_to_zero' : policy.refund.revokeShortfall;
     if (behavior === 'clamp_and_reduce_refund') {
-      const ratio = creditsToRevoke > 0 ? available / creditsToRevoke : 1;
-      amountMinor = Math.floor(amountMinor * ratio);
+      // EC:J7 — exact integer clamp instead of a float ratio.
+      amountMinor = creditsToRevoke > 0 ? scaleMinor(amountMinor, available, creditsToRevoke, 'floor') : amountMinor;
       reason += `; B13 clamp_and_reduce_refund: balance ${available} < ${creditsToRevoke} -> amount ${amountMinor} minor, ${available} credits`;
       creditsToRevoke = available;
     } else if (behavior === 'clamp_to_zero') {

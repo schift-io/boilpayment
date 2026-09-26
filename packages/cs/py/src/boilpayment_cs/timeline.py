@@ -15,7 +15,6 @@ from datetime import datetime
 from typing import Any, Literal
 
 from boilpayment_core import (
-    ZERO_DECIMAL_CURRENCIES,
     Clock,
     CsCase,
     CsCaseStatus,
@@ -29,6 +28,7 @@ from boilpayment_core import (
     Repo,
     WebhookEventRecord,
     WebhookEventStatus,
+    currency_exponent,
 )
 
 # ── Public types ─────────────────────────────────────────────────────────────────────────
@@ -133,9 +133,9 @@ _CURRENCY_SYMBOLS: dict[str, str] = {
 
 
 def _format_money(m: Money) -> str:
-    zero_decimal = m.currency in ZERO_DECIMAL_CURRENCIES
-    amount = m.amount_minor if zero_decimal else m.amount_minor / 100
-    formatted = f"{amount:,.0f}" if zero_decimal else f"{amount:,.2f}"
+    exp = currency_exponent(m.currency)  # EC:J6 -- ISO 4217 minor units (0, 2 or 3)
+    amount = m.amount_minor / 10**exp
+    formatted = f"{amount:,.{exp}f}"
     symbol = _CURRENCY_SYMBOLS.get(m.currency)
     return f"{symbol}{formatted}" if symbol else f"{formatted} {m.currency}"
 
