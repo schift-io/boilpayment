@@ -1,4 +1,4 @@
-"""[EC:schema-postgres Migrations] migrate() applies all 7 files, records paykit_migrations rows,
+"""[EC:schema-postgres Migrations] migrate() applies all 9 files, records paykit_migrations rows,
 idempotent rerun. pytest-asyncio is not installed -> wrap async bodies with asyncio.run().
 """
 
@@ -70,7 +70,7 @@ def test_migrate_applies_all_files_and_is_idempotent():
                 async with conn.cursor() as cur:
                     await cur.execute("select count(*) as n from paykit_migrations")
                     row = await cur.fetchone()
-                assert row["n"] == 7
+                assert row["n"] == 9
             finally:
                 await conn.close()
         finally:

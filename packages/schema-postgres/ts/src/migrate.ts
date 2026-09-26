@@ -29,6 +29,12 @@ export interface MigrationFile {
  * since every other module's tables FK into customers/subscriptions/payments. Sorted by filename
  * so base modules and subsequent core updates always apply in order. Used both by migrate() and by apps/cli to copy files into a
  * generated project's paykit/migrations/ without needing a live DB connection. */
+/** Follow-up migrations of a module, applied with it (EC:B20: per-customer idempotency keys). */
+export const MODULE_UPDATES: Record<string, readonly string[]> = {
+  credits: ['0009_ledger_idempotency_per_customer.sql'],
+  usage: ['0010_usage_idempotency_per_customer.sql'],
+};
+
 /** Modules applied only when asked for by name (EC:N1): a default `migrate()` keeps its schema. */
 export const OPT_IN_MODULES: readonly string[] = ['iap'];
 
@@ -44,6 +50,7 @@ export function loadMigrations(modules?: string[]): MigrationFile[] {
       .map(([, file]) => file),
   );
   wantedFiles.add('0007_subscription_provider_ref_nullable.sql');
+  for (const [mod, updates] of Object.entries(MODULE_UPDATES)) if (wanted.has(mod)) for (const f of updates) wantedFiles.add(f);
   return files
     .filter((f) => wantedFiles.has(f))
     .map((name) => ({ name, sql: readFileSync(`${SQL_DIR}/${name}`, 'utf8') }));

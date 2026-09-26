@@ -54,9 +54,9 @@ function consume(input: ConsumeInput) -> ConsumeResult:
     exec "select pg_advisory_xact_lock(hashtext($1))" [customerId]
 
     # 2. Idempotency check — same key already applied?
-    existing = query "select * from ledger_entries where idempotency_key = $1 limit 1" [idempotencyKey]
+    existing = query "select * from ledger_entries where customer_id = $1 and idempotency_key = $2 limit 1" [customerId, idempotencyKey]   # EC:B20
     if existing:
-      entries = query "select * from ledger_entries where idempotency_key = $1" [idempotencyKey]
+      entries = query "select * from ledger_entries where customer_id = $1 and idempotency_key = $2" [customerId, idempotencyKey]   # EC:B20
       return { ok: true, entries, shortfall: 0, duplicated: true }
 
     remaining = amount
@@ -379,3 +379,10 @@ JSON conversion at persistence, matching JSON serialization of nested date value
 have no provider subscription ID. Existing 0001 history and payment provider references remain
 unchanged. Both loaders always append this core update in filename order; schema verification
 reports it pending on older databases. No migration is applied automatically by these changes.
+
+## [EC:B20] Idempotency keys are unique per customer
+
+`ledger_entries` and `usage_events` enforce `unique (customer_id, idempotency_key)` (migrations
+0009 and 0010 replace the global indexes from 0002/0003). Every duplicate lookup filters by
+customer: a key another customer already used is a new operation for this customer, and the
+first customer's rows are never returned. The in-memory stores key their maps the same way.

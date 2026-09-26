@@ -51,7 +51,7 @@ output: { event: UsageEvent, duplicated: bool }
 idempotency_key = event.idempotencyKey
 
 steps:
-  1. existing = repo.usageEvents.list({ idempotencyKey: idempotency_key })
+  1. existing = repo.usageEvents.list({ customerId, idempotencyKey: idempotency_key })   # EC:B20 per customer
      if existing non-empty: return { event: existing[0], duplicated: true }   # EC:B12-style dedupe applied to usage
   2. receivedAt = clock.now()
   3. periodStart = sub.currentPeriod.start

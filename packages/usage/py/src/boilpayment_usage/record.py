@@ -55,7 +55,10 @@ async def record(
     for a late report `occurred_at` is before `current_period.start`, so the anchor must already
     precede it, and `sub.created_at` is the only instant on `Subscription` guaranteed to."""
     # EC:C2 — dedupe by idempotency key (mirrors EC:B12's webhook dedupe pattern)
-    existing = await repo.usage_events.list(idempotency_key=event.idempotency_key)
+    # EC:B20 -- dedupe per customer: another customer's identical key is a different event.
+    existing = await repo.usage_events.list(
+        customer_id=event.customer_id, idempotency_key=event.idempotency_key
+    )
     if existing:
         return RecordResult(event=existing[0], duplicated=True)
 

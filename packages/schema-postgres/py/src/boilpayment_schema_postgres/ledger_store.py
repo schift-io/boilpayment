@@ -122,8 +122,8 @@ class PostgresLedgerStore:
                 conn.cursor() as cur,
             ):
                 await cur.execute(
-                    "select * from ledger_entries where idempotency_key = %s",
-                    (entry.idempotency_key,),
+                    "select * from ledger_entries where customer_id = %s and idempotency_key = %s",
+                    (entry.customer_id, entry.idempotency_key),
                 )
                 existing = await cur.fetchone()
                 if existing:
@@ -243,9 +243,10 @@ class PostgresLedgerStore:
                 conn.cursor() as cur,
             ):
                 await cur.execute(
-                    "select * from ledger_entries where idempotency_key = %s or idempotency_key like %s "
+                    "select * from ledger_entries where customer_id = %s "
+                    "and (idempotency_key = %s or idempotency_key like %s) "
                     "order by created_at asc",
-                    (input.idempotency_key, f"{input.idempotency_key}:%"),
+                    (input.customer_id, input.idempotency_key, f"{input.idempotency_key}:%"),
                 )
                 existing = await cur.fetchall()
                 if existing:

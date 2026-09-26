@@ -91,12 +91,14 @@ export class PostgresLedgerStore implements LedgerStore {
     return withCustomerTransaction(this.pool, customerId, fn);
   }
 
-  // EC:B1 B2 B9 B12 — single-row grant/revoke/expire/hold/release/adjust. Idempotency_key UNIQUE
-  // makes a webhook resend or duplicate CS regrant a no-op (B12/E2/E14).
+  // EC:B1 B2 B9 B12 B20 — single-row grant/revoke/expire/hold/release/adjust. (customer_id,
+  // idempotency_key) UNIQUE makes a webhook resend or duplicate CS regrant a no-op (B12/E2/E14);
+  // another customer's identical key is a different operation (B20).
   async append(entry: NewLedgerEntry): Promise<AppendResult> {
     return withCustomerTransaction(this.pool, entry.customerId, async () => {
       const client = this.client(entry.customerId);
-      const existing = await client.query('select * from ledger_entries where idempotency_key = $1', [
+      const existing = await client.query('select * from ledger_entries where customer_id = $1 and idempotency_key = $2', [
+        entry.customerId,
         entry.idempotencyKey,
       ]);
       if (existing.rows[0]) {
@@ -183,8 +185,8 @@ export class PostgresLedgerStore implements LedgerStore {
       const client = this.client(input.customerId);
 
       const existing = await client.query(
-        `select * from ledger_entries where idempotency_key = $1 or idempotency_key like $1 || ':%' order by created_at asc`,
-        [input.idempotencyKey],
+        `select * from ledger_entries where customer_id = $2 and (idempotency_key = $1 or idempotency_key like $1 || ':%') order by created_at asc`,
+        [input.idempotencyKey, input.customerId],
       );
       if (existing.rows.length) {
         return { ok: true, entries: existing.rows.map(rowToLedgerEntry), shortfall: 0, duplicated: true };

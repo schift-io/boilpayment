@@ -143,6 +143,9 @@ interface Bucket {
   remaining: number;
 }
 
+/** EC:B20 — idempotency keys are scoped to the customer. */
+const scopedKey = (customerId: string, key: string): string => `${customerId}\u0000${key}`;
+
 export class InMemoryLedger implements LedgerStore {
   private readonly entriesByCustomer = new Map<string, LedgerEntry[]>();
   private readonly byIdempotencyKey = new Map<string, LedgerEntry>();
@@ -181,15 +184,16 @@ export class InMemoryLedger implements LedgerStore {
     return this.mutexFor(customerId).run(() => this.held.run(next, fn));
   }
 
-  // EC:B12 — idempotency_key is UNIQUE across the whole ledger; a re-append returns the existing row.
+  // EC:B12 B20 — (customerId, idempotencyKey) is unique; a re-append by the same customer returns the
+  // existing row. Another customer's identical key is a different operation.
   async append(entry: NewLedgerEntry): Promise<AppendResult> {
-    const existing = this.byIdempotencyKey.get(entry.idempotencyKey);
+    const existing = this.byIdempotencyKey.get(scopedKey(entry.customerId, entry.idempotencyKey));
     if (existing) return { entry: existing, duplicated: true };
     const row: LedgerEntry = { ...entry, id: this.ids.newId(), createdAt: this.clock.now() };
     const bucket = this.entriesByCustomer.get(entry.customerId) ?? [];
     bucket.push(row);
     this.entriesByCustomer.set(entry.customerId, bucket);
-    this.byIdempotencyKey.set(entry.idempotencyKey, row);
+    this.byIdempotencyKey.set(scopedKey(entry.customerId, entry.idempotencyKey), row);
     return { entry: row, duplicated: false };
   }
 
@@ -270,7 +274,7 @@ export class InMemoryLedger implements LedgerStore {
   // · EC:B12 idempotent (whole call cached by idempotencyKey) · EC:B14 expiry filtered at consume time.
   async consume(input: ConsumeInput): Promise<ConsumeResult> {
     return this.transaction(input.customerId, async () => {
-      const cached = this.consumeResults.get(input.idempotencyKey);
+      const cached = this.consumeResults.get(scopedKey(input.customerId, input.idempotencyKey));
       if (cached) return { ...cached, duplicated: true };
 
       const now = input.now;
@@ -322,7 +326,7 @@ export class InMemoryLedger implements LedgerStore {
 
       if (!ok) {
         const result: ConsumeResult = { ok: false, entries: [], shortfall, duplicated: false };
-        this.consumeResults.set(input.idempotencyKey, result);
+        this.consumeResults.set(scopedKey(input.customerId, input.idempotencyKey), result);
         return result;
       }
 
@@ -348,7 +352,7 @@ export class InMemoryLedger implements LedgerStore {
         entries.push(entry);
       }
       const result: ConsumeResult = { ok: true, entries, shortfall: 0, duplicated: false };
-      this.consumeResults.set(input.idempotencyKey, result);
+      this.consumeResults.set(scopedKey(input.customerId, input.idempotencyKey), result);
       return result;
     });
   }

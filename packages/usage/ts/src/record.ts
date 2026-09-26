@@ -43,7 +43,8 @@ export async function record(input: RecordInput): Promise<RecordResult> {
   const { event, sub, policy, repo, clock, ids, provider, plan } = input;
 
   // EC:C2 — dedupe by idempotency key (mirrors EC:B12's webhook dedupe pattern)
-  const existing = await repo.usageEvents.list({ idempotencyKey: event.idempotencyKey } as Partial<UsageEvent>);
+  // EC:B20 — dedupe per customer: another customer's identical key is a different event.
+  const existing = await repo.usageEvents.list({ customerId: event.customerId, idempotencyKey: event.idempotencyKey } as Partial<UsageEvent>);
   if (existing.length > 0) {
     return { event: existing[0], duplicated: true };
   }

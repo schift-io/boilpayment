@@ -66,6 +66,7 @@
 | B19 | 출처별 기본 만료 — 트라이얼 직접 지급 | `policy.credits.expiry_days.trial` | **`null`** / 일수. `grantTrial` 직접 지급에만 적용(구독 트라이얼 크레딧은 기간 끝에 만료되는 기존 규칙 그대로) | credits | P0 |
 | B19 | 출처별 기본 만료 — 운영자 수동 지급 | `policy.credits.expiry_days.manual` | **`null`** / 일수. `manualGrant` 에 `policy` 를 넘길 때 적용 | credits | P0 |
 | B19 | 출처별 기본 만료 — CS 재지급 | `policy.credits.expiry_days.regrant` | **`null`** / 일수. 재지급 계획에 `expiresAt` 이 없으면 케이스의 정책 스냅샷 값으로 만료일을 정한다. 충전분은 기존 `topup_expiry_days`(B10), 구독 지급분은 주기 끝(롤오버 규칙) | cs · credits | P0 |
+| B20 | 다른 고객이 같은 멱등 키를 재사용 (호출자가 정한 요청 ID 충돌) | (구현 규칙) | 원장·usage_events 의 멱등 키 유일성은 `(customer_id, idempotency_key)`. 다른 고객의 같은 키는 새 작업으로 처리해 그 고객에게 청구하고, 처음 고객의 원장 행을 돌려주지 않는다. 같은 고객의 같은 키는 B12 대로 중복. Postgres 는 0009(원장)·0010(usage) 마이그레이션이 전역 unique 를 고객 단위로 바꾼다 | core + credits + usage + schema-postgres | P0 |
 | B18 | 차지백 증빙(evidence) 수집·제출 마감 (D9 보강) | `policy.dispute.evidence_due_days` | **`7`** (분쟁 오픈 후 N일 안에 체크리스트 수집·제출. 체크리스트는 결제 기록·원장 grant/consume 이력·이용량·환불 이력·CS 케이스 기록에서 도출, 없는 항목은 `available:false`+사유(약관 동의 이력은 kit 이 아예 안 갖고 있어 항상 이 상태). provider 가 프로그램적 제출을 지원하면(duck-typed `submitDisputeEvidence`, Stripe 有 / Toss·PortOne 無) 자동 제출, 아니면 `submitted:false, reason:'provider_unsupported'` + 체크리스트 첨부해 사람에게 에스컬레이션. 마감 24시간 전이고 체크리스트 미완이면 크론이 재에스컬레이션 | cs | P1 |
 
 ## C. 이용량(Usage)

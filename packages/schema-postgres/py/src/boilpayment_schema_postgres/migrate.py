@@ -45,6 +45,12 @@ class MigrationFile:
         self.sql = sql
 
 
+# Follow-up migrations of a module, applied with it (EC:B20: per-customer idempotency keys).
+MODULE_UPDATES: dict[str, tuple[str, ...]] = {
+    "credits": ("0009_ledger_idempotency_per_customer.sql",),
+    "usage": ("0010_usage_idempotency_per_customer.sql",),
+}
+
 # Modules applied only when asked for by name (EC:N1): a default migrate() keeps its schema.
 OPT_IN_MODULES: tuple[str, ...] = ("iap",)
 
@@ -56,6 +62,9 @@ def load_migrations(modules: list[str] | None = None) -> list[MigrationFile]:
     wanted.add("core")
     wanted_files = {file for mod, file in MODULE_FILES.items() if mod in wanted}
     wanted_files.add("0007_subscription_provider_ref_nullable.sql")
+    for mod, updates in MODULE_UPDATES.items():
+        if mod in wanted:
+            wanted_files.update(updates)
     sql_dir = _sql_dir()
     files = sorted(p.name for p in sql_dir.glob("*.sql"))
     return [

@@ -146,8 +146,8 @@ class InMemoryLedger:
         self._ids: IdGen = ids or UuidIdGen()
         self._clock: Clock = clock or SystemClock()
         self._entries_by_customer: dict[str, list[LedgerEntry]] = {}
-        self._by_idempotency_key: dict[str, LedgerEntry] = {}
-        self._consume_results: dict[str, ConsumeResult] = {}
+        self._by_idempotency_key: dict[tuple[str, str], LedgerEntry] = {}
+        self._consume_results: dict[tuple[str, str], ConsumeResult] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         # Reentrant per customer, like the Postgres store: a ledger call made inside transaction()
         # for the same customer (e.g. usage.commit calling consume) joins it instead of deadlocking.
@@ -173,9 +173,10 @@ class InMemoryLedger:
             finally:
                 self._held.reset(token)
 
-    # EC:B12 — idempotency_key is UNIQUE across the whole ledger; a re-append returns the existing row.
+    # EC:B12 B20 — (customer_id, idempotency_key) is unique; a re-append by the same customer returns
+    # the existing row. Another customer's identical key is a different operation.
     async def append(self, entry: NewLedgerEntry) -> AppendResult:
-        existing = self._by_idempotency_key.get(entry.idempotency_key)
+        existing = self._by_idempotency_key.get((entry.customer_id, entry.idempotency_key))
         if existing is not None:
             return AppendResult(entry=existing, duplicated=True)
         row = LedgerEntry(
@@ -196,7 +197,7 @@ class InMemoryLedger:
         )
         bucket = self._entries_by_customer.setdefault(entry.customer_id, [])
         bucket.append(row)
-        self._by_idempotency_key[entry.idempotency_key] = row
+        self._by_idempotency_key[(entry.customer_id, entry.idempotency_key)] = row
         return AppendResult(entry=row, duplicated=False)
 
     async def entries(
@@ -296,7 +297,7 @@ class InMemoryLedger:
     # · EC:B12 idempotent (whole call cached by idempotency_key) · EC:B14 expiry filtered at consume time.
     async def consume(self, input: ConsumeInput) -> ConsumeResult:
         async def _do() -> ConsumeResult:
-            cached = self._consume_results.get(input.idempotency_key)
+            cached = self._consume_results.get((input.customer_id, input.idempotency_key))
             if cached is not None:
                 return ConsumeResult(
                     ok=cached.ok,
@@ -366,7 +367,7 @@ class InMemoryLedger:
                 result = ConsumeResult(
                     ok=False, entries=[], shortfall=shortfall, duplicated=False
                 )
-                self._consume_results[input.idempotency_key] = result
+                self._consume_results[(input.customer_id, input.idempotency_key)] = result
                 return result
 
             written: list[LedgerEntry] = []
@@ -393,7 +394,7 @@ class InMemoryLedger:
             result = ConsumeResult(
                 ok=True, entries=written, shortfall=0, duplicated=False
             )
-            self._consume_results[input.idempotency_key] = result
+            self._consume_results[(input.customer_id, input.idempotency_key)] = result
             return result
 
         return await self.transaction(input.customer_id, _do)
