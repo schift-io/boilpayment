@@ -67,6 +67,17 @@ describe('[EC:A28] subscription currency', () => {
     expect(provider.lastCharge?.currency).toBe('KRW');
   });
 
+  it('[EC:A33] an upgrade from a plan without the subscription currency is refused, not charged the whole new price', async () => {
+    const h = await harness('2024-01-16T00:00:00.000Z');
+    const usdOnly: Plan = { ...planA, id: 'plan_usd', prices: [{ currency: 'USD', amountMinor: 1000, providerPriceRefs: {} }] };
+    await h.repo.plans.put(usdOnly);
+    const sub = mkSub({ planId: 'plan_usd' });
+    await h.repo.subscriptions.put(sub);
+    const provider = new FakeSelfSchedulingProvider();
+    await expect(upgrade({ sub, newPlan: planB, policy: resolvePolicy(), provider, ...h })).rejects.toMatchObject({ code: 'plan_price_missing' });
+    expect(provider.lastCharge).toBeNull();
+  });
+
   it('[EC:A28] the native price ref follows the subscription currency', () => {
     expect([resolvePriceRef(planB, 'stripe', 'KRW'), resolvePriceRef(planB, 'stripe', 'USD'), resolvePriceRef(planB, 'stripe')]).toEqual(['price_b_krw', 'price_b_usd', 'price_b_usd']);
   });

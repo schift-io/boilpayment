@@ -42,8 +42,13 @@ def money(amount_minor: int, currency: str) -> Money:
 
 
 def round_half_away_from_zero(x: float) -> int:
-    """EC:J7 -- half away from zero, identical to the TS kit (Python's round() is half-to-even)."""
-    return -math.floor(-x + 0.5) if x < 0 else math.floor(x + 0.5)
+    """EC:J7 -- half away from zero, identical to the TS kit (Python's round() is half-to-even).
+    Compares the exact fractional part (x - floor(x) is exact for doubles) instead of floor(x + 0.5),
+    which rounds 0.49999999999999994 up and odd values near 2^52 wrongly (TS Math.round does not)."""
+    if x < 0:
+        return -round_half_away_from_zero(-x)
+    whole = math.floor(x)
+    return whole + 1 if x - whole >= 0.5 else whole
 
 
 def scale_minor(amount: int, num: int, den: int, rounding: Rounding = "floor") -> int:

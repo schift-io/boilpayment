@@ -37,6 +37,7 @@ from boilpayment_core import (
     Refund,
     Subscription,
     WebhookSignatureError,
+    money,  # EC:J8 -- safe-integer check at the provider boundary
 )
 
 BASE_URL = "https://api.tosspayments.com"
@@ -111,7 +112,7 @@ def normalize_toss_payment(raw: dict[str, Any]) -> Payment:
         provider="toss",
         provider_ref=raw["paymentKey"],
         subscription_id=None,
-        amount=Money(
+        amount=money(
             amount_minor=raw["totalAmount"], currency=raw.get("currency") or "KRW"
         ),
         status=status,
@@ -136,7 +137,7 @@ def _normalize_toss_refund(
         # NOTE (contract gap — see spec "계약 변경 제안"): the provider adapter has no
         # access to our internal customer_id/rule_id. refund.execute must overwrite these.
         customer_id="",
-        amount=Money(
+        amount=money(
             amount_minor=last.get("cancelAmount", amount.amount_minor),
             currency=raw.get("currency") or amount.currency,
         ),
@@ -209,7 +210,7 @@ def normalize_toss_cash_receipt(raw: dict[str, Any]) -> CashReceipt:
         order_id=raw["orderId"],
         type=_from_toss_cash_receipt_type(raw.get("type", "")),
         status=status,
-        amount=Money(amount_minor=raw["amount"], currency="KRW"),
+        amount=money(amount_minor=raw["amount"], currency="KRW"),
         issue_number=raw.get("issueNumber"),
         receipt_url=raw.get("receiptUrl"),
         failure=CashReceiptFailure(
@@ -255,10 +256,8 @@ def map_toss_webhook(body: dict[str, Any]) -> NormalizedEvent:
     amount_minor = cancellation.get("cancelAmount") if normalized_type.startswith("refund.") else data.get("totalAmount")
     currency = data.get("currency") if normalized_type.startswith("refund.") else data.get("currency", "KRW")
     if isinstance(amount_minor, (int, float)) and currency:
-        amount = Money(
-            amount_minor=int(amount_minor),
-            currency=currency,
-        )
+        # EC:J8 -- money() refuses a non-integer or unsafe amount (no silent int() truncation).
+        amount = money(amount_minor=amount_minor, currency=currency)
     return NormalizedEvent(
         # Toss webhook bodies carry no unique event id; synthesize one. created_at is the
         # original event time so retries reuse the same value -> stable idempotency key.
@@ -691,7 +690,7 @@ class TossProvider:
             return None
         return _normalize_toss_refund(
             {**raw, "lastTransactionKey": refund_ref}, payment_ref=payment_ref,
-            amount=Money(amount_minor=cancellation["cancelAmount"], currency=raw["currency"]),
+            amount=money(amount_minor=cancellation["cancelAmount"], currency=raw.get("currency") or "KRW"),
             reason=cancellation.get("cancelReason", ""),
         )
 

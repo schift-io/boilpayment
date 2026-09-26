@@ -91,7 +91,8 @@ export async function upgrade(input: UpgradeInput): Promise<UpgradeResult> {
       } else {
         if (!sub.billingKey) throw new PaymentKitError('upgrade requires a billing key for self-scheduling providers', 'billing_key_required');
         // EC:A28 — both prices in the subscription's currency (spec note #4 used the first price).
-        const oldPrice = priceForSubscription(oldPlan, sub) ?? undefined;
+        // EC:A33 — a missing old price is refused, not read as 0 (the whole new price as the delta).
+        const oldPrice = requirePriceForSubscription(oldPlan, sub);
         const newPrice = requirePriceForSubscription(newPlan, sub);
         const priceDeltaMinor = (newPrice?.amountMinor ?? 0) - (oldPrice?.amountMinor ?? 0);
         // EC:J7 — exact integer proration (a float ratio can land one minor unit short).

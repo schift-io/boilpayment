@@ -66,8 +66,9 @@ async def check(
         else policy.usage.included_quantity
     )  # EC:C5
 
-    # EC:A27 -- paused / incomplete subscriptions hold no entitlement.
-    if sub.status in INACTIVE_SUBSCRIPTION_STATUSES:
+    # EC:A27 -- paused / incomplete subscriptions hold no entitlement. EC:C11 -- nor does one that
+    # has ended (canceled = the period is over; expired).
+    if has_no_entitlement(sub.status):
         return CheckResult(allow=False, overage=0, reason="subscription_inactive", remaining=0)
 
     # EC:A14 / EC:C6 — grace-period gating
@@ -158,3 +159,8 @@ async def check(
     return CheckResult(
         allow=True, overage=overage, reason="bill_overage", remaining=remaining
     )
+
+
+def has_no_entitlement(status: str) -> bool:
+    """EC:A27 C11 -- statuses that carry no usage entitlement."""
+    return status in INACTIVE_SUBSCRIPTION_STATUSES or status in ("canceled", "expired")

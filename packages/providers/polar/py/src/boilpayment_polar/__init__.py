@@ -40,6 +40,7 @@ from boilpayment_core import (
     Refund,
     Subscription,
     WebhookSignatureError,
+    money,
 )
 
 SERVER_URLS = {
@@ -49,7 +50,7 @@ SERVER_URLS = {
 
 
 def _money(amount_minor: int, currency: str) -> Money:
-    return Money(amount_minor=amount_minor, currency=(currency or "usd").upper())
+    return money(amount_minor, (currency or "usd").upper())  # EC:J8 -- safe-integer check
 
 
 def _parse_dt(value: str | None) -> datetime:

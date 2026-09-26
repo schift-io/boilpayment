@@ -26,7 +26,10 @@ from boilpayment_core import (
     Policy,
     Pool,
     Repo,
+    Subscription,
 )
+
+from .check import has_no_entitlement
 
 _POOL_ORDER: Final[dict[ConsumeOrder, list[Pool]]] = {
     "expiring_first": ["paid", "promo", "trial"],
@@ -54,7 +57,7 @@ class ReserveResult:
     ok: bool
     reservation: Reservation | None = None
     duplicated: bool = False
-    reason: Literal["insufficient"] | None = None
+    reason: Literal["insufficient", "subscription_inactive"] | None = None
     need: int | None = None
     available: int | None = None
 
@@ -171,13 +174,17 @@ async def reserve(
     policy: Policy,
     ledger: LedgerStore,
     clock: Clock,
+    sub: Subscription | None = None,
 ) -> ReserveResult:
-    """EC:C10 -- hold `amount` credits for `job_id`. Same job_id again returns the existing reservation."""
+    """EC:C10 -- hold `amount` credits for `job_id`. Same job_id again returns the existing reservation.
+    EC:C11 -- when `sub` is given, a subscription without entitlement is refused."""
     _check_job(customer_id, job_id)
     if not _is_int(amount) or amount <= 0:
         raise PaymentKitError(
             "reservation amount must be a positive integer", "reservation_invalid"
         )
+    if sub is not None and has_no_entitlement(sub.status):
+        return ReserveResult(ok=False, reason="subscription_inactive")
 
     async def run() -> ReserveResult:
         now = clock.now()

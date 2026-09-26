@@ -47,6 +47,7 @@
 | A30 | 자체 스케줄 tick 에서 구독 하나의 청구가 미확정(pending)이거나, 청구 성공 뒤 로컬 단계가 실패 | (구현 규칙) | 구독마다 따로 처리하고 오류는 `result.errors` 에 모은다: 한 행이 뒤의 모든 갱신을 멈추지 않는다. 청구가 성공하면 로컬 단계 전에 결제 행을 기록하고, 다음 tick 은 그 기간의 성공 결제가 있으면 다시 청구하지 않고 로컬 단계만 이어서 한다. 미확정 결제는 dunning 을 시작하지 않는다(reconcile 대상) | lifecycle | P0 |
 | A31 | 갱신하려는 플랜이 삭제됐거나 구독 통화 가격이 없음 (설정 오류) | (구현 규칙) | 청구하지 않고, 구독을 dunning(past_due, 유예)에 넣고 `cs.needs_human`(`kind: plan_price_missing`)으로 사람에게 알린다. 활성 상태로 무기한 남지 않는다. dunning 재시도도 같은 상황이면 알리고 재시도 일정을 유지해, 가격을 고치면 다음 시도에서 청구된다 | lifecycle | P0 |
 | A32 | 결제사에서 이미 취소·만료된 구독의 갱신 결제가 늦게 처리됨 | (구현 규칙) | 낸 기간의 크레딧은 지급하되 구독을 `active` 로 되살리지 않는다(`canceled`·`expired` 유지) | lifecycle | P0 |
+| A33 | 구독 통화에 가격이 없는 플랜으로 결제사 가격 변경(업·다운그레이드) 또는 업그레이드 차액 계산 | (구현 규칙) | 통화가 있는 구독은 그 통화 가격의 ref 만 쓴다. 플랜에 그 통화 가격이 없으면 `plan_price_missing` 으로 거절하고 다른 통화 ref 로 넘어가지 않는다. 업그레이드는 옛 플랜 가격도 구독 통화로 있어야 한다(없으면 0 으로 보아 새 가격 전액을 차액으로 청구하지 않고 거절) | lifecycle | P0 |
 
 ## B. 크레딧 원장
 
@@ -90,6 +91,7 @@
 | C7 | 사용량 분쟁 ("난 안 썼다") | (CS) | `usage_events` 에 `request_id` · `ip` · `user_agent` 메타 저장 → 증빙 | cs · usage | P1 |
 | C8 | 사용량 → 크레딧 환산 (하이브리드) | `policy.usage.credit_conversion` | **`null`** / `{unit, credits_per_unit}` | usage · credits | P1 |
 | C10 | 오래 걸리는 작업의 예산 예약 (영상 처리, 대량 변환 등) | `policy.usage.reservation_ttl_minutes` | **60** 분. `usage.reserve` 가 작업 id 로 크레딧을 hold 하고(남은 예산 = 잔액 − 살아 있는 예약, 모자라면 `{need, available}` 로 거절), 성공하면 `usage.commit` 이 실제 사용량(≤ 예약)만 청구하고 나머지를 풀며, 실패·취소는 `usage.release` 로 청구 없이 푼다. 만료된 예약은 `cron.sweepReservations` 가 푼다. 같은 고객의 예약 경쟁은 고객 단위 원장 트랜잭션으로 직렬화되어 마지막 예산은 하나만 가져간다 | usage | P0 |
+| C11 | 끝난 구독(`canceled`: 기간이 끝남, `expired`: 최종 결제 실패)이나 권한 없는 구독(`paused`, `incomplete`)으로 이용·예약 | (구현 규칙) | `usage.check` 는 네 상태 모두 `subscription_inactive` 로 거절한다(기간 말 해지 예약은 기간 끝까지 `active`). `usage.reserve` 는 `sub` 를 넘기면 같은 규칙으로 hold 전에 거절한다. `usage.record`(이미 일어난 사용량 기록)와 `credits.consume`(구독과 무관한 충전 크레딧)은 막지 않는다 | usage | P0 |
 | C9 | 주기 마감 후 도착한 사용량 재정산 | (구현 규칙) | 마감(`closePeriod`) 뒤에도 C2 창 안이면 `record()` 가 그 주기로 귀속시키므로, **`usage.resettlePeriod` 로 다시 정산**해 증분만 청구한다(`newlyReported` · `additionalOverage`). 정산 완료 총량은 `usage_periods` 에 갱신되어 재실행이 멱등이다. 이게 없으면 늦게 온 사용량은 **영원히 청구되지 않는다** | usage | P0 |
 
 ## D. 환불
@@ -216,6 +218,7 @@
 | J5 | 어느 연산이 키를 쓰는가 + 기본 키 유도 규칙 | (구현 규칙) | 호출자가 `idempotencyKey` 를 안 주면 **입력값에서 결정적으로 유도**(시각·랜덤 금지): `lifecycle.upgrade` → `upgrade:{sub.id}:{newPlan.id}:{sub.currentPeriod.start ISO}` / `lifecycle.downgrade` → `downgrade:{sub.id}:{newPlan.id}:{sub.currentPeriod.start ISO}` / `lifecycle.cancel` → `cancel:{sub.id}:{sub.currentPeriod.start ISO}` / `lifecycle.convertTrial` → `convert-trial:{sub.id}:{plan.id}` / `refund.execute` → `refund:{decision.paymentId}:{decision.amount.amountMinor}:{decision.ruleId}` / `credits.topup` → `topup:{payment.id}` (기존 원장 키와 동일) / `cs.regrant` → `plan.idempotencyKey ?? case.referenceId` (기존 동작 유지) / `cs.refundAssist` → `refund-assist:{case.id}:{payment.id}`. **`clock.now()`·`ids.newId()` 로 키를 유도하지 않는다** — 재시도마다 값이 달라져 J1 이 깨진다 | lifecycle · refund · credits · cs | P0 |
 | J6 | 통화별 소수 자릿수 (KRW·JPY 외의 0 자리 통화, KWD·BHD 같은 3 자리 통화) | (구현 규칙) | ISO 4217 지수 표(`currencyExponent`: 0/2/3)를 표시·변환 전부에서 쓴다(타임라인, 인앱결제 금액 환산) | core + cs | P1 |
 | J7 | 금액 계산이 부동소수점으로 한 단위 모자라거나(8.7/30 일 남은 100 차액 → 28), TS 와 Python 이 .5 를 다르게 반올림(Math.round vs round), 2^53 을 넘는 정수가 조용히 깨짐 | (구현 규칙) | 금액은 안전 정수(절댓값 2^53-1 이하)만 받는다. 비례 금액은 `prorationFraction`(ms 정수 분수) × `scaleMinor`(정수 유리수, 반올림 방식 명시)로 계산한다. 반올림 `round` 는 두 언어 모두 0 에서 먼 쪽 | core + lifecycle + refund | P0 |
+| J8 | 결제사 응답·웹훅의 금액이 정수가 아니거나 2^53 을 넘음, Python 반올림이 TS 와 다른 경계값(0.49999999999999994, 2^52 근처), Python 비례 분모의 banker's rounding·마이크로초 | (구현 규칙) | 결제사 어댑터(Stripe, Polar, Toss, PortOne)의 금액은 core `money()` 를 거쳐 안전 정수가 아니면 거절한다(Py 가 1.5 를 1 로 자르던 것도 거절). Python `round_half_away_from_zero` 는 소수부를 정확히 비교하고, `proration_fraction` 은 TS 처럼 0 에서 먼 반올림과 epoch 밀리초 정수를 쓴다 | core + providers | P0 |
 
 ---
 

@@ -35,18 +35,19 @@ def scope_provider(provider: object, correlation_id: str | None):
 
 
 def resolve_price_ref(plan: Plan, provider: str, currency: str | None = None) -> str:
-    # EC:A28 -- the price in the subscription's currency first.
+    # EC:A28 A33 -- a subscription with a currency only ever gets a price ref in that currency; a
+    # plan without a price in it is refused (never a silent switch to another currency's price).
     if currency:
-        for p in plan.prices:
-            if p.currency == currency and p.provider_price_refs and p.provider_price_refs.get(provider):
-                return p.provider_price_refs[provider]
+        price = next((p for p in plan.prices if p.currency == currency), None)
+        if price is None:
+            raise PaymentKitError(
+                f"plan {plan.id} has no price in {currency}", "plan_price_missing",
+                {"plan_id": plan.id, "currency": currency},
+            )
+        return (price.provider_price_refs or {}).get(provider) or plan.id
     for p in plan.prices:
         if p.provider_price_refs and p.provider_price_refs.get(provider):
             return p.provider_price_refs[provider]
-    if plan.prices and plan.prices[0].provider_price_refs:
-        ref = plan.prices[0].provider_price_refs.get(provider)
-        if ref:
-            return ref
     return plan.id
 
 

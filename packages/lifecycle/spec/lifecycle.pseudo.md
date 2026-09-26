@@ -598,3 +598,15 @@ onRenewalPaid(sub, payment):
    if sub.status in ('canceled', 'expired'): return { sub }   # 상태·기간 그대로
    put { ...sub, planId, scheduledPlanId: null, currentPeriod: period, status: 'active' }
 ```
+
+## [EC:A33] 구독 통화의 가격만 쓴다
+
+```pseudo
+resolvePriceRef(plan, provider, currency):
+   if currency:
+      price = plan.prices.find(currency) or raise plan_price_missing   # 다른 통화 ref 로 넘어가지 않는다
+      return price.ref[provider] ?? plan.id
+   return first price with a ref for provider ?? plan.id               # 통화 없는 옛 행
+
+upgrade (self-scheduled): oldPrice = requirePriceForSubscription(oldPlan, sub)   # 없으면 거절, 0 으로 보지 않는다
+```

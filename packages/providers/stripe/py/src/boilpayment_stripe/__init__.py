@@ -30,6 +30,7 @@ from boilpayment_core import (
     Refund,
     Subscription,
     WebhookSignatureError,
+    money,
 )
 
 
@@ -238,7 +239,7 @@ def normalize_failure(
 
 
 def _money(amount_minor: int, currency: str) -> Money:
-    return Money(amount_minor=amount_minor, currency=currency.upper())
+    return money(amount_minor, currency.upper())  # EC:J8 -- safe-integer check
 
 
 def _dt(unix_ts: int) -> datetime:

@@ -7,7 +7,8 @@
 // against `balance().available` in every store, so two reserves racing for the last credits are
 // serialized by the per-customer ledger transaction and exactly one wins.
 import { PaymentKitError } from 'boilpayment-core';
-import type { Clock, ConsumeOrder, LedgerEntry, LedgerStore, Policy, Pool, Repo } from 'boilpayment-core';
+import type { Clock, ConsumeOrder, LedgerEntry, LedgerStore, Policy, Pool, Repo, Subscription } from 'boilpayment-core';
+import { hasNoEntitlement } from './check.js';
 
 const POOL_ORDER: Record<ConsumeOrder, Pool[]> = {
   expiring_first: ['paid', 'promo', 'trial'],
@@ -38,10 +39,13 @@ interface ReservationDeps {
 
 export interface ReserveInput extends ReservationDeps {
   amount: number;
+  /** EC:C11 — when given, a subscription without entitlement (paused, incomplete, canceled, expired) is refused. */
+  sub?: Pick<Subscription, 'status'>;
 }
 export type ReserveResult =
   | { ok: true; reservation: Reservation; duplicated: boolean }
-  | { ok: false; reason: 'insufficient'; need: number; available: number };
+  | { ok: false; reason: 'insufficient'; need: number; available: number }
+  | { ok: false; reason: 'subscription_inactive' };
 
 export interface CommitInput extends ReservationDeps {
   /** What the job actually used, 0 <= amount <= reserved. */
@@ -108,6 +112,7 @@ export async function reserve(input: ReserveInput): Promise<ReserveResult> {
   const { customerId, jobId, amount, policy, ledger, clock } = input;
   checkJob(customerId, jobId);
   if (!Number.isSafeInteger(amount) || amount <= 0) throw new PaymentKitError('reservation amount must be a positive integer', 'reservation_invalid');
+  if (input.sub && hasNoEntitlement(input.sub.status)) return { ok: false, reason: 'subscription_inactive' }; // EC:C11
   return ledger.transaction(customerId, async () => {
     const now = clock.now();
     const existing = await readOne(ledger, customerId, jobId);

@@ -5,11 +5,13 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
+import pytest
 from boilpayment_core import (
     CollectingNotifier,
     FixedClock,
     InMemoryLedger,
     InMemoryRepo,
+    PaymentKitError,
     Period,
     Plan,
     PlanPrice,
@@ -96,3 +98,21 @@ def test_ec_a28_dunning_retry_and_upgrade_use_krw() -> None:
 def test_ec_a28_price_ref_follows_currency() -> None:
     assert [resolve_price_ref(PLAN_B, "stripe", "KRW"), resolve_price_ref(PLAN_B, "stripe", "USD"), resolve_price_ref(PLAN_B, "stripe")] == [
         "price_b_krw", "price_b_usd", "price_b_usd"]
+
+
+def test_ec_a33_upgrade_from_plan_without_currency_refused() -> None:
+    async def run():
+        repo = await _repo()
+        usd_only = Plan(id="plan_usd", name="U", interval="month", credits_per_period=100, usage_included=0, trial_days=0,
+                        prices=[PlanPrice(currency="USD", amount_minor=1000)])
+        await repo.plans.put(usd_only)
+        sub = mk_sub(plan_id="plan_usd")
+        await repo.subscriptions.put(sub)
+        p = FakeSelfSchedulingProvider()
+        with pytest.raises(PaymentKitError) as err:
+            await upgrade(UpgradeInput(sub=sub, new_plan=PLAN_B, policy=resolve_policy(), provider=p,
+                                       ledger=InMemoryLedger(SequentialIdGen("l_")), repo=repo,
+                                       clock=FixedClock(datetime(2024, 1, 16, tzinfo=UTC)), ids=SequentialIdGen("id_")))
+        return err.value.code, p.last_charge
+
+    assert asyncio.run(run()) == ("plan_price_missing", None)

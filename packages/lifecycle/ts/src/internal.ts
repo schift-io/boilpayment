@@ -2,10 +2,15 @@
 import { Clock, LedgerEntry, LedgerReference, LedgerStore, PaymentKitError, PaymentProvider, Plan, PlanPrice, Pool, ProviderName, Subscription } from 'boilpayment-core';
 
 export function resolvePriceRef(plan: Plan, provider: ProviderName, currency?: string | null): string {
-  // EC:A28 — the price in the subscription's currency first.
-  const inCurrency = currency ? plan.prices.find((p) => p.currency === currency && p.providerPriceRefs?.[provider]) : undefined;
-  const withRef = inCurrency ?? plan.prices.find((p) => p.providerPriceRefs?.[provider]);
-  return withRef?.providerPriceRefs?.[provider] ?? plan.prices[0]?.providerPriceRefs?.[provider] ?? plan.id;
+  // EC:A28 A33 — a subscription with a currency only ever gets a price ref in that currency; a plan
+  // without a price in it is refused (never a silent switch to another currency's price).
+  if (currency) {
+    const price = plan.prices.find((p) => p.currency === currency);
+    if (!price) throw new PaymentKitError(`plan ${plan.id} has no price in ${currency}`, 'plan_price_missing', { planId: plan.id, currency });
+    return price.providerPriceRefs?.[provider] ?? plan.id;
+  }
+  const withRef = plan.prices.find((p) => p.providerPriceRefs?.[provider]);
+  return withRef?.providerPriceRefs?.[provider] ?? plan.id;
 }
 
 /** EC:A29 — the plan a renewal moves the subscription into: a scheduled change applies at renewal. */

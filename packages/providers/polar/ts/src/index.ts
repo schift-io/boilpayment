@@ -28,7 +28,7 @@ import type {
   SubscriptionStatus,
   Logger,
 } from 'boilpayment-core';
-import { PaymentKitError, ProviderError, WebhookSignatureError, NoopLogger } from 'boilpayment-core';
+import { PaymentKitError, ProviderError, WebhookSignatureError, NoopLogger, money as coreMoney } from 'boilpayment-core';
 
 export interface PolarProviderConfig {
   accessToken: string;
@@ -48,8 +48,9 @@ export interface PolarProviderConfig {
 
 const SERVER_URLS = { production: 'https://api.polar.sh', sandbox: 'https://sandbox-api.polar.sh' } as const;
 
+// EC:J8 — the core money() checks the amount is a safe integer at the provider boundary.
 function money(amountMinor: number, currency: string): Money {
-  return { amountMinor, currency: currency.toUpperCase() };
+  return coreMoney(amountMinor, currency);
 }
 
 // EC:E12 — Polar exposes little failure detail on the provider side (see spec)

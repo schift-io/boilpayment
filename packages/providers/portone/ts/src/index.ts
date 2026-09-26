@@ -23,7 +23,7 @@ import type {
   NormalizedEventType,
   Logger,
 } from 'boilpayment-core';
-import { PaymentKitError, WebhookSignatureError, ProviderError, NoopLogger } from 'boilpayment-core';
+import { PaymentKitError, WebhookSignatureError, ProviderError, NoopLogger, money } from 'boilpayment-core'; // money(): EC:J8 safe-integer check at the provider boundary
 
 const BASE_URL = 'https://api.portone.io';
 
@@ -85,7 +85,7 @@ export function normalizePortoneCashReceipt(raw: any): CashReceipt {
     paymentRef: raw.paymentId,
     type: raw.type === 'CORPORATE' ? 'business' : raw.type === 'PERSONAL' ? 'personal' : null,
     status,
-    amount: typeof raw.amount === 'number' ? { amountMinor: raw.amount, currency: raw.currency ?? 'KRW' } : null,
+    amount: typeof raw.amount === 'number' ? money(raw.amount, raw.currency ?? 'KRW') : null,
     issueNumber: raw.issueNumber ?? null,
     receiptUrl: raw.url ?? null,
     raw,
@@ -123,7 +123,7 @@ export function normalizePortonePayment(raw: any): Payment {
     provider: 'portone',
     providerRef: raw.id ?? raw.paymentId,
     subscriptionId: null,
-    amount: { amountMinor: amount.total ?? amount, currency: raw.currency ?? 'KRW' },
+    amount: money(amount.total ?? amount, raw.currency ?? 'KRW'),
     status,
     kind: 'subscription',
     period: null,
@@ -142,7 +142,7 @@ function normalizePortoneRefund(raw: any, input: { paymentRef: string; amount: M
     // NOTE (contract gap — see spec "계약 변경 제안"): customerId/ruleId unknown to the
     // provider adapter. refund.execute must overwrite these before persisting.
     customerId: '',
-    amount: { amountMinor: cancellation.totalAmount ?? cancellation.amount ?? input.amount.amountMinor, currency: input.amount.currency },
+    amount: money(cancellation.totalAmount ?? cancellation.amount ?? input.amount.amountMinor, input.amount.currency),
     status: cancellation.status === 'SUCCEEDED' ? 'succeeded' : cancellation.status === 'FAILED' ? 'failed' : 'pending',
     providerRef: cancellation.id ?? null,
     creditsRevoked: 0,
@@ -494,7 +494,7 @@ export class PortoneProvider implements PaymentProvider {
     const cancellation = (raw.cancellations ?? []).find((cancel: { id?: string }) => cancel.id === input.refundRef);
     if (!cancellation) return null;
     return normalizePortoneRefund({ cancellation }, {
-      paymentRef: input.paymentRef, amount: { amountMinor: cancellation.totalAmount, currency: raw.currency }, reason: cancellation.reason ?? '',
+      paymentRef: input.paymentRef, amount: money(cancellation.totalAmount, raw.currency ?? 'KRW'), reason: cancellation.reason ?? '',
     });
   }
 

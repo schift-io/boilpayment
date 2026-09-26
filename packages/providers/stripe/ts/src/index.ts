@@ -19,7 +19,7 @@ import type {
   SubscriptionStatus,
   Logger,
 } from 'boilpayment-core';
-import { PaymentKitError, WebhookSignatureError, NoopLogger } from 'boilpayment-core';
+import { PaymentKitError, WebhookSignatureError, NoopLogger, money as coreMoney } from 'boilpayment-core';
 
 export interface StripeProviderConfig {
   secretKey: string;
@@ -65,8 +65,9 @@ export function normalizeFailure(input: { code?: string | null; declineCode?: st
   return { code: 'unknown', providerCode: key || null, retryable: false, userMessage: input.message || '결제 중 알 수 없는 오류가 발생했습니다.' };
 }
 
+// EC:J8 — the core money() checks the amount is a safe integer at the provider boundary.
 function money(amountMinor: number, currency: string): Money {
-  return { amountMinor, currency: currency.toUpperCase() };
+  return coreMoney(amountMinor, currency);
 }
 
 // EC:E7 — PaymentIntent.status -> PaymentStatus

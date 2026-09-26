@@ -40,8 +40,9 @@ export async function check(input: CheckInput): Promise<CheckResult> {
   const { customerId, meter, quantity, sub, policy, repo, ledger, clock, ids, includedQuantity, idempotencyKey } = input;
   const included = includedQuantity ?? policy.usage.includedQuantity; // EC:C5
 
-  // EC:A27 — paused / incomplete subscriptions hold no entitlement.
-  if (INACTIVE_SUBSCRIPTION_STATUSES.includes(sub.status)) {
+  // EC:A27 — paused / incomplete subscriptions hold no entitlement. EC:C11 — nor does one that has
+  // ended (canceled = the period is over; a cancel at period end stays 'active' until then; expired).
+  if (hasNoEntitlement(sub.status)) {
     return { allow: false, overage: 0, reason: 'subscription_inactive', remaining: 0, notify: null };
   }
 
@@ -95,4 +96,9 @@ export async function check(input: CheckInput): Promise<CheckResult> {
       if (blockGraceOverage) return { allow: false, overage, reason: 'grace_block_overage', remaining, notify: null };
       return { allow: true, overage, reason: 'bill_overage', remaining, notify: null };
   }
+}
+
+/** EC:A27 C11 — statuses that carry no usage entitlement. */
+export function hasNoEntitlement(status: Subscription['status']): boolean {
+  return INACTIVE_SUBSCRIPTION_STATUSES.includes(status) || status === 'canceled' || status === 'expired';
 }

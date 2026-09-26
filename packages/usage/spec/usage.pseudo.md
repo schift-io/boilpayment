@@ -324,3 +324,13 @@ service in an outer database transaction. Provider idempotency and its retention
 contract remain required for retrying an unknown remote outcome. Real PostgreSQL
 regressions verify committed intent survives a lost response and that late usage
 creates only a separate delta after the original request resolves.
+
+## [EC:C11] 끝났거나 권한 없는 구독은 이용·예약 불가
+
+```pseudo
+hasNoEntitlement(status) = status in ('paused', 'incomplete', 'canceled', 'expired')
+check(sub, ...):   if hasNoEntitlement(sub.status): return { allow: false, reason: 'subscription_inactive' }
+reserve(..., sub?): if sub and hasNoEntitlement(sub.status): return { ok: false, reason: 'subscription_inactive' }   # hold 전
+```
+
+`record` 와 `credits.consume` 은 막지 않는다: 이미 일어난 사용량 기록과, 구독과 무관한 충전 크레딧 사용.

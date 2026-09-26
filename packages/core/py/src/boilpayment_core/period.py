@@ -6,13 +6,16 @@ All datetime instants in/out are UTC (EC:G3); `tz` is used only for civil month/
 from __future__ import annotations
 
 import calendar
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal, NamedTuple
 from zoneinfo import ZoneInfo
 
+from .money import round_half_away_from_zero
 from .types import MonthEndAnchor, Period, ProrationDenominator
 
 _DAY_MS = 86_400_000
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+_ONE_MS = timedelta(milliseconds=1)
 
 Interval = Literal["month", "year"]
 
@@ -138,9 +141,16 @@ def proration_fraction(
     total_days = 30.0 if denominator == "fixed_30" else days_in_period(period)
     if total_days <= 0:
         return 0, 1
-    den = round(total_days * _DAY_MS)
-    remaining = round((period.end - now).total_seconds() * 1000)
+    # EC:J7 -- same integers as the TS kit: half-away-from-zero (not banker's) for the denominator,
+    # and whole epoch milliseconds for both instants (a JS Date has no microseconds).
+    den = round_half_away_from_zero(total_days * _DAY_MS)
+    remaining = _epoch_ms(period.end) - _epoch_ms(now)
     return min(den, max(0, remaining)), den
+
+
+def _epoch_ms(dt: datetime) -> int:
+    """Whole milliseconds since the epoch, floored like a JS Date."""
+    return (dt - _EPOCH) // _ONE_MS
 
 
 def proration_ratio(

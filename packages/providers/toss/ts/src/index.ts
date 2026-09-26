@@ -17,7 +17,7 @@ import type {
   NormalizedEventType,
   Logger,
 } from 'boilpayment-core';
-import { PaymentKitError, WebhookSignatureError, ProviderError, NoopLogger } from 'boilpayment-core';
+import { PaymentKitError, WebhookSignatureError, ProviderError, NoopLogger, money } from 'boilpayment-core'; // money(): EC:J8 safe-integer check at the provider boundary
 
 const BASE_URL = 'https://api.tosspayments.com';
 
@@ -93,7 +93,7 @@ export function normalizeTossCashReceipt(raw: any): CashReceipt {
     orderId: raw.orderId,
     type: fromTossCashReceiptType(raw.type),
     status,
-    amount: { amountMinor: raw.amount, currency: 'KRW' },
+    amount: money(raw.amount, 'KRW'),
     issueNumber: raw.issueNumber ?? null,
     receiptUrl: raw.receiptUrl ?? null,
     failure: raw.failure ? { code: raw.failure.code ?? null, message: raw.failure.message ?? null } : null,
@@ -145,7 +145,7 @@ export function normalizeTossPayment(raw: any): Payment {
     provider: 'toss',
     providerRef: raw.paymentKey,
     subscriptionId: null,
-    amount: { amountMinor: raw.totalAmount, currency: raw.currency ?? 'KRW' },
+    amount: money(raw.totalAmount, raw.currency ?? 'KRW'),
     status,
     kind: 'subscription',
     period: null,
@@ -165,7 +165,7 @@ function normalizeTossRefund(raw: any, input: { paymentRef: string; amount: Mone
     // NOTE (contract gap — see spec "계약 변경 제안"): the provider adapter has no
     // access to our internal customerId/ruleId. refund.execute must overwrite these.
     customerId: '',
-    amount: { amountMinor: last.cancelAmount ?? input.amount.amountMinor, currency: raw.currency ?? input.amount.currency },
+    amount: money(last.cancelAmount ?? input.amount.amountMinor, raw.currency ?? input.amount.currency),
     status: last.cancelStatus === 'DONE' ? 'succeeded' : 'pending',
     providerRef: last.transactionKey ?? null,
     creditsRevoked: 0,
@@ -231,8 +231,8 @@ export function mapTossWebhook(body: any): NormalizedEvent {
     paymentRef: data.paymentKey ?? null,
     refundRef: type.startsWith('refund.') ? cancellation?.transactionKey ?? null : null,
     amount: type.startsWith('refund.')
-      ? (typeof cancellation?.cancelAmount === 'number' && typeof data.currency === 'string' ? { amountMinor: cancellation.cancelAmount, currency: data.currency } : null)
-      : (typeof data.totalAmount === 'number' ? { amountMinor: data.totalAmount, currency: data.currency ?? 'KRW' } : null),
+      ? (typeof cancellation?.cancelAmount === 'number' && typeof data.currency === 'string' ? money(cancellation.cancelAmount, data.currency) : null)
+      : (typeof data.totalAmount === 'number' ? money(data.totalAmount, data.currency ?? 'KRW') : null),
     raw: body,
   };
 }
@@ -549,7 +549,7 @@ export class TossProvider implements PaymentProvider {
     const cancellation = (raw.cancels ?? []).find((cancel: { transactionKey?: string }) => cancel.transactionKey === input.refundRef);
     if (!cancellation) return null;
     return normalizeTossRefund({ ...raw, lastTransactionKey: input.refundRef }, {
-      paymentRef: input.paymentRef, amount: { amountMinor: cancellation.cancelAmount, currency: raw.currency }, reason: cancellation.cancelReason ?? '',
+      paymentRef: input.paymentRef, amount: money(cancellation.cancelAmount, raw.currency ?? 'KRW'), reason: cancellation.cancelReason ?? '',
     });
   }
 

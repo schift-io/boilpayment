@@ -30,7 +30,6 @@ from boilpayment_core import (
 )
 
 from .internal import (
-    price_for_subscription,
     replace_sub,
     require_price_for_subscription,
     resolve_price_ref,
@@ -160,7 +159,8 @@ async def _do_upgrade(input: UpgradeInput) -> UpgradeResult:
                 "billing_key_required",
             )
         # EC:A28 -- both prices in the subscription's currency (spec note #4 used the first price).
-        old_price = price_for_subscription(old_plan, sub)
+        # EC:A33 -- a missing old price is refused, not read as 0 (the whole new price as the delta).
+        old_price = require_price_for_subscription(old_plan, sub)
         new_price = require_price_for_subscription(new_plan, sub)
         price_delta_minor = (new_price.amount_minor if new_price else 0) - (
             old_price.amount_minor if old_price else 0

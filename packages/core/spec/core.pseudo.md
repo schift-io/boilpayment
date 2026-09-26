@@ -443,3 +443,17 @@ scaleMinor(amount, num, den, rounding): exact integer amount*num/den; floor | ce
 prorationFraction(period, now, denominator) -> { num: remaining ms clamped, den: total ms }
 roundHalfAwayFromZero(x): the same .5 rule in TS and Python
 ```
+
+## [EC:J8] 결제사 경계의 금액 검사와 Python 반올림 일치
+
+```pseudo
+provider normalizers: amount = money(amountMinor, currency)   # 안전 정수 아니면 throw (TS Error / Py TypeError·ValueError)
+
+round_half_away_from_zero(x):          # Python, TS Math.round 와 같은 결과
+   if x < 0: return -round_half_away_from_zero(-x)
+   whole = floor(x); return whole + 1 if x - whole >= 0.5 else whole   # floor(x + 0.5) 아님
+
+proration_fraction(period, now, denominator):   # Python, TS prorationFraction 과 같은 정수
+   den = round_half_away_from_zero(totalDays * DAY_MS)
+   num = clamp(epoch_ms(period.end) - epoch_ms(now), 0, den)          # epoch_ms = floor to whole ms
+```

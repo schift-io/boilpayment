@@ -44,6 +44,7 @@ from boilpayment_core import (
     Refund,
     Subscription,
     WebhookSignatureError,
+    money,  # EC:J8 -- safe-integer check at the provider boundary
 )
 
 BASE_URL = "https://api.portone.io"
@@ -129,7 +130,7 @@ def normalize_portone_payment(raw: dict[str, Any]) -> Payment:
         provider="portone",
         provider_ref=raw.get("id") or raw.get("paymentId"),
         subscription_id=None,
-        amount=Money(amount_minor=total, currency=raw.get("currency") or "KRW"),
+        amount=money(amount_minor=total, currency=raw.get("currency") or "KRW"),
         status=status,
         kind="subscription",
         period=None,
@@ -151,7 +152,7 @@ def _normalize_portone_refund(
         # NOTE (contract gap — see spec "계약 변경 제안"): customer_id/rule_id unknown to the
         # provider adapter. refund.execute must overwrite these before persisting.
         customer_id="",
-        amount=Money(
+        amount=money(
             amount_minor=cancellation.get(
                 "totalAmount", cancellation.get("amount", amount.amount_minor)
             ),
@@ -208,7 +209,7 @@ def normalize_portone_cash_receipt(raw: dict[str, Any]) -> CashReceipt:
         if type_raw == "PERSONAL"
         else None,
         status=status,
-        amount=Money(amount_minor=amount_raw, currency=raw.get("currency") or "KRW")
+        amount=money(amount_minor=amount_raw, currency=raw.get("currency") or "KRW")
         if isinstance(amount_raw, (int, float))
         else None,
         issue_number=raw.get("issueNumber"),
@@ -659,7 +660,7 @@ class PortoneProvider:
             return None
         return _normalize_portone_refund(
             {"cancellation": cancellation}, payment_ref=payment_ref,
-            amount=Money(amount_minor=cancellation["totalAmount"], currency=raw["currency"]),
+            amount=money(amount_minor=cancellation["totalAmount"], currency=raw.get("currency") or "KRW"),
             reason=cancellation.get("reason", ""),
         )
 
