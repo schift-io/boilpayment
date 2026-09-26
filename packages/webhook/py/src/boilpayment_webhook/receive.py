@@ -15,6 +15,7 @@ from boilpayment_core import (
 
 from .correlation import mint_correlation_id
 from .identity import resolve_webhook_identity
+from .process import accepts_kwarg
 
 
 @dataclass(kw_only=True, slots=True)
@@ -34,11 +35,17 @@ async def receive(
     # EC:L1 L5 -- optional; when given, logs a `webhook.received` event carrying the minted
     # correlation_id. Omit and nothing is logged (backward compatible with every existing caller).
     logger: Logger | None = None,
+    # EC:E18 -- the peer address from the app's socket (for IP-allowlisted providers such as Toss).
+    remote_address: str | None = None,
 ) -> ReceiveResult:
     try:
-        event = await provider.verify_webhook(
-            headers=headers, raw_body=raw_body
-        )  # EC:E4
+        # EC:E4 E18 -- pass the peer address only when given, so adapters without the parameter work.
+        extra = (
+            {"remote_address": remote_address}
+            if remote_address and accepts_kwarg(provider.verify_webhook, "remote_address")
+            else {}
+        )
+        event = await provider.verify_webhook(headers=headers, raw_body=raw_body, **extra)  # EC:E4
     except WebhookSignatureError:
         return ReceiveResult(status=400)  # nothing stored
 

@@ -26,7 +26,6 @@ function delivery(name: ProviderName, status: Refund['status']) {
   const headers: Record<string, string> = {
     'webhook-id': id, 'webhook-timestamp': timestamp, 'webhook-signature': `v1,${signature}`,
     'stripe-signature': `t=${timestamp},v1=${createHmac('sha256', secret).update(`${timestamp}.${rawBody}`).digest('hex')}`,
-    'x-paykit-remote-ip': '127.0.0.1',
   };
   return { rawBody, headers };
 }
@@ -65,7 +64,7 @@ describe('real normalized refund webhook completion', () => {
         } });
         // When actual signed verification (IP-checked for unsigned Toss) reaches the default handler and is replayed.
         const input = delivery(name, status);
-        const received = await receive({ provider, ...input, repo, clock });
+        const received = await receive({ provider, ...input, remoteAddress: '127.0.0.1', repo, clock }); // EC:E18
         expect(received.status).toBe(200);
         if (!received.eventId) throw new Error('missing verified event ID');
         for (let attempt = 0; attempt < 2; attempt++) await processWebhook({ eventId: received.eventId, providers: { [name]: provider }, handlers, repo, clock });

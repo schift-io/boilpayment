@@ -83,7 +83,7 @@ async def process(
         # EC:E17 -- the signature is checked again (a tampered stored row fails), but timestamp
         # tolerance is judged at receipt: receive() already enforced freshness.
         verify_kwargs: dict[str, Any] = {"headers": record.headers, "raw_body": record.raw_body}
-        if _accepts_received_at(provider.verify_webhook):
+        if accepts_kwarg(provider.verify_webhook, "received_at"):
             verify_kwargs["received_at"] = record.received_at
         event = await provider.verify_webhook(**verify_kwargs)
         # EC:I9 -- re-resolve identity even on a re-process: a local row that didn't exist at
@@ -177,13 +177,13 @@ async def process_pending(
     return ProcessPendingResult(processed=processed, failed=failed)
 
 
-def _accepts_received_at(fn: Any) -> bool:
-    """EC:E17 -- adapters written before received_at existed keep working (they re-check freshness
-    against now, as before); in-repo providers all accept it."""
+def accepts_kwarg(fn: Any, name: str) -> bool:
+    """EC:E17 E18 -- optional verify_webhook arguments (received_at, remote_address) are passed only
+    to adapters that declare them, so adapters written before they existed keep working."""
     try:
         params = inspect.signature(fn).parameters
     except (TypeError, ValueError):
         return False
-    return "received_at" in params or any(
+    return name in params or any(
         p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
     )

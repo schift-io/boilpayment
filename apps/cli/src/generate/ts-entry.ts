@@ -306,13 +306,14 @@ export function generateIndexTs(config: PaykitConfig): string {
   l.push(`   * to this (see ./webhook.ts for framework snippets), or pass { provider } explicitly when only`);
   l.push(`   * one provider is configured.`);
   l.push(`   */`);
-  l.push(`  async function handleWebhook(rawBody: string, headers: Record<string, string>, opts?: { provider?: ProviderName }) {`);
+  const tossOrigin = config.providers.includes('toss'); // EC:E18 — Toss allowlists by peer address
+  l.push(`  async function handleWebhook(rawBody: string, headers: Record<string, string>, opts?: { provider?: ProviderName${tossOrigin ? '; /** EC:E18 — req.socket.remoteAddress, never a header */ remoteAddress?: string' : ''} }) {`);
   l.push(`    const configured = Object.keys(providers) as ProviderName[];`);
   l.push(`    const providerName = opts?.provider ?? (configured.length === 1 ? configured[0] : undefined);`);
   l.push(`    if (!providerName) throw new Error('multiple providers configured — pass { provider } to handleWebhook');`);
   l.push(`    const provider = providers[providerName];`);
   l.push(`    if (!provider) throw new Error(\`provider not configured: \${providerName}\`);`);
-  l.push(`    const received = await receiveWebhook({ provider, headers, rawBody, repo: full.repo, clock: full.clock });`);
+  l.push(`    const received = await receiveWebhook({ provider, headers, rawBody, ${tossOrigin ? 'remoteAddress: opts?.remoteAddress, ' : ''}repo: full.repo, clock: full.clock });`);
   l.push(`    if (received.status === 200 && received.eventId) await processWebhook({ eventId: received.eventId, providers, handlers, repo: full.repo, clock: full.clock });`);
   l.push(`    return received;`);
   l.push(`  }`);

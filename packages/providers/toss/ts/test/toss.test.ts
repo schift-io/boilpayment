@@ -186,16 +186,16 @@ describe('[EC:E4] verifyWebhook — IP allowlist (Toss has no signature)', () =>
   it('[EC:E4] allowed IP passes and returns the mapped event', async () => {
     const provider = new TossProvider({ secretKey: 'sk_test', allowedWebhookIps: ['203.0.113.10'] }, (async () => { throw new Error('should not fetch'); }) as any);
     const rawBody = JSON.stringify(WEBHOOK_FIXTURE);
-    const event = await provider.verifyWebhook({ headers: { 'x-paykit-remote-ip': '203.0.113.10' }, rawBody });
+    const event = await provider.verifyWebhook({ headers: {}, rawBody, remoteAddress: '203.0.113.10' });
     expect(event.type).toBe('payment.succeeded');
     expect(event.paymentRef).toBe('B3EvL1cKz9p-kO6XPNpfF');
   });
   it('[EC:E4] disallowed IP throws WebhookSignatureError', async () => {
     const provider = new TossProvider({ secretKey: 'sk_test', allowedWebhookIps: ['203.0.113.10'] }, (async () => { throw new Error('should not fetch'); }) as any);
     const rawBody = JSON.stringify(WEBHOOK_FIXTURE);
-    await expect(provider.verifyWebhook({ headers: { 'x-paykit-remote-ip': '198.51.100.1' }, rawBody })).rejects.toBeInstanceOf(WebhookSignatureError);
+    await expect(provider.verifyWebhook({ headers: {}, rawBody, remoteAddress: '198.51.100.1' })).rejects.toBeInstanceOf(WebhookSignatureError);
   });
-  it('[EC:E4] missing IP header throws WebhookSignatureError when an allowlist is configured', async () => {
+  it('[EC:E4] missing connection address throws WebhookSignatureError when an allowlist is configured', async () => {
     const provider = new TossProvider({ secretKey: 'sk_test', allowedWebhookIps: ['203.0.113.10'] }, (async () => { throw new Error('should not fetch'); }) as any);
     const rawBody = JSON.stringify(WEBHOOK_FIXTURE);
     await expect(provider.verifyWebhook({ headers: {}, rawBody })).rejects.toBeInstanceOf(WebhookSignatureError);

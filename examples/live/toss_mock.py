@@ -301,9 +301,9 @@ async def main() -> None:
         )
         thread1.join(timeout=5)
         delivered1 = dict(_CapturingHandler.captured)
-        delivered1["headers"]["x-paykit-remote-ip"] = "203.0.113.5"
+        # EC:E18 -- the allowlist reads the connection address the app passes, never a header.
         ev1 = await provider.verify_webhook(
-            headers=delivered1["headers"], raw_body=delivered1["rawBody"]
+            headers=delivered1["headers"], raw_body=delivered1["rawBody"], remote_address="203.0.113.5"
         )
         out("verifyWebhook_allowed", {"type": ev1.type, "paymentRef": ev1.payment_ref})
         httpd1.server_close()
@@ -319,10 +319,11 @@ async def main() -> None:
         )
         thread2.join(timeout=5)
         delivered2 = dict(_CapturingHandler.captured)
-        delivered2["headers"]["x-paykit-remote-ip"] = "10.0.0.1"
         try:
             await provider.verify_webhook(
-                headers=delivered2["headers"], raw_body=delivered2["rawBody"]
+                headers={**delivered2["headers"], "x-paykit-remote-ip": "203.0.113.5"},
+                raw_body=delivered2["rawBody"],
+                remote_address="10.0.0.1",
             )
             raise AssertionError("Expected verifyWebhook_disallowed rejection")
         except WebhookSignatureError as e:

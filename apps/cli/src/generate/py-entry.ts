@@ -353,7 +353,8 @@ export function generateIndexPy(config: PaykitConfig): string {
   l.push('');
   l.push(`        return decision, execute`);
   l.push('');
-  l.push(`    async def handle_webhook(raw_body: str, headers: dict[str, str], provider: str | None = None):`);
+  const tossOrigin = config.providers.includes('toss'); // EC:E18 — Toss allowlists by peer address
+  l.push(`    async def handle_webhook(raw_body: str, headers: dict[str, str], provider: str | None = None${tossOrigin ? ', remote_address: str | None = None' : ''}):`);
   l.push(`        """EC:E3 E4 E5 E13 — webhook receipt is provider-scoped. See ./webhook.py for framework snippets."""`);
   l.push(`        configured = list(providers.keys())`);
   l.push(`        provider_name = provider or (configured[0] if len(configured) == 1 else None)`);
@@ -362,7 +363,7 @@ export function generateIndexPy(config: PaykitConfig): string {
   l.push(`        prov = providers.get(provider_name)`);
   l.push(`        if prov is None:`);
   l.push(`            raise ValueError(f"provider not configured: {provider_name}")`);
-  l.push(`        received = await receive_webhook(provider=prov, headers=headers, raw_body=raw_body, repo=repo, clock=clock)`);
+  l.push(`        received = await receive_webhook(provider=prov, headers=headers, raw_body=raw_body, repo=repo, clock=clock${tossOrigin ? ', remote_address=remote_address' : ''})`);
   l.push(`        if received.status == 200 and received.event_id:`);
   l.push(`            await process_webhook(event_id=received.event_id, providers=providers, handlers=handlers, repo=repo, clock=clock)`);
   l.push(`        return received`);

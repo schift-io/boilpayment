@@ -147,16 +147,15 @@ async function main(): Promise<void> {
   const recv1 = await receiveOneWebhook();
   await triggerMockWebhook({ url: `http://127.0.0.1:${recv1.port}/hook`, paymentKey: cardPay.id, status: 'DONE' });
   const delivered1 = await recv1.wait;
-  delivered1.headers['x-paykit-remote-ip'] = '203.0.113.5';
-  const ev1 = await p.verifyWebhook({ headers: delivered1.headers, rawBody: delivered1.rawBody });
+  // EC:E18 — the allowlist reads the connection address the app passes, never a header.
+  const ev1 = await p.verifyWebhook({ headers: delivered1.headers, rawBody: delivered1.rawBody, remoteAddress: '203.0.113.5' });
   out('verifyWebhook_allowed', { type: ev1.type, paymentRef: ev1.paymentRef });
 
   const recv2 = await receiveOneWebhook();
   await triggerMockWebhook({ url: `http://127.0.0.1:${recv2.port}/hook`, paymentKey: cardPay.id, status: 'DONE' });
   const delivered2 = await recv2.wait;
-  delivered2.headers['x-paykit-remote-ip'] = '10.0.0.1';
   try {
-    await p.verifyWebhook({ headers: delivered2.headers, rawBody: delivered2.rawBody });
+    await p.verifyWebhook({ headers: { ...delivered2.headers, 'x-paykit-remote-ip': '203.0.113.5' }, rawBody: delivered2.rawBody, remoteAddress: '10.0.0.1' });
     throw new Error('Expected verifyWebhook_disallowed rejection');
   } catch (e) {
     if (!(e instanceof WebhookSignatureError) || !(true)) throw e;

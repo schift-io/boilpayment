@@ -1,7 +1,7 @@
 // boilpayment — Toss Payments provider.
 // See spec/toss.pseudo.md for the full contract. Endpoints/enums verified against
 // docs.tosspayments.com/reference and docs.tosspayments.com/reference/using-api/webhook-events (2026-09).
-import { createHash } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import type {
   PaymentProvider,
   ProviderCapabilities,
@@ -174,6 +174,13 @@ function normalizeTossRefund(raw: any, input: { paymentRef: string; amount: Mone
     failure: null,
     createdAt: new Date(last.canceledAt ?? raw.approvedAt ?? Date.now()),
   } as Refund;
+}
+
+/** EC:E18 — constant-time string compare (length leak only). */
+function constantTimeEqual(a: string, b: string): boolean {
+  const ba = Buffer.from(a, 'utf8');
+  const bb = Buffer.from(b, 'utf8');
+  return ba.length === bb.length && timingSafeEqual(ba, bb);
 }
 
 /** EC:E3/E4 — normalizes the notification only; caller MUST re-fetch before acting. */
@@ -610,13 +617,27 @@ export class TossProvider implements PaymentProvider {
     throw new PaymentKitError('toss has no meters API', 'unsupported'); // capabilities().meters === false
   }
 
-  async verifyWebhook(input: { headers: Record<string, string>; rawBody: string; receivedAt?: Date }): Promise<NormalizedEvent> {
+  async verifyWebhook(input: { headers: Record<string, string>; rawBody: string; receivedAt?: Date; remoteAddress?: string }): Promise<NormalizedEvent> {
     const body = JSON.parse(input.rawBody);
-    if (this.allowedWebhookIps && this.allowedWebhookIps.length > 0) {
-      // EC:E4 variant — Toss payment webhooks carry no signature; IP allowlist is the defense.
-      const remoteIp = input.headers['x-paykit-remote-ip'] ?? input.headers['X-Paykit-Remote-Ip'];
+    // EC:E4 E18 — Toss webhooks carry no signature. Origin checks run at receipt (no receivedAt);
+    // webhook.process re-verifies a stored row that already passed them.
+    const atReceipt = input.receivedAt === undefined;
+    if (atReceipt && this.allowedWebhookIps && this.allowedWebhookIps.length > 0) {
+      // The peer address the app read from its socket. A request header (x-paykit-remote-ip,
+      // x-forwarded-for) is client-controlled and is never used.
+      const remoteIp = input.remoteAddress;
       if (!remoteIp || !this.allowedWebhookIps.includes(remoteIp)) {
         throw new WebhookSignatureError(`toss webhook ip not allowed: ${remoteIp ?? 'unknown'}`);
+      }
+    }
+    // EC:E18 — a virtual-account DEPOSIT_CALLBACK is genuine only when its `secret` equals the one
+    // Toss returned on that payment (Toss docs: webhook-events, DEPOSIT_CALLBACK.secret).
+    if (atReceipt && typeof body.secret === 'string') {
+      const orderId = body.orderId ?? body.data?.orderId;
+      if (!orderId) throw new WebhookSignatureError('toss deposit callback without orderId');
+      const payment = await this.request('GET', `/v1/payments/orders/${encodeURIComponent(orderId)}`);
+      if (typeof payment?.secret !== 'string' || !constantTimeEqual(payment.secret, body.secret)) {
+        throw new WebhookSignatureError('toss deposit callback secret mismatch');
       }
     }
     return mapTossWebhook(body); // EC:E3 — caller must re-fetch before acting

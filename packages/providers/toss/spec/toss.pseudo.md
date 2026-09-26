@@ -301,3 +301,16 @@ remains unchanged.
 - Synthetic refund delivery IDs include the transaction key to distinguish simultaneous partial refunds; non-refund delivery IDs and timestamp compatibility are unchanged.
 
 Sources: [Toss API reference](https://docs.tosspayments.com/reference), [webhook event reference](https://docs.tosspayments.com/reference/using-api/webhook-events).
+
+## [EC:E18] Webhook origin: peer address and deposit secret
+
+```pseudo
+verifyWebhook({ headers, rawBody, receivedAt?, remoteAddress? }):
+   atReceipt = receivedAt is undefined               # process() re-verifies a row that passed these
+   if atReceipt and allowedWebhookIps:
+      require remoteAddress in allowedWebhookIps      # the app's socket peer; headers are never read
+   if atReceipt and body.secret is a string:          # DEPOSIT_CALLBACK (virtual account)
+      payment = GET /v1/payments/orders/{orderId}
+      require constantTimeEqual(payment.secret, body.secret)
+   return mapTossWebhook(body)
+```

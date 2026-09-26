@@ -173,7 +173,8 @@ def test_verified_default_handler_settles_original_hold(
             raw, headers = delivery(name, status)
             # When signed verification (IP-checked for unsigned Toss) reaches the default handler twice.
             received = await receive(
-                provider=provider, raw_body=raw, headers=headers, repo=repo, clock=clock
+                provider=provider, raw_body=raw, headers=headers, repo=repo, clock=clock,
+                remote_address="127.0.0.1",  # EC:E18
             )
             assert received.status == 200
             assert received.event_id is not None

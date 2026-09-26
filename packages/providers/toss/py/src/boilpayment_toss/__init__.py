@@ -11,11 +11,13 @@ from __future__ import annotations
 import base64
 import copy
 import hashlib
+import hmac
 import json
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Any, Literal
+from urllib.parse import quote
 
 import httpx
 from boilpayment_core import (
@@ -789,15 +791,32 @@ class TossProvider:
         headers: dict[str, str],
         raw_body: str,
         received_at: datetime | None = None,
+        remote_address: str | None = None,
     ) -> NormalizedEvent:
         body = json.loads(raw_body)
-        if self._allowed_webhook_ips:
-            # EC:E4 variant — Toss payment webhooks carry no signature; IP allowlist is the defense.
-            remote_ip = headers.get("x-paykit-remote-ip") or headers.get(
-                "X-Paykit-Remote-Ip"
+        # EC:E4 E18 -- Toss webhooks carry no signature. Origin checks run at receipt (no
+        # received_at); webhook.process re-verifies a stored row that already passed them.
+        at_receipt = received_at is None
+        # The peer address the app read from its socket. A request header (x-paykit-remote-ip,
+        # x-forwarded-for) is client-controlled and is never used.
+        if (
+            at_receipt
+            and self._allowed_webhook_ips
+            and (not remote_address or remote_address not in self._allowed_webhook_ips)
+        ):
+            raise WebhookSignatureError(
+                f"toss webhook ip not allowed: {remote_address or 'unknown'}"
             )
-            if not remote_ip or remote_ip not in self._allowed_webhook_ips:
-                raise WebhookSignatureError(
-                    f"toss webhook ip not allowed: {remote_ip or 'unknown'}"
-                )
+        # EC:E18 -- a virtual-account DEPOSIT_CALLBACK is genuine only when its `secret` equals the
+        # one Toss returned on that payment (Toss docs: webhook-events, DEPOSIT_CALLBACK.secret).
+        if at_receipt and isinstance(body.get("secret"), str):
+            order_id = body.get("orderId") or (body.get("data") or {}).get("orderId")
+            if not order_id:
+                raise WebhookSignatureError("toss deposit callback without orderId")
+            payment = await self._request("GET", f"/v1/payments/orders/{quote(str(order_id), safe='')}")
+            stored = payment.get("secret") if isinstance(payment, dict) else None
+            if not isinstance(stored, str) or not hmac.compare_digest(
+                stored.encode(), body["secret"].encode()
+            ):
+                raise WebhookSignatureError("toss deposit callback secret mismatch")
         return map_toss_webhook(body)  # EC:E3 — caller must re-fetch before acting

@@ -90,7 +90,6 @@ def delivery(name: ProviderName, status: Status) -> tuple[str, dict[str, str]]:
         "webhook-timestamp": timestamp,
         "webhook-signature": f"v1,{standard_sig}",
         "stripe-signature": f"t={timestamp},v1={stripe_sig}",
-        "x-paykit-remote-ip": "127.0.0.1",
     }
 
 

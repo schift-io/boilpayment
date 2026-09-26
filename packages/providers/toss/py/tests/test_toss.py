@@ -263,7 +263,7 @@ class TestVerifyWebhookIpAllowlist:
 
         async def run():
             return await provider.verify_webhook(
-                headers={"x-paykit-remote-ip": "203.0.113.10"}, raw_body=raw_body
+                headers={}, raw_body=raw_body, remote_address="203.0.113.10"
             )
 
         event = asyncio.run(run())
@@ -278,7 +278,7 @@ class TestVerifyWebhookIpAllowlist:
 
         async def run():
             await provider.verify_webhook(
-                headers={"x-paykit-remote-ip": "198.51.100.1"}, raw_body=raw_body
+                headers={}, raw_body=raw_body, remote_address="198.51.100.1"
             )
 
         with pytest.raises(WebhookSignatureError):

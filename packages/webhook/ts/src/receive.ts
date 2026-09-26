@@ -13,6 +13,8 @@ export interface ReceiveInput {
   /** EC:L1 L5 — optional; when given, logs a `webhook.received` event carrying the minted
    * correlationId. Omit and nothing is logged (backward compatible with every existing caller). */
   logger?: Logger;
+  /** EC:E18 — the peer address from the app's socket (for IP-allowlisted providers such as Toss). */
+  remoteAddress?: string;
 }
 
 export interface ReceiveResult {
@@ -22,11 +24,11 @@ export interface ReceiveResult {
 }
 
 export async function receive(input: ReceiveInput): Promise<ReceiveResult> {
-  const { provider, headers, rawBody, repo, clock, logger } = input;
+  const { provider, headers, rawBody, repo, clock, logger, remoteAddress } = input;
 
   let event;
   try {
-    event = await provider.verifyWebhook({ headers, rawBody }); // EC:E4
+    event = await provider.verifyWebhook({ headers, rawBody, ...(remoteAddress ? { remoteAddress } : {}) }); // EC:E4 E18
   } catch (e) {
     if (e instanceof WebhookSignatureError) {
       return { status: 400, eventId: null, duplicated: null }; // nothing stored

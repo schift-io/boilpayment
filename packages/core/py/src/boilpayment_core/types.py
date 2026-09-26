@@ -817,6 +817,7 @@ class PaymentProvider(Protocol):
         headers: dict[str, str],
         raw_body: str,
         received_at: datetime | None = None,
+        remote_address: str | None = None,
     ) -> NormalizedEvent:
         """EC:E4 E17 -- verify signature and freshness. received_at (set by webhook.process
         when re-verifying a stored body) means: judge timestamp tolerance at that instant."""

@@ -517,7 +517,7 @@ export interface PaymentProvider {
    * re-verifies a stored body) means "judge the timestamp tolerance at this instant": the body was
    * fresh when received, so a later retry must not fail on age. The signature is always checked.
    */
-  verifyWebhook(input: { headers: Record<string, string>; rawBody: string; receivedAt?: Date }): Promise<NormalizedEvent>;
+  verifyWebhook(input: { headers: Record<string, string>; rawBody: string; receivedAt?: Date; /** EC:E18 — the connection's peer address, from the app's socket (never a request header). */ remoteAddress?: string }): Promise<NormalizedEvent>;
 }
 
 export interface ConsumeInput {
