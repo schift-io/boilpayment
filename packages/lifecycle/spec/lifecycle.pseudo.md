@@ -757,17 +757,64 @@ when every retry should run.
 ## [EC:A53] Resolving an attempt held for review
 
 ```pseudo
-resolveHeldAttempt({paymentId, decision, actor, note?}):
+resolveHeldAttempt({paymentId, decision, actor, note?, provider}):
+   withAttemptLease(attemptKeyOf(row)) or throw attempt_in_flight                       # A58: one decision at a time
    row = payments.get(paymentId); require row.status == pending and row under review   # else attempt_not_held
    review = row.raw.boilpaymentReview; row.raw.boilpaymentReviewResolved = {...review, decision, actor, note, at}
    if decision == settle:
       require review.status == succeeded                                               # else held_order_not_paid
       row -> succeeded, amount = review.amount, providerRef = review.providerRef
       onRenewalPaid(sub, row)                            # grants row.period; an ended sub stays ended (A32)
-   else (void):
+   if decision == close:                                 # A58
+      row -> failed {code: review_closed}; a person handles any refund
+      if sub is active or past_due and row.period ends after sub.currentPeriod:
+         sub -> active, currentPeriod = row.period, graceUntil = null   # no grant, no further charge for it
+   if decision == void:
+      status = provider.getPaymentByOrderId(orderIdOf(row)).status (else review.status)  # A58: asked again
+      require status not in {succeeded, partially_refunded, disputed, pending, requires_action}  # else held_order_moved_money
       row -> failed {code: review_voided}
       if sub is active or past_due: dunning.onPaymentFailed(sub)   # as for a decline: grace, retries
 ```
+
+## [EC:A55] Every legacy dunning key is looked up
+
+```pseudo
+checkLegacyDunning(sub, period):
+   paid = null
+   for each sent legacy retry item (orderId dunning-retry:<sub>:<n>) without a row of this release:
+      settled = row settled already, else settleAttemptByLookup(row)
+      if settled is succeeded:
+         if paid == null: paid = settled                 # buys the period
+         elif the row settled in this call: notify cs.needs_human {kind: renewal_double_charge}   # once
+   return paid ? paid : (unverified keys ? unverified : none)
+settleOrphanAttempts: a late success whose period another payment already bought -> renewal_double_charge
+```
+
+## [EC:A56] past_due only through an unanswered charge, then behind
+
+```pseudo
+renewOne: after settleOpenAttemptIfBehind closed the open attempt (order_not_found):
+   if sub.status == past_due and sub.graceUntil != null and catchUpPeriods(sub) != null
+      and an attempt for the charged period failed with order_not_found:
+         continue like an active subscription: applyMissedPeriods (A47) and charge the current period once
+   (parked subscriptions, graceUntil == null, are left to resumeParked)
+```
+
+## [EC:A57] The upgrade charge on a self-scheduled provider
+
+```pseudo
+chargeKey = "charge:upgrade:<sub>:<plan>:<period start>"
+orderId = idempotencyKey = providerOrderId(chargeKey)    # ord_ + 40 hex, as A35
+if the upgrade operation already ran before (operation.attempts > 1):
+   for id in [orderId, chargeKey (an earlier release sent it raw), the raw key in an older time form (py, J13)]:
+      found = provider.getPaymentByOrderId(id)           # a refused raw id is no order
+      succeeded -> use it, do not charge; pending/unknown -> throw upgrade_charge_unresolved
+chargeBillingKey({orderId, idempotencyKey: orderId})
+```
+
+## [EC:A58] See EC:A53: `close`, `void` asked again, one decision under the attempt lease
+
+The webhook's A45 branch never grants a row a person voided or closed (`isClosedByPerson`).
 
 ## [EC:A54] Resuming a subscription parked for missed periods
 

@@ -478,6 +478,19 @@ keyMatchesInstant(key, prefix, t):                       # upgrade compatibility
 Python Postgres sessions run with TimeZone=UTC; idempotency payloads hash datetimes as isoZ.
 ```
 
+## [EC:J13] Python: 날짜가 든 모든 키를 어느 형식으로든 먼저 찾는다
+
+```pseudo
+ledger_instant_key(ledger, customer, prefix, t, suffix=""):
+   the key of an existing entry with keyMatchesInstant(key, prefix, t, suffix), else prefix + isoZ(t) + suffix
+operation_instant_key(repo, kind, prefix, t) -> (key, stamp):
+   no operation under prefix + isoZ(t) and one of `kind` whose key matches the instant -> (that key, its time text)
+   else (prefix + isoZ(t), isoZ(t))                     # the payload hashes `stamp`, so the old operation replays
+used by: revoke:cancel, restore:reactivate, revoke:downgrade, grant:upgrade, revoke:dunning(-all), rollover,
+         cancel:/upgrade:/downgrade:/reactivate: operations, the upgrade charge key (A57)
+TypeScript always wrote isoZ keys: nothing to look up.
+```
+
 ## [EC:J12] DST 경계의 벽시계 → 순간 규칙
 
 ```pseudo

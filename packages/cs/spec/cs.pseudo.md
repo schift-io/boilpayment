@@ -263,6 +263,15 @@ if churnReason is not None:
 return resolved
 ```
 
+## [EC:D21] dispute verdict
+
+```pseudo
+outcome = event.disputeOutcome (the adapter's: Stripe dispute.status won|lost, else null)
+          ?? event.raw.outcome (a caller building the event by hand), only won|lost count
+dispute.closed with no verdict: no restore, no revoke, the customer stays as dispute.opened left it,
+                                escalate(case, 'dispute closed without a verdict')   # cs.needs_human
+```
+
 ## [EC:B11][EC:D9] dispute
 
 ```pseudo
