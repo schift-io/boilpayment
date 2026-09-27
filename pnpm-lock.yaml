@@ -29,6 +29,9 @@ importers:
       boilpayment-portone:
         specifier: workspace:*
         version: link:../../packages/providers/portone/ts
+      boilpayment-schema-postgres:
+        specifier: workspace:*
+        version: link:../../packages/schema-postgres/ts
       boilpayment-stripe:
         specifier: workspace:*
         version: link:../../packages/providers/stripe/ts

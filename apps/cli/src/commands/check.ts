@@ -180,19 +180,39 @@ export async function missedPeriodsPrecheck(sp: SchemaPostgres, url: string): Pr
   if (typeof sp.createPool !== 'function') return [];
   const pool = sp.createPool(url);
   try {
-    const res = await pool.query(
-      `select id, provider, period_start, period_end from subscriptions
-       where provider in ('toss', 'portone') and status = 'active'
+    const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : String(v));
+    const lines: string[] = [];
+    // past_due too (round-6 I-3): an unresolved or parked renewal is as far behind as an active one.
+    const behind = await pool.query(
+      `select id, provider, status, period_start, period_end from subscriptions
+       where provider in ('toss', 'portone') and status in ('active', 'past_due')
          and period_end + (period_end - period_start) <= now()
        order by period_end limit 50`,
     );
-    if (res.rows.length === 0) return [pc.green('자체 스케줄 구독 중 두 기간 이상 밀린 구독 없음 (EC:A47).')];
-    const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : String(v));
-    return [
-      pc.yellow(`두 기간 이상 밀린 자체 스케줄 구독 ${res.rows.length}건 (EC:A47, 최대 50건 표시):`),
-      ...res.rows.map((r) => `  ${String(r.id)}  ${String(r.provider)}  기간 끝 ${iso(r.period_end)}`),
-      '  다음 schedulerTick 이 policy.subscription.missedPeriods 를 적용합니다(기본: 지금 기간만 1회 청구, 밀린 기간은 건너뛰고 담당자 알림).',
-    ];
+    if (behind.rows.length === 0) lines.push(pc.green('자체 스케줄 구독 중 두 기간 이상 밀린 구독 없음 (EC:A47).'));
+    else {
+      lines.push(pc.yellow(`두 기간 이상 밀린 자체 스케줄 구독 ${behind.rows.length}건 (EC:A47, 최대 50건 표시):`));
+      lines.push(...behind.rows.map((r) => `  ${String(r.id)}  ${String(r.provider)}  ${String(r.status)}  기간 끝 ${iso(r.period_end)}`));
+      lines.push('  다음 schedulerTick 이 policy.subscription.missedPeriods 를 적용합니다(기본: 지금 기간만 1회 청구, 밀린 기간은 건너뛰고 담당자 알림).');
+    }
+    // Attempts that wait: open ones (answer unknown or never sent; looked up before any re-send,
+    // EC:A49 A47) and ones held for a person (EC:A50; resolve with lifecycle.resolveHeldAttempt, EC:A53).
+    const attempts = await pool.query(
+      `select id, subscription_id, status, raw ? 'boilpaymentReview' as held, occurred_at from payments
+       where kind = 'subscription' and status = 'pending' and raw ? 'boilpaymentAttemptKey'
+       order by occurred_at limit 50`,
+    );
+    const held = attempts.rows.filter((r) => r.held === true);
+    const open = attempts.rows.filter((r) => r.held !== true);
+    if (open.length > 0) {
+      lines.push(pc.yellow(`결과를 아직 모르는 갱신 청구 시도 ${open.length}건 (EC:A49: 다음 tick 이 결제사에 먼저 조회):`));
+      lines.push(...open.map((r) => `  ${String(r.id)}  구독 ${String(r.subscription_id)}  ${iso(r.occurred_at)}`));
+    }
+    if (held.length > 0) {
+      lines.push(pc.yellow(`사람 확인을 기다리는 갱신 청구 ${held.length}건 (EC:A50, lifecycle.resolveHeldAttempt 로 정리, EC:A53):`));
+      lines.push(...held.map((r) => `  ${String(r.id)}  구독 ${String(r.subscription_id)}  ${iso(r.occurred_at)}`));
+    }
+    return lines;
   } catch (err) {
     return [pc.yellow(`밀린 구독 점검을 건너뜀: ${(err as Error).message}`)];
   } finally {

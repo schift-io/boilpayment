@@ -40,7 +40,7 @@ export async function runMigrate(dir: string, opts: MigrateOptions = {}): Promis
 
   const sp = await loadSchemaPostgres(dir);
   if (!sp) {
-    console.error(pc.red('boilpayment-sdk 가 설치되어 있지 않습니다. 먼저 설치하세요.'));
+    console.error(pc.red('마이그레이션 모듈(boilpayment-schema-postgres)을 불러오지 못했습니다. CLI 를 다시 설치하세요.'));
     process.exitCode = 1;
     return;
   }

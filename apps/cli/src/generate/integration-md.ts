@@ -111,6 +111,33 @@ export function generateIntegrationMd(config: PaykitConfig): string {
   l.push('패키지를 되돌려서 DB 가 코드보다 **앞선** 경우도 잡아냅니다. 그때는 마이그레이션을 더');
   l.push('적용하는 게 아니라 패키지를 다시 올려야 합니다.');
   l.push('');
+  if (config.models.includes('subscription') && config.providers.some((p) => p === 'toss' || p === 'portone')) {
+    // Round-6 I-2: an older worker does not follow the attempt-lease rules of the new one (EC:A48).
+    l.push('**cron·워커는 옛 버전을 모두 내린 뒤 새 버전을 띄우세요.** 옛 버전과 새 버전이 같은 갱신 청구를');
+    l.push('동시에 잡으면 청구는 한 번이지만 한쪽이 답을 못 받아 구독이 잠시 past_due 로 보일 수 있습니다.');
+    l.push('올린 뒤 첫 `schedulerTick` 전에 `npx boilpayment check` 로 밀린 구독과 결과를 모르는 청구를 확인하세요.');
+    l.push('');
+    l.push('### 담당자 알림(`cs.needs_human`)이 오면');
+    l.push('');
+    l.push('- `attempt_lookup_mismatch`: 결제사 주문이 보낸 청구와 달라(금액·통화·고객·환불) 그 갱신을 멈췄습니다.');
+    l.push('  결제사 화면에서 확인한 뒤 `settle`(이 갱신이 맞음) 또는 `void`(돈이 움직이지 않음·환불됨)로 정리합니다.');
+    l.push('- `missed_periods_parked`: 두 기간 이상 밀려 청구를 멈췄습니다. 이어서 받으려면 지금 기간부터 재개하고, 끝내려면 취소합니다.');
+    l.push('');
+    if (ts(config)) {
+      l.push('```ts');
+      l.push("import { resolveHeldAttempt, resumeParked } from 'boilpayment-sdk/lifecycle';");
+      l.push("await resolveHeldAttempt({ paymentId, decision: 'settle', actor: 'ops@yourapp.com', policy, ledger, repo, clock, notifier });");
+      l.push("await resumeParked({ subscriptionId, actor: 'ops@yourapp.com', policy, repo, clock, notifier });");
+      l.push('```');
+    } else {
+      l.push('```python');
+      l.push('from boilpayment.lifecycle import resolve_held_attempt, resume_parked');
+      l.push('await resolve_held_attempt(payment_id=payment_id, decision="settle", actor="ops@yourapp.com", policy=policy, ledger=ledger, repo=repo, clock=clock, notifier=notifier)');
+      l.push('await resume_parked(subscription_id=subscription_id, actor="ops@yourapp.com", policy=policy, repo=repo, clock=clock, notifier=notifier)');
+      l.push('```');
+    }
+    l.push('');
+  }
 
   // ── 2. 결제 시작 ───────────────────────────────────────────────────────────
   l.push('## 2. 결제 시작');

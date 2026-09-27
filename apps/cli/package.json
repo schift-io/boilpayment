@@ -46,6 +46,7 @@
     "boilpayment-stripe": "workspace:*",
     "boilpayment-toss": "workspace:*",
     "boilpayment-portone": "workspace:*",
+    "boilpayment-schema-postgres": "workspace:*",
     "boilpayment-polar": "workspace:*",
     "boilpayment-webhook": "workspace:*",
     "@clack/prompts": "^0.8.0",
