@@ -234,7 +234,9 @@ export async function runCheck(dir: string): Promise<void> {
   const checkoutErrors = checkoutConfigurationErrors(config);
   for (const error of checkoutErrors) console.error(pc.red(`checkout 초안: ${error}`));
   const warnings = computeWarnings(config);
-  const moduleSystem = await detectModuleSystem(dir);
+  // The generated TypeScript is ESM; a Python-only app has no package.json to check (round-7 I-1).
+  const pythonOnly = config.languages.length > 0 && !config.languages.includes('ts');
+  const moduleSystem = pythonOnly ? 'esm' : await detectModuleSystem(dir);
   if (moduleSystem !== 'esm') {
     warnings.push({
       code: 'ESM',

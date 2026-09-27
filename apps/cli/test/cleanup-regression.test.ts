@@ -93,6 +93,26 @@ describe('wizard contract cleanup', () => {
     expect(console.error).toHaveBeenCalledWith(expect.stringContaining('Price ID'));
   });
 
+  it('checks the ESM package.json only when the app has TypeScript (round-7 I-1)', async () => {
+    // Given a Python-only app (no package.json) and a TypeScript app without one.
+    const run = async (languages: Array<'ts' | 'py'>) => {
+      const config = buildConfig({ providers: ['toss'] });
+      config.languages = languages;
+      const dir = await tempDir();
+      await fs.writeFile(path.join(dir, 'paykit.config.json'), JSON.stringify(config));
+      const lines: string[] = [];
+      vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => { lines.push(a.join(' ')); });
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      vi.stubEnv('DATABASE_URL', '');
+      await runCheck(dir);
+      vi.restoreAllMocks();
+      return lines.some((l) => l.includes('[ESM]'));
+    };
+    // Then only the TypeScript app is told about "type": "module".
+    expect(await run(['py'])).toBe(false);
+    expect(await run(['ts'])).toBe(true);
+  });
+
   it('does not require subscription scheduling for topup-only sellers', () => {
     // Given a Toss seller offering only credit topups.
     const config = buildConfig({ providers: ['toss'], models: ['topup'] });
