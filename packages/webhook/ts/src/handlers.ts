@@ -19,6 +19,7 @@ import {
   PaymentKitError,
   expectedAttemptAmount,
   holdAttemptForReview,
+  isClosedByPerson,
   isUnderReview,
   lookupMismatch,
   recordPaymentRefAliases,
@@ -239,6 +240,8 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
       // EC:A50 (A6-6) — a held attempt waits for a person here too, and a pending one is only completed
       // when the provider's payment is the charge sent under its key (the same rule as the lookup).
       if (stored && isUnderReview(stored)) return;
+      // EC:A58 — a person voided or closed this attempt: a late or redelivered webhook never grants it.
+      if (stored && isClosedByPerson(stored)) return;
       if (stored && stored.status === 'pending') {
         const reason = lookupMismatch(payment, { amount: expectedAttemptAmount(stored), customerId: stored.customerId, currency: stored.amount.currency });
         if (reason) { await holdAttemptForReview(repo, notifier, stored, payment, reason); return; }

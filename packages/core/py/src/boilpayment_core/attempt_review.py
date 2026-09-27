@@ -29,6 +29,13 @@ def is_under_review(row: Payment) -> bool:
     return bool(raw.get("boilpaymentReview"))
 
 
+def is_closed_by_person(row: Payment) -> bool:
+    """EC:A58 -- an attempt a person voided or closed after review: nothing (a webhook included) grants it."""
+    raw = row.raw if isinstance(row.raw, dict) else {}
+    resolved = raw.get("boilpaymentReviewResolved")
+    return isinstance(resolved, dict) and resolved.get("decision") in ("void", "close")
+
+
 def is_legacy_attempt_row(row: Payment) -> bool:
     """A row for a charge an earlier release made (orderId = the attempt key itself, EC:A39)."""
     raw = row.raw if isinstance(row.raw, dict) else {}

@@ -114,4 +114,16 @@ describe('EC:A45 self-scheduled renewal webhook', () => {
     expect(t.renewed).toEqual([]);
     expect((await t.repo.payments.get('pay_rn_1'))?.status).toBe('pending');
   });
+
+  it('EC:A58 an attempt a person voided or closed is never granted by a late or redelivered paid event', async () => {
+    for (const decision of ['void', 'close']) {
+      const t = setup('succeeded');
+      await t.repo.subscriptions.put(t.sub);
+      await t.repo.payments.put({ ...t.row, status: 'failed', raw: { ...(t.row.raw as object), boilpaymentReviewResolved: { decision, actor: 'ops' } },
+        failure: { code: `review_${decision === 'void' ? 'voided' : 'closed'}`, providerCode: null, retryable: false, userMessage: 'x' } });
+      await t.deliver(`evt_paid_${decision}`);
+      expect(t.renewed).toEqual([]);
+      expect((await t.repo.payments.get('pay_rn_1'))?.status).toBe('failed');
+    }
+  });
 });

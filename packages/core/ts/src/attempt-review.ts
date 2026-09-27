@@ -22,6 +22,12 @@ export function isUnderReview(row: Payment): boolean {
   return !!(row.raw as { boilpaymentReview?: unknown } | undefined)?.boilpaymentReview;
 }
 
+/** EC:A58 — an attempt a person voided or closed after review: nothing (a webhook included) grants it. */
+export function isClosedByPerson(row: Payment): boolean {
+  const d = (row.raw as { boilpaymentReviewResolved?: { decision?: unknown } } | undefined)?.boilpaymentReviewResolved?.decision;
+  return d === 'void' || d === 'close';
+}
+
 /** A row for a charge an earlier release made (orderId = the attempt key itself, EC:A39). */
 export function isLegacyAttemptRow(row: Payment): boolean {
   return typeof (row.raw as { boilpaymentLegacyOrderId?: unknown } | undefined)?.boilpaymentLegacyOrderId === 'string';

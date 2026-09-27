@@ -120,19 +120,22 @@ export function generateIntegrationMd(config: PaykitConfig): string {
     l.push('### 담당자 알림(`cs.needs_human`)이 오면');
     l.push('');
     l.push('- `attempt_lookup_mismatch`: 결제사 주문이 보낸 청구와 달라(금액·통화·고객·환불) 그 갱신을 멈췄습니다.');
-    l.push('  결제사 화면에서 확인한 뒤 `settle`(이 갱신이 맞음) 또는 `void`(돈이 움직이지 않음·환불됨)로 정리합니다.');
+    l.push('  결제사 화면에서 확인한 뒤 `settle`(이 갱신이 맞음), `void`(돈이 움직이지 않음·전액 환불됨, 다음 날 다시 청구),');
+    l.push('  `close`(일부 환불 등 돈이 움직였지만 킷은 지급·재청구 없이 그 기간을 넘김, 환불은 담당자가 처리) 중 하나로 정리합니다.');
+    l.push('  `void` 는 결제사에 주문을 다시 물어 돈이 남아 있으면 거절합니다. 보류된 구독은 유예 기간이 끝나면 만료되니 그 안에 정리하세요.');
+    l.push('- `renewal_double_charge`: 같은 기간에 결제가 두 번 들어왔습니다(이전 버전의 재시도). 두 번째 결제를 환불하세요.');
     l.push('- `missed_periods_parked`: 두 기간 이상 밀려 청구를 멈췄습니다. 이어서 받으려면 지금 기간부터 재개하고, 끝내려면 취소합니다.');
     l.push('');
     if (ts(config)) {
       l.push('```ts');
       l.push("import { resolveHeldAttempt, resumeParked } from 'boilpayment-sdk/lifecycle';");
-      l.push("await resolveHeldAttempt({ paymentId, decision: 'settle', actor: 'ops@yourapp.com', policy, ledger, repo, clock, notifier });");
+      l.push("await resolveHeldAttempt({ paymentId, decision: 'settle', actor: 'ops@yourapp.com', provider, policy, ledger, repo, clock, notifier });");
       l.push("await resumeParked({ subscriptionId, actor: 'ops@yourapp.com', policy, repo, clock, notifier });");
       l.push('```');
     } else {
       l.push('```python');
       l.push('from boilpayment.lifecycle import resolve_held_attempt, resume_parked');
-      l.push('await resolve_held_attempt(payment_id=payment_id, decision="settle", actor="ops@yourapp.com", policy=policy, ledger=ledger, repo=repo, clock=clock, notifier=notifier)');
+      l.push('await resolve_held_attempt(payment_id=payment_id, decision="settle", actor="ops@yourapp.com", provider=provider, policy=policy, ledger=ledger, repo=repo, clock=clock, notifier=notifier)');
       l.push('await resume_parked(subscription_id=subscription_id, actor="ops@yourapp.com", policy=policy, repo=repo, clock=clock, notifier=notifier)');
       l.push('```');
     }

@@ -92,14 +92,14 @@ describe('round-6 lifecycle regressions', () => {
     await t.tick('2024-02-01T01:10:00Z');
     const [held] = await t.repo.payments.list();
     expect(t.notices('attempt_lookup_mismatch')).toHaveLength(1);
-    const r = await resolveHeldAttempt({ paymentId: held.id, decision: 'settle', actor: 'ops@x', policy: t.policy, ledger: t.ledger, repo: t.repo, clock: t.clk('2024-02-02T00:00:00Z') });
+    const r = await resolveHeldAttempt({ paymentId: held.id, decision: 'settle', actor: 'ops@x', provider: t.provider as any, policy: t.policy, ledger: t.ledger, repo: t.repo, clock: t.clk('2024-02-02T00:00:00Z') });
     expect(r.payment.status).toBe('succeeded');
     expect(r.payment.amount.amountMinor).toBe(4500);
     expect(r.sub?.status).toBe('active');
     expect(await t.usable('2024-02-02T01:00:00Z')).toBe(100);
     await t.tick('2024-02-02T02:00:00Z');
     expect(t.moved('2024-02-01')).toBe(1);
-    await expect(resolveHeldAttempt({ paymentId: held.id, decision: 'void', actor: 'x', policy: t.policy, ledger: t.ledger, repo: t.repo, clock: t.clk('2024-02-02T03:00:00Z') }))
+    await expect(resolveHeldAttempt({ paymentId: held.id, decision: 'void', actor: 'x', provider: t.provider as any, policy: t.policy, ledger: t.ledger, repo: t.repo, clock: t.clk('2024-02-02T03:00:00Z') }))
       .rejects.toMatchObject({ code: 'attempt_not_held' });
   });
 
@@ -110,9 +110,9 @@ describe('round-6 lifecycle regressions', () => {
     t.provider.lookupOverride = (_id, found) => (found ? { ...found, status: 'refunded' } : null);
     await t.tick('2024-02-01T01:10:00Z');
     const [held] = await t.repo.payments.list();
-    await expect(resolveHeldAttempt({ paymentId: held.id, decision: 'settle', actor: 'x', policy: t.policy, ledger: t.ledger, repo: t.repo, clock: t.clk('2024-02-02T00:00:00Z') }))
+    await expect(resolveHeldAttempt({ paymentId: held.id, decision: 'settle', actor: 'x', provider: t.provider as any, policy: t.policy, ledger: t.ledger, repo: t.repo, clock: t.clk('2024-02-02T00:00:00Z') }))
       .rejects.toMatchObject({ code: 'held_order_not_paid' });
-    const r = await resolveHeldAttempt({ paymentId: held.id, decision: 'void', actor: 'x', policy: t.policy, ledger: t.ledger, repo: t.repo, notifier: t.notifier, clock: t.clk('2024-02-02T00:00:00Z') });
+    const r = await resolveHeldAttempt({ paymentId: held.id, decision: 'void', actor: 'x', provider: t.provider as any, policy: t.policy, ledger: t.ledger, repo: t.repo, notifier: t.notifier, clock: t.clk('2024-02-02T00:00:00Z') });
     expect(r.payment.status).toBe('failed');
     expect(r.sub?.status).toBe('past_due');
     expect(await t.usable('2024-02-02T01:00:00Z')).toBe(0);

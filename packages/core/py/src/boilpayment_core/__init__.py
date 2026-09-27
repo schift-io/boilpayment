@@ -2,6 +2,7 @@
 
 from .attempt_review import expected_attempt_amount as expected_attempt_amount
 from .attempt_review import hold_attempt_for_review as hold_attempt_for_review
+from .attempt_review import is_closed_by_person as is_closed_by_person
 from .attempt_review import is_legacy_attempt_row as is_legacy_attempt_row
 from .attempt_review import is_under_review as is_under_review
 from .attempt_review import lookup_mismatch as lookup_mismatch

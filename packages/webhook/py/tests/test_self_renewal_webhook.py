@@ -153,3 +153,15 @@ def test_ec_a50_a6_6_held_attempt_is_not_paid_by_the_webhook() -> None:
 
     assert asyncio.run(run()) == ([], "pending")
 
+
+def test_ec_a58_an_attempt_a_person_voided_or_closed_is_never_granted_by_the_webhook() -> None:
+    async def run(decision: str):  # type: ignore[no-untyped-def]
+        repo, sub, row, renewed, _, deliver = _setup("succeeded")
+        await repo.subscriptions.put(sub)
+        await repo.payments.put(dataclasses.replace(
+            row, status="failed", raw={**row.raw, "boilpaymentReviewResolved": {"decision": decision, "actor": "ops"}}))
+        await deliver(f"evt_paid_{decision}")
+        return renewed, (await repo.payments.get("pay_rn_1")).status
+
+    for decision in ("void", "close"):
+        assert asyncio.run(run(decision)) == ([], "failed")
