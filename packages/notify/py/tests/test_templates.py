@@ -168,3 +168,15 @@ def test_notify_credits_expiring_en_ko():
     ko = render("credits.expiring", "ko", payload)
     assert ko.subject == "크레딧 만료 예정"
     assert ko.text == "크레딧 120 개가 2026-03-01 에 만료됩니다. 이월되지 않으니 그 전에 사용해 주세요."
+
+
+def test_snake_case_payload_fills_the_camel_case_placeholders():
+    """Round-6 I-5: Python payloads use snake_case keys; no placeholder may be left unfilled."""
+    for kind, payload in (
+        ("grace.ending", {"grace_until": "2026-09-16"}),
+        ("cs.needs_human", {"case_id": "case_1", "kind": "attempt_lookup_mismatch", "customer_id": "c1"}),
+    ):
+        for locale in ("en", "ko"):
+            out = render(kind, locale, payload)
+            assert "{" not in out.text, out.text
+            assert all(str(v) in out.text for v in payload.values())

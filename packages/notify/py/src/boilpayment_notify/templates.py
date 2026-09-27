@@ -25,10 +25,21 @@ class TemplateSet:
     ko: TemplateFn
 
 
+def _camel(key: str) -> str:
+    head, *rest = key.split("_")
+    return head + "".join(p[:1].upper() + p[1:] for p in rest)
+
+
 def _interp(s: str, payload: dict[str, Any]) -> str:
+    """Placeholders are the TS payload keys ({graceUntil}); Python payloads use snake_case keys
+    (grace_until), so each key also fills its camelCase placeholder (round-6 I-5: a Python grace
+    email showed a literal '{graceUntil}')."""
     out = s
     for k, v in payload.items():
         out = out.replace("{" + k + "}", str(v))
+        camel = _camel(k)
+        if camel != k:
+            out = out.replace("{" + camel + "}", str(v))
     return out
 
 
