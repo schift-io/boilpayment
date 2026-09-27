@@ -423,7 +423,7 @@ export function toNormalizedEvent(event: Stripe.Event): NormalizedEvent {
     paymentRef,
     refundRef,
     amount,
-    ...(type === 'dispute.closed' ? { disputeOutcome } : {}),
+    disputeOutcome,
     raw: event,
   };
 }

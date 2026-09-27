@@ -261,6 +261,7 @@ export function mapTossWebhook(body: any): NormalizedEvent {
     subscriptionRef: null,
     paymentRef: data.paymentKey ?? null,
     refundRef: type.startsWith('refund.') ? cancellation?.transactionKey ?? null : null,
+    disputeOutcome: null, // EC:D21
     amount: type.startsWith('refund.')
       ? (typeof cancellation?.cancelAmount === 'number' && typeof data.currency === 'string' ? money(cancellation.cancelAmount, data.currency) : null)
       : (typeof data.totalAmount === 'number' ? money(data.totalAmount, data.currency ?? 'KRW') : null),

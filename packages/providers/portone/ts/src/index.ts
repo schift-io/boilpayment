@@ -198,6 +198,7 @@ export function mapPortoneWebhook(body: any): NormalizedEvent {
     subscriptionRef: null,
     paymentRef: data.paymentId ?? null,
     refundRef: normType.startsWith('refund.') ? data.cancellationId ?? null : null,
+    disputeOutcome: null, // EC:D21 — Transaction.DisputeResolved carries no verdict
     amount: null,
     raw: body,
   };

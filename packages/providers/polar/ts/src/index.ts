@@ -217,6 +217,7 @@ export function toNormalizedEvent(parsed: { type: string; data: Record<string, a
     subscriptionRef,
     paymentRef,
     refundRef,
+    disputeOutcome: null, // EC:D21 — Polar sends no dispute verdict
     amount,
     raw: parsed,
   };

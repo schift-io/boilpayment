@@ -469,6 +469,7 @@ describe('[EC:F(Stripe)] toNormalizedEvent — field extraction per event type',
       subscriptionRef: 'sub_1',
       paymentRef: 'in_1',
       refundRef: null,
+      disputeOutcome: null,
       amount: { amountMinor: 5000, currency: 'KRW' },
       raw: event,
     });
@@ -582,7 +583,7 @@ describe('[EC:F(Stripe)] toNormalizedEvent — field extraction per event type',
     expect(closed('warning_closed').disputeOutcome).toBeNull();
     const opened = toNormalizedEvent({ id: 'evt_o', type: 'charge.dispute.created', created: NOW,
       data: { object: { payment_intent: 'pi_1', amount: 3000, currency: 'krw', status: 'needs_response' } } } as unknown as Stripe.Event);
-    expect(opened.disputeOutcome).toBeUndefined();
+    expect(opened.disputeOutcome).toBeNull();
   });
 
   it('unhandled event type -> unknown with all refs null and raw preserved', () => {
