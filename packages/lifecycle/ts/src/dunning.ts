@@ -91,7 +91,7 @@ export async function onPaymentFailed(input: OnPaymentFailedInput): Promise<OnPa
     await notifier.send({
       type: 'grace.started',
       customerId: sub.customerId,
-      payload: { subscriptionId: sub.id, graceUntil: graceUntil.toISOString() },
+      payload: { subscriptionId: sub.id, graceUntil: graceUntil.toISOString(), graceDays }, // EC:I11 — every template placeholder is filled
     });
   }
 
@@ -174,7 +174,7 @@ export async function onGraceExpired(input: OnGraceExpiredInput): Promise<OnGrac
 
   const updated: Subscription = { ...sub, status: 'expired', graceUntil: null };
   await repo.subscriptions.put(updated);
-  await notifier.send({ type: 'grace.ending', customerId: sub.customerId, payload: { subscriptionId: sub.id } });
+  await notifier.send({ type: 'grace.ending', customerId: sub.customerId, payload: { subscriptionId: sub.id, graceUntil: (sub.graceUntil ?? now).toISOString() } });
 
   return { sub: updated, revoked };
 }
@@ -412,7 +412,7 @@ export async function runRetry(input: RunRetryInput): Promise<RunRetryResult> {
       await scheduleRetry(repo, sub.id, payload.attempt + 1, clock.now(), policy.dunning.retryIntervalHours);
     } else {
       // Retries exhausted — the existing graceUntil-driven onGraceExpired path finishes it.
-      await notifier.send({ type: 'grace.ending', customerId: sub.customerId, payload: { subscriptionId: sub.id } });
+      await notifier.send({ type: 'grace.ending', customerId: sub.customerId, payload: { subscriptionId: sub.id, graceUntil: (sub.graceUntil ?? clock.now()).toISOString() } });
     }
 
     return { outcome: 'failed' as const, sub, grants: [] };

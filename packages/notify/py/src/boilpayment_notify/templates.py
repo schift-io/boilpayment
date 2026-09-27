@@ -1,6 +1,7 @@
 # Templates per NotifyType, EN + KO. Plain string interpolation, no engine dep.
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -36,11 +37,23 @@ def _interp(s: str, payload: dict[str, Any]) -> str:
     email showed a literal '{graceUntil}')."""
     out = s
     for k, v in payload.items():
+        if v is None:
+            continue
         out = out.replace("{" + k + "}", str(v))
         camel = _camel(k)
         if camel != k:
             out = out.replace("{" + camel + "}", str(v))
     return out
+
+
+def _detail_of(payload: dict[str, Any]) -> str:
+    """{detail}: every payload field as ``key=value``, for templates whose senders carry different fields."""
+    parts = []
+    for k, v in payload.items():
+        if v is None or k in ("customer_id", "customerId"):  # the customer has its own placeholder
+            continue
+        parts.append(f"{_camel(k)}={json.dumps(v, default=str) if isinstance(v, (dict, list)) else v}")
+    return ", ".join(parts)
 
 
 def _tpl(en_subject: str, en_text: str, ko_subject: str, ko_text: str) -> TemplateSet:
@@ -53,9 +66,9 @@ def _tpl(en_subject: str, en_text: str, ko_subject: str, ko_text: str) -> Templa
 templates: dict[NotifyType, TemplateSet] = {
     "payment.failed": _tpl(
         "Payment failed",
-        "Your payment of {amount} failed: {reason}. We will retry during your grace period.",
+        "We could not process the payment for your subscription. We will try again; please check your billing info.",
         "결제 실패",
-        "{amount} 결제가 실패했습니다: {reason}. 유예 기간 동안 재시도합니다.",
+        "구독 결제를 처리하지 못했습니다. 다시 시도하며, 결제 정보를 확인해 주세요.",
     ),
     "grace.started": _tpl(
         "Payment issue — grace period started",
@@ -83,9 +96,9 @@ templates: dict[NotifyType, TemplateSet] = {
     ),
     "cs.needs_human": _tpl(
         "Case needs review",
-        "CS case {caseId} ({kind}) for customer {customerId} needs human review.",
+        "Customer {customerId} needs human review ({kind}). {detail}",
         "상담원 확인 필요",
-        "고객 {customerId} 의 CS 케이스 {caseId} ({kind}) 는 상담원 확인이 필요합니다.",
+        "고객 {customerId} 건은 상담원 확인이 필요합니다 ({kind}). {detail}",
     ),
     "reconcile.mismatch": _tpl(
         "Reconciliation mismatch",
@@ -119,8 +132,9 @@ templates: dict[NotifyType, TemplateSet] = {
 def render(type: NotifyType, locale: Locale, payload: dict[str, Any]) -> Rendered:
     set_ = templates[type]
     fn = set_.en if locale == "en" else set_.ko
-    return fn(payload)
+    return fn({"detail": _detail_of(payload), **payload})
 
 
 def render_notification(n: Notification, locale: Locale) -> Rendered:
-    return render(n.type, locale, n.payload)
+    """The notification's own customer fills {customerId} ("-" when it names none)."""
+    return render(n.type, locale, {"customer_id": n.customer_id or "-", **n.payload})

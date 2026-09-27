@@ -7,7 +7,15 @@ export type TemplateFn = (payload: Record<string, unknown>) => Rendered;
 export type TemplateSet = { en: TemplateFn; ko: TemplateFn };
 
 function interp(s: string, payload: Record<string, unknown>): string {
-  return s.replace(/\{(\w+)\}/g, (_, k) => (payload[k] !== undefined ? String(payload[k]) : `{${k}}`));
+  return s.replace(/\{(\w+)\}/g, (_, k) => (payload[k] !== undefined && payload[k] !== null ? String(payload[k]) : `{${k}}`));
+}
+
+/** EC:I11 — `{detail}`: every payload field as `key=value`, for templates whose senders carry different fields. */
+function detailOf(payload: Record<string, unknown>): string {
+  return Object.entries(payload)
+    .filter(([k, v]) => v !== undefined && v !== null && k !== 'customerId') // the customer has its own placeholder
+    .map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : String(v)}`)
+    .join(', ');
 }
 
 function tpl(enSubject: string, enText: string, koSubject: string, koText: string): TemplateSet {
@@ -19,8 +27,8 @@ function tpl(enSubject: string, enText: string, koSubject: string, koText: strin
 
 export const templates: Record<NotifyType, TemplateSet> = {
   'payment.failed': tpl(
-    'Payment failed', 'Your payment of {amount} failed: {reason}. We will retry during your grace period.',
-    '결제 실패', '{amount} 결제가 실패했습니다: {reason}. 유예 기간 동안 재시도합니다.',
+    'Payment failed', 'We could not process the payment for your subscription. We will try again; please check your billing info.',
+    '결제 실패', '구독 결제를 처리하지 못했습니다. 다시 시도하며, 결제 정보를 확인해 주세요.',
   ),
   'grace.started': tpl(
     'Payment issue — grace period started', 'We could not process your payment. You have {graceDays} days to update your billing info before service is paused.',
@@ -39,8 +47,8 @@ export const templates: Record<NotifyType, TemplateSet> = {
     '환불 처리 완료', '{amount} 환불이 원래 결제 수단으로 처리되었습니다.',
   ),
   'cs.needs_human': tpl(
-    'Case needs review', 'CS case {caseId} ({kind}) for customer {customerId} needs human review.',
-    '상담원 확인 필요', '고객 {customerId} 의 CS 케이스 {caseId} ({kind}) 는 상담원 확인이 필요합니다.',
+    'Case needs review', 'Customer {customerId} needs human review ({kind}). {detail}',
+    '상담원 확인 필요', '고객 {customerId} 건은 상담원 확인이 필요합니다 ({kind}). {detail}',
   ),
   'reconcile.mismatch': tpl(
     'Reconciliation mismatch', 'Provider payments vs grants mismatch detected for customer {customerId}: {detail}',
@@ -65,9 +73,10 @@ export const templates: Record<NotifyType, TemplateSet> = {
 export function render(type: NotifyType, locale: Locale, payload: Record<string, unknown>): Rendered {
   const set = templates[type];
   const fn = set[locale] ?? set.en;
-  return fn(payload);
+  return fn({ detail: detailOf(payload), ...payload });
 }
 
+/** The notification's own customer fills `{customerId}` ('-' when it names none). */
 export function renderNotification(n: Notification, locale: Locale): Rendered {
-  return render(n.type, locale, n.payload);
+  return render(n.type, locale, { customerId: n.customerId ?? '-', ...n.payload });
 }

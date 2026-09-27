@@ -129,7 +129,7 @@ async def on_payment_failed(input: OnPaymentFailedInput) -> OnPaymentFailedResul
         Notification(
             type="payment.failed",
             customer_id=sub.customer_id,
-            payload={"subscription_id": sub.id, "grace_until": grace_until.isoformat()},
+            payload={"subscription_id": sub.id, "grace_until": iso_z(grace_until)},
         )
     )
     if grace_days > 0:
@@ -137,9 +137,11 @@ async def on_payment_failed(input: OnPaymentFailedInput) -> OnPaymentFailedResul
             Notification(
                 type="grace.started",
                 customer_id=sub.customer_id,
+                # EC:I11 -- every template placeholder is filled
                 payload={
                     "subscription_id": sub.id,
-                    "grace_until": grace_until.isoformat(),
+                    "grace_until": iso_z(grace_until),
+                    "grace_days": grace_days,
                 },
             )
         )
@@ -256,7 +258,7 @@ async def on_grace_expired(input: OnGraceExpiredInput) -> OnGraceExpiredResult:
         Notification(
             type="grace.ending",
             customer_id=sub.customer_id,
-            payload={"subscription_id": sub.id},
+            payload={"subscription_id": sub.id, "grace_until": iso_z(sub.grace_until or now)},
         )
     )
 
@@ -549,7 +551,7 @@ async def run_retry(input: RunRetryInput) -> RunRetryResult:
                 Notification(
                     type="grace.ending",
                     customer_id=sub.customer_id,
-                    payload={"subscription_id": sub.id},
+                    payload={"subscription_id": sub.id, "grace_until": iso_z(sub.grace_until or clock.now())},
                 )
             )
 
