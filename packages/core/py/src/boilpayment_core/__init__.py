@@ -43,6 +43,8 @@ from .money import (  # noqa: F401
     round_half_away_from_zero,
     scale_minor,
 )
+from .payment_refs import find_local_payment as find_local_payment
+from .payment_refs import record_payment_ref_aliases as record_payment_ref_aliases
 from .period import (  # noqa: F401
     days_in_month,
     days_in_period,

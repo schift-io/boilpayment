@@ -17,7 +17,9 @@ import { authoritativeRefundEvent } from './refund.js';
 import {
   INACTIVE_SUBSCRIPTION_STATUSES,
   PaymentKitError,
+  recordPaymentRefAliases,
 } from 'boilpayment-core';
+import { localizePaymentEvent } from './payment-ref.js';
 import type {
   CashReceiptType, Clock, IdGen, LedgerStore, Notifier, Payment, PaymentProvider, Policy, Repo, Subscription,
 } from 'boilpayment-core';
@@ -131,6 +133,7 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
     const payments = await repo.payments.list({ providerRef } as Partial<Payment>);
     if (payments.length === 0) return markUnknownProviderRef('payment', providerRef, ctx.provider.name);
     const providerPayment = await ctx.provider.getPayment(providerRef); // re-fetch for verification (EC:E3)
+    await recordPaymentRefAliases(repo, payments[0], providerPayment.providerRefAliases ?? [], clock.now()); // EC:E24
     return { ...payments[0], status: providerPayment.status, amount: providerPayment.amount, period: providerPayment.period, occurredAt: providerPayment.occurredAt, failure: providerPayment.failure };
   }
 
@@ -150,11 +153,13 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
     // A concurrent delivery of the same invoice may have recorded it since the first lookup.
     const [raced] = await repo.payments.list({ providerRef: paymentRef } as Partial<Payment>);
     if (raced) return raced;
-    return repo.payments.put({
+    const recorded = await repo.payments.put({
       id: ids.newId(), customerId: sub.customerId, provider: ctx.provider.name, providerRef: paymentRef, subscriptionId: sub.id,
       amount: remote.amount, status: remote.status, kind: 'subscription', period: remote.period, occurredAt: remote.occurredAt,
       failure: remote.failure, cashReceipt: null,
     });
+    await recordPaymentRefAliases(repo, recorded, remote.providerRefAliases ?? [], clock.now()); // EC:E24
+    return recorded;
   }
 
   // EC:K2 K4 K6 K7 — issue a cash receipt for a succeeded payment when policy.cashReceipt.mode ===
@@ -297,12 +302,16 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
 
   const onRefundCreated: Handler = async (ctx) => {
     // EC:L5 — see onPaymentSucceeded above.
-    if (refund) await refund.onExternalRefund({ event: await authoritativeRefundEvent(ctx, notifier), ledger: withCorrelationId(ledger, ctx.correlationId), repo, cs }); // EC:D8
+    if (!refund) return;
+    const event = await localizePaymentEvent(ctx, await authoritativeRefundEvent(ctx, notifier), 'refund', repo, clock, notifier);
+    await refund.onExternalRefund({ event, ledger: withCorrelationId(ledger, ctx.correlationId), repo, cs }); // EC:D8
   };
 
   const onDispute: Handler = async (ctx) => {
     // EC:L5 — see onPaymentSucceeded above.
-    if (cs) await cs.dispute({ event: ctx.event, policy, ledger: withCorrelationId(ledger, ctx.correlationId), repo, notifier }); // EC:B11 D9
+    if (!cs) return;
+    const event = await localizePaymentEvent(ctx, ctx.event, 'dispute', repo, clock, notifier);
+    await cs.dispute({ event, policy, ledger: withCorrelationId(ledger, ctx.correlationId), repo, notifier }); // EC:B11 D9
   };
 
   const onUnknown: Handler = async () => { /* ignored, no-op */ };

@@ -63,7 +63,7 @@ export function generateIndexPy(config: PaykitConfig): string {
   l.push('');
   l.push(`from typing import Any`);
   l.push('');
-  l.push(`from boilpayment.core import Clock, ConsoleLogger, Deps, LedgerStore, Logger, Money, NoopLogger, Notifier, Payment, ${hasSubscription && hasCredits ? 'PaymentKitError, ' : ''}PaymentProvider, Period, Plan, PlanPrice, Policy, Repo, Subscription, resolve_policy`);
+  l.push(`from boilpayment.core import Clock, ConsoleLogger, Deps, LedgerStore, Logger, Money, NoopLogger, Notification, Notifier, Payment, ${hasSubscription && hasCredits ? 'PaymentKitError, ' : ''}PaymentProvider, Period, Plan, PlanPrice, Policy, Repo, Subscription, resolve_policy`);
   l.push(`from boilpayment.postgres import verify_schema`);
   if (config.infra.logging === 'postgres') {
     l.push(`from boilpayment.postgres import PostgresLogger`);
@@ -236,7 +236,11 @@ export function generateIndexPy(config: PaykitConfig): string {
   l.push(`    # Adapts open_case to the small case-opener Protocols refund.on_external_refund/execute expect,`);
   l.push(`    # so refund/execute stay decoupled from importing boilpayment.cs directly (EC:D8/D12).`);
   l.push(`    class _CaseOpener:`);
-  l.push(`        async def open_reconcile_mismatch_case(self, *, customer_id: str, reference_id: str, reason: str) -> None:`);
+  l.push(`        async def open_reconcile_mismatch_case(self, *, customer_id: str | None, reference_id: str, reason: str) -> None:`);
+  l.push(`            # EC:E24 -- no local customer: tell a person (a case needs a customer row).`);
+  l.push(`            if not customer_id or await repo.customers.get(customer_id) is None:`);
+  l.push(`                await notifier.send(Notification(type="cs.needs_human", customer_id=None, payload={"kind": "reconcile_mismatch", "referenceId": reference_id, "reason": reason}))`);
+  l.push(`                return`);
   l.push(`            await open_case(OpenCaseInput(customer_id=customer_id, kind="reconcile_mismatch", reference_id=reference_id, policy=policy, repo=repo, clock=clock, ids=ids))`);
   l.push(`        async def open_refund_failed_case(self, *, customer_id: str, reference_id: str, reason: str, needs: str | None = None) -> None:`);
   l.push(`            await open_case(OpenCaseInput(customer_id=customer_id, kind="refund_failed", reference_id=reference_id, policy=policy, repo=repo, clock=clock, ids=ids))`);

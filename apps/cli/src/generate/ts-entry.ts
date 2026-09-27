@@ -192,7 +192,12 @@ export function generateIndexTs(config: PaykitConfig): string {
   l.push(`  // Adapts cs.openCase to the small case-opener shapes refund.onExternalRefund/execute expect,`);
   l.push(`  // so refund/execute stay decoupled from importing boilpayment-cs directly (EC:D8/D12).`);
   l.push(`  const caseOpener = {`);
-  l.push(`    async openReconcileMismatchCase(input: { customerId: string; referenceId: string; reason: string }) {`);
+  l.push(`    async openReconcileMismatchCase(input: { customerId: string | null; referenceId: string; reason: string }) {`);
+  l.push(`      // EC:E24 — no local customer: tell a person (a case needs a customer row).`);
+  l.push(`      if (!input.customerId || !(await full.repo.customers.get(input.customerId))) {`);
+  l.push(`        await notifier.send({ type: 'cs.needs_human', customerId: null, payload: { kind: 'reconcile_mismatch', referenceId: input.referenceId, reason: input.reason } });`);
+  l.push(`        return;`);
+  l.push(`      }`);
   l.push(`      await openCase({ customerId: input.customerId, kind: 'reconcile_mismatch', referenceId: input.referenceId, policy, repo: full.repo, clock: full.clock, ids: full.ids });`);
   l.push(`    },`);
   l.push(`    async openRefundFailedCase(input: { customerId: string; referenceId: string; reason: string }) {`);

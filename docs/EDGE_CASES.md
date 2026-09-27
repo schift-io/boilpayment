@@ -139,6 +139,7 @@
 | D17 | 같은 결제에 키가 다른 환불 요청 두 개가 동시에 도착 (합이 결제액 초과) | (구현 규칙) | 남은 환불 가능액 검사부터 보류·pending 환불 기록까지를 고객 단위 임계구역(`ledger.transaction`: 메모리 잠금, Postgres advisory lock)에서 실행해 하나만 통과한다. 결제사 호출은 잠금 밖 | refund | P0 |
 | D18 | 외부(결제사 대시보드) 환불의 크레딧 회수가 같은 고객의 consume 과 겹침, 또는 회수 뒤 consume | (구현 규칙) | 잔액 조회·회수량 clamp·회수 기록·환불 행 쓰기를 고객 원장 잠금(`ledger.transaction`, consume 과 같은 잠금) 안에서 한다. 회수는 grant 버킷에 묶어(`reference.grantId`, 그 결제의 grant 먼저, 이어서 만료가 이른 순) 기록해, 회수된 크레딧을 뒤이은 consume 이 다시 쓰지 못한다. 승인된 `allow_negative` pending 환불이 버킷보다 많이 회수할 때만 넘는 부분을 grant 없는 회수로 남긴다. clamp 되면 reconcile 케이스를 연다. 이전 구현은 경합 시 8/8 라운드에서 `block` 인데 잔액 -100 이었다 | refund | P0 |
 | D19 | 같은 결제사 환불이 동시에 두 번 도착(Stripe 는 한 환불에 `refund.created`, `refund.updated`, `charge.refund.updated` 를 보낸다) | (구현 규칙) | 환불 참조(`refundRef`)로 이미 정산된 환불이 있는지를 고객 원장 잠금 안에서 다시 확인하고, 있으면 그 환불을 돌려준다. 이전에는 확인이 잠금 밖에 있어 환불 행이 2 개, 크레딧 회수가 두 번, 결제가 전액 환불로 표시되어 남은 금액을 kit 으로 환불할 수 없었다(Postgres 6/6 재현) | refund | P0 |
+| D20 | 외부 환불의 회수 크레딧을 grant 단가(내림)로 계산 — 나누어떨어지지 않는 가격(1999 minor 에 1000 크레딧 → 단가 1)의 전액 환불이 1999 크레딧으로 계산돼 매번 거짓 정산 불일치 케이스가 열림 | (구현 규칙) | 이 결제가 지급한 크레딧이 있고 통화가 같으면 회수량 = 환불액 ÷ 결제액 × 지급 크레딧(반올림, J9 규칙). 전액 환불은 지급분 전부. 지급이 없거나 통화가 다를 때만 단가로 계산 | refund | P0 |
 | D15 | 환불 중 소비 시도 (회수 전) | (구현 규칙) | 환불 시작 시 `hold` 행으로 잔액 선차감. 실패 시 hold 해제 | refund · credits | P0 |
 
 ## E. 결제 실패 · 복구 (CS 수익의 본체)
@@ -168,6 +169,7 @@
 | E21 | 유출 때문에 교체해 뺀 이전 비밀값으로 서명한 새 웹훅 | `*_WEBHOOK_PREVIOUS_SECRETS` | 수신 시점(`receivedAt` 없음)에는 현재 비밀값 하나만 인정한다. 이전 비밀값은 이미 받아 둔 행의 재검증에만 쓴다. 이전 구현은 수신에도 이전 값을 받아, 목록에 남은 동안 옛 키로 새 이벤트를 위조할 수 있었다 | providers(stripe, polar, portone) | P0 |
 | E22 | Toss 허용목록이 IPv4-mapped IPv6 주소(`::ffff:a.b.c.d`)나 CIDR 블록을 거부 | `TOSS_WEBHOOK_ALLOWED_IPS` | 목록 항목은 주소 또는 CIDR(IPv4/IPv6)이다. dual-stack 소켓이 주는 `::ffff:` 주소는 IPv4 로 보고 대조한다. 주소도 CIDR 도 아닌 항목은 생성 시점에 오류로 거부한다(조용히 안 맞는 항목을 두지 않는다) | providers(toss) | P0 |
 | E23 | Stripe PaymentIntent 는 환불·분쟁 뒤에도 `succeeded` 로 남는다 | (구현 규칙) | `getPayment` 는 `latest_charge` 를 펼쳐 가져오고, 환불액이 있으면 `refunded`/`partially_refunded`, 분쟁이면 `disputed` 로 정규화한다. 재시도 사이에 환불된 충전 결제가 `succeeded` 로 재조회되어 크레딧이 지급되던 경로(E19 두 번째 경로)를 막는다 | providers(stripe) | P0 |
+| E24 | 한 결제를 결제사가 여러 id 로 부름 — Stripe 갱신 결제는 인보이스(`in_…`)로 기록되는데 환불·분쟁 이벤트는 PaymentIntent(`pi_…`)·충전(`ch_…`)을 가리킨다. 로컬 결제를 못 찾아 대시보드 환불의 크레딧 회수·분쟁 동결이 빠지고, 고객 `'unknown'` 케이스가 `cs_cases` FK 로 실패해 웹훅이 영구 failed | (구현 규칙) | 결제사 어댑터가 가져온 결제에 다른 id 들(`providerRefAliases`)을 싣고, 웹훅이 결제를 기록·재조회할 때 operations 에 별칭으로 남긴다(스키마 변경 없음). 환불·분쟁 이벤트는 정확한 `providerRef` → 별칭 → 결제사 재조회(그 결제의 다른 id, 별칭 이전에 기록된 행은 같은 고객의 최근 결제를 한 번씩 재조회) 순서로 로컬 결제를 찾는다. 끝내 없으면 `cs.needs_human`(`unmatched_refund`/`unmatched_dispute`)을 한 번만 보내고 레코드는 failed(재시도 상한 안에서 다시 처리)로 둔다. 로컬 고객이 없는 케이스는 만들지 않는다 | webhook · refund · cs · providers(stripe) | P0 |
 
 ## F. Provider 별 특이점
 

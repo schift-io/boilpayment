@@ -5,7 +5,8 @@ import { weightedAvgUnitPrice } from './util.js';
 
 /** Injected instead of importing `boilpayment-cs` directly (EC:D8). */
 export interface ReconcileMismatchCaseOpener {
-  openReconcileMismatchCase(input: { customerId: string; referenceId: string; reason: string }): Promise<void>;
+  /** EC:E24 — customerId is null when no local customer is known: the opener tells a person instead of opening a case. */
+  openReconcileMismatchCase(input: { customerId: string | null; referenceId: string; reason: string }): Promise<void>;
 }
 
 export interface OnExternalRefundInput {
@@ -26,6 +27,15 @@ export interface OnExternalRefundInput {
 /** EC:J9 — credits an external refund of `amountMinor` stands for, rounded half away from zero (same as Python). */
 export function creditsForAmount(amountMinor: number, unitPrice: number): number {
   return unitPrice > 0 ? roundHalfAwayFromZero(amountMinor / unitPrice) : 0;
+}
+
+/** EC:D20 — the credits a refund of `amountMinor` stands for, as its share of what this payment granted
+ *  (a full refund revokes every credit the payment bought). A unit price rounded down from a price that
+ *  does not divide evenly (1999 minor for 1000 credits → 1) overstated the credits and opened a false
+ *  reconcile case on every full refund. Null when the payment grants nothing or the currency differs. */
+export function paymentShareCredits(amountMinor: number, currency: string, paid: { amountMinor: number; currency: string }, totalGranted: number): number | null {
+  if (totalGranted <= 0 || paid.amountMinor <= 0 || paid.currency !== currency) return null;
+  return roundHalfAwayFromZero((amountMinor * totalGranted) / paid.amountMinor);
 }
 
 /** EC:onExternalRefund — refund.onExternalRefund({event, ledger, repo, cs, clock, ids}) */
@@ -53,7 +63,7 @@ export async function onExternalRefund(input: OnExternalRefundInput): Promise<Re
   const pending = refundRef && existing?.status === 'pending' ? existing : null;
   const unresolved = refunds.filter((refund) => refund.status === 'pending');
   if (!pending && unresolved.length > 0) {
-    await cs.openReconcileMismatchCase({ customerId: payment?.customerId ?? 'unknown', referenceId: event.id,
+    await cs.openReconcileMismatchCase({ customerId: payment?.customerId ?? null, referenceId: event.id,
       reason: 'pending refund requires a matching provider refund reference' });
     const single = unresolved[0];
     if (unresolved.length === 1 && single) return single;
@@ -63,7 +73,7 @@ export async function onExternalRefund(input: OnExternalRefundInput): Promise<Re
   if (pending && event.type === 'refund.pending') return pending;
   const settlementAmount = event.amount ?? pending?.amount;
   if (!refundRef || !settlementAmount) {
-    await cs.openReconcileMismatchCase({ customerId: payment?.customerId ?? 'unknown', referenceId: event.id,
+    await cs.openReconcileMismatchCase({ customerId: payment?.customerId ?? null, referenceId: event.id,
       reason: 'external refund requires an actual refund reference and amount' });
     throw new PaymentKitError('external refund evidence is incomplete', 'refund_reconciliation_required');
   }
@@ -72,7 +82,7 @@ export async function onExternalRefund(input: OnExternalRefundInput): Promise<Re
   const status: Refund['status'] = event.type === 'refund.failed' ? 'failed' : event.type === 'refund.pending' ? 'pending' : 'succeeded';
 
   if (!payment) {
-    await cs.openReconcileMismatchCase({ customerId: event.customerRef ?? 'unknown', referenceId: event.paymentRef ?? event.id, reason: 'no matching payment for external refund event' });
+    await cs.openReconcileMismatchCase({ customerId: null, referenceId: event.paymentRef ?? event.id, reason: 'no matching payment for external refund event' }); // EC:E24 — customerRef is a provider id, not a local customer
     throw new PaymentKitError('external refund payment was not found', 'refund_reconciliation_required');
   }
 
@@ -114,7 +124,8 @@ export async function onExternalRefund(input: OnExternalRefundInput): Promise<Re
       .filter((e) => e.reference.paymentId === payment.id && e.source === 'refund')
       .reduce((sum, e) => sum + -e.amount, 0);
     const unitPrice = weightedAvgUnitPrice(grants);
-    const rawCredits = pending ? pendingCredits : creditsForAmount(amountMinor, unitPrice);
+    const rawCredits = pending ? pendingCredits
+      : paymentShareCredits(amountMinor, currency, payment.amount, totalGranted) ?? creditsForAmount(amountMinor, unitPrice);
     const balance = await ledger.balance(payment.customerId, 'paid', clock.now()); // FINDINGS#1 class: always thread the injected clock
     const creditsToRevoke = pending ? pendingCredits : Math.max(0, Math.min(rawCredits, totalGranted - alreadyRevoked, balance.available));
 

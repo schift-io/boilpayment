@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import Any, Protocol
 
 from boilpayment_core import (
     Clock,
@@ -23,6 +23,14 @@ from boilpayment_core.money import round_half_away_from_zero
 from .util import weighted_avg_unit_price
 
 
+def payment_share_credits(amount_minor: int, currency: str, paid: Any, total_granted: int) -> int | None:
+    """EC:D20 -- the credits a refund stands for, as its share of what this payment granted (mirrors
+    paymentShareCredits in external.ts). None when the payment grants nothing or the currency differs."""
+    if total_granted <= 0 or paid.amount_minor <= 0 or paid.currency != currency:
+        return None
+    return round_half_away_from_zero(amount_minor * total_granted / paid.amount_minor)
+
+
 def credits_for_amount(amount_minor: int, unit_price: float) -> int:
     """EC:J9 -- credits an external refund of `amount_minor` stands for, rounded half away from zero
     (the same as the TS kit; built-in round() is half-to-even)."""
@@ -32,8 +40,8 @@ class ReconcileMismatchCaseOpener(Protocol):
     """Injected instead of importing `boilpayment_cs` directly (EC:D8)."""
 
     async def open_reconcile_mismatch_case(
-        self, *, customer_id: str, reference_id: str, reason: str
-    ) -> None: ...
+        self, *, customer_id: str | None, reference_id: str, reason: str
+    ) -> None: ...  # EC:E24 -- None: no local customer, the opener tells a person
 
 
 @dataclass(kw_only=True, slots=True)
@@ -104,7 +112,7 @@ async def on_external_refund(input: OnExternalRefundInput) -> Refund:
     unresolved = [refund for refund in refunds if refund.status == "pending"]
     if pending is None and unresolved:
         await cs.open_reconcile_mismatch_case(
-            customer_id=payment.customer_id if payment else "unknown",
+            customer_id=payment.customer_id if payment else None,
             reference_id=event.id,
             reason="pending refund requires a matching provider refund reference",
         )
@@ -120,7 +128,7 @@ async def on_external_refund(input: OnExternalRefundInput) -> Refund:
     settlement_amount = event.amount or (pending.amount if pending else None)
     if not refund_ref or settlement_amount is None:
         await cs.open_reconcile_mismatch_case(
-            customer_id=payment.customer_id if payment else "unknown",
+            customer_id=payment.customer_id if payment else None,
             reference_id=event.id,
             reason="external refund requires an actual refund reference and amount",
         )
@@ -139,7 +147,7 @@ async def on_external_refund(input: OnExternalRefundInput) -> Refund:
 
     if payment is None:
         await cs.open_reconcile_mismatch_case(
-            customer_id=event.customer_ref or "unknown",
+            customer_id=None,  # EC:E24 -- customer_ref is a provider id, not a local customer
             reference_id=event.payment_ref or event.id,
             reason="no matching payment for external refund event",
         )
@@ -215,9 +223,12 @@ async def on_external_refund(input: OnExternalRefundInput) -> Refund:
             if e.reference.payment_id == payment.id and e.source == "refund"
         )
         unit_price = weighted_avg_unit_price(grants)
+        share = payment_share_credits(amount_minor, currency, payment.amount, total_granted)
         raw_credits = (
             pending_credits
             if pending
+            else share
+            if share is not None
             else credits_for_amount(amount_minor, unit_price)
         )
         balance = await ledger.balance(

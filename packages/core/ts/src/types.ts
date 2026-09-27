@@ -244,6 +244,9 @@ export interface Payment {
    *  never undefined: py dataclasses always render the key and the two must serialize alike. */
   cashReceipt: CashReceiptRef | null;
   raw?: unknown;
+  /** EC:E24 — other refs the provider uses for this same payment (Stripe invoice ↔ PaymentIntent ↔ charge).
+   *  Set by provider adapters on fetched payments; the webhook records them as aliases. Not stored on the row. */
+  providerRefAliases?: string[];
 }
 
 export interface PaymentFailure {

@@ -31,9 +31,11 @@ from boilpayment_core import (
     Policy,
     Repo,
     Subscription,
+    record_payment_ref_aliases,
 )
 
 from .correlation import with_correlation_id
+from .payment_ref import localize_payment_event
 from .process import Handler, HandlerCtx, HandlerMap
 from .refund import authoritative_refund_event
 
@@ -192,9 +194,8 @@ def default_handlers(
         payments = await repo.payments.list(provider_ref=provider_ref)
         if not payments:
             await mark_unknown_provider_ref("payment", provider_ref, ctx.provider.name)
-        provider_payment = await ctx.provider.get_payment(
-            provider_ref
-        )  # re-fetch for verification (EC:E3)
+        provider_payment = await ctx.provider.get_payment(provider_ref)  # re-fetch for verification (EC:E3)
+        await record_payment_ref_aliases(repo, payments[0], provider_payment.provider_ref_aliases or [], clock.now())  # EC:E24
         return dataclasses.replace(
             payments[0],
             status=provider_payment.status,
@@ -227,22 +228,13 @@ def default_handlers(
         raced = await repo.payments.list(provider_ref=payment_ref)
         if raced:
             return raced[0]
-        return await repo.payments.put(
-            Payment(
-                id=ids.new_id(),
-                customer_id=sub.customer_id,
-                provider=ctx.provider.name,
-                provider_ref=payment_ref,
-                subscription_id=sub.id,
-                amount=remote.amount,
-                status=remote.status,
-                kind="subscription",
-                period=remote.period,
-                occurred_at=remote.occurred_at,
-                failure=remote.failure,
-                cash_receipt=None,
-            )
-        )
+        recorded = await repo.payments.put(Payment(
+            id=ids.new_id(), customer_id=sub.customer_id, provider=ctx.provider.name, provider_ref=payment_ref,
+            subscription_id=sub.id, amount=remote.amount, status=remote.status, kind="subscription",
+            period=remote.period, occurred_at=remote.occurred_at, failure=remote.failure, cash_receipt=None,
+        ))
+        await record_payment_ref_aliases(repo, recorded, remote.provider_ref_aliases or [], clock.now())  # EC:E24
+        return recorded
 
     async def maybe_issue_cash_receipt(payment: Payment, provider: Any) -> None:
         """EC:K2 K4 K6 K7 -- auto-issue a cash receipt. Never rolls back a payment that succeeded.
@@ -462,8 +454,9 @@ def default_handlers(
     async def on_refund_created(ctx: HandlerCtx) -> None:
         # EC:L5 -- see on_payment_succeeded above.
         if refund is not None:
+            event = await localize_payment_event(ctx, await authoritative_refund_event(ctx, notifier), "refund", repo, clock, notifier)
             await refund.on_external_refund(
-                event=await authoritative_refund_event(ctx, notifier),
+                event=event,
                 ledger=with_correlation_id(ledger, ctx.correlation_id),
                 repo=repo,
                 cs=cs,
@@ -473,7 +466,7 @@ def default_handlers(
         # EC:L5 -- see on_payment_succeeded above.
         if cs is not None:
             await cs.dispute(
-                event=ctx.event,
+                event=await localize_payment_event(ctx, ctx.event, "dispute", repo, clock, notifier),
                 policy=policy,
                 ledger=with_correlation_id(ledger, ctx.correlation_id),
                 repo=repo,

@@ -411,6 +411,9 @@ class Payment:
     # EC:K2-K7 -- set once a cash receipt is issued for this payment (KR only).
     cash_receipt: CashReceiptRef | None = None
     raw: Any = None
+    # EC:E24 -- other refs the provider uses for this same payment (Stripe invoice <-> PaymentIntent
+    # <-> charge). Set by adapters on fetched payments; recorded as aliases by the webhook. Not stored.
+    provider_ref_aliases: list[str] | None = None
 
 
 Pool = Literal["paid", "promo", "trial"]

@@ -1,5 +1,5 @@
 // spec/cs.pseudo.md — EC:B11 D9
-import { Clock, CsCase, IdGen, LedgerStore, NormalizedEvent, Notifier, Policy, Repo } from 'boilpayment-core';
+import { Clock, CsCase, IdGen, LedgerStore, NormalizedEvent, Notifier, PaymentKitError, Policy, Repo } from 'boilpayment-core';
 import { escalate, OnCaseEvent, openCase, resolve } from './cases.js';
 import { LicenseReporter } from './metrics.js';
 
@@ -106,7 +106,9 @@ export async function dispute(input: DisputeInput): Promise<CsCase> {
   if (event.type === 'dispute.opened') {
     const payments = event.paymentRef ? await repo.payments.list({ providerRef: event.paymentRef }) : [];
     const payment = payments[0] ?? null;
-    const customerId = payment?.customerId ?? event.customerRef ?? 'unknown';
+    // EC:E24 — the local customer: the payment's, else the one holding this provider customer ref.
+    const customerId = payment?.customerId ?? await localCustomerId(repo, event);
+    if (!customerId) throw new PaymentKitError('dispute names no local payment or customer', 'unmatched_dispute');
     const csCase = await openCase({ customerId, kind: 'dispute', referenceId: event.paymentRef ?? event.id, policy, repo, clock, ids, onCaseEvent });
 
     const onOpen = policy.dispute.onOpen;
@@ -124,7 +126,9 @@ export async function dispute(input: DisputeInput): Promise<CsCase> {
   if (event.type === 'dispute.closed') {
     const referenceId = event.paymentRef ?? event.id;
     const existing = await repo.csCases.list({ kind: 'dispute', referenceId });
-    const csCase = existing[0] ?? await openCase({ customerId: event.customerRef ?? 'unknown', kind: 'dispute', referenceId, policy, repo, clock, ids, onCaseEvent });
+    const closedCustomer = existing[0] ? null : await localCustomerId(repo, event);
+    if (!existing[0] && !closedCustomer) throw new PaymentKitError('dispute names no local payment or customer', 'unmatched_dispute');
+    const csCase = existing[0] ?? await openCase({ customerId: closedCustomer!, kind: 'dispute', referenceId, policy, repo, clock, ids, onCaseEvent });
 
     // D9 — outcome isn't a first-class NormalizedEvent field (provider-specific); read it from
     // event.raw.outcome ('won' | 'lost'). Documented contract gap — see final report.
@@ -161,4 +165,17 @@ export async function dispute(input: DisputeInput): Promise<CsCase> {
   }
 
   throw new Error(`cs.dispute: unsupported event type '${event.type}'`);
+}
+
+/** EC:E24 — the local customer for a provider event: via the disputed payment, else the provider customer ref. */
+async function localCustomerId(repo: DisputeInput['repo'], event: DisputeInput['event']): Promise<string | null> {
+  if (event.paymentRef) {
+    const [p] = await repo.payments.list({ providerRef: event.paymentRef });
+    if (p) return p.customerId;
+  }
+  if (!event.customerRef) return null;
+  const match = (await repo.customers.list()).find((c) => c.providerRefs.some((r) => r.provider === event.provider && r.ref === event.customerRef));
+  if (match) return match.id;
+  // A caller that already holds the local customer id may pass it as customerRef.
+  return (await repo.customers.get(event.customerRef))?.id ?? null;
 }

@@ -440,3 +440,16 @@ onExternalRefund(event):
       if refunds(payment).any(r.providerRef == refundRef and r.status != pending): return that refund
       ... 회수, 환불 행, 결제 상태
 ```
+
+## [EC:D20] 외부 환불의 회수 크레딧은 결제 대비 비율로
+
+```pseudo
+rawCredits = pending ? heldCredits
+           : (granted(payment) > 0 and payment.currency == refund.currency)
+             ? roundHalfAway(refund.amountMinor * granted(payment) / payment.amountMinor)
+             : roundHalfAway(refund.amountMinor / weightedUnitPrice(grants))
+```
+
+grant 단가는 내림된 값(1999 minor / 1000 크레딧 → 1)이라 전액 환불을 1999 크레딧으로 셌고, clamp 가 1000 으로
+줄이면서 매 환불마다 정산 불일치 케이스가 열렸다.
+

@@ -46,3 +46,33 @@ def test_ec_d18_refund_then_consume_refused() -> None:
                 (await ledger.balance("c", None, clock.now())).available)
 
     assert asyncio.run(run()) == (100, True, False, 0)
+
+
+def test_ec_d20_full_refund_of_uneven_price_revokes_all_credits_without_case() -> None:
+    """[EC:D20] 1999 minor bought 1000 credits (unit price 1, remainder 999): the refund's share of the payment decides."""
+    async def run():
+        clock = FixedClock(datetime(2026, 1, 1, tzinfo=UTC))
+        ledger, repo = InMemoryLedger(SequentialIdGen("l_"), clock), InMemoryRepo()
+        await repo.payments.put(Payment(id="pay_1", customer_id="c", provider="stripe", provider_ref="in_1", subscription_id=None,
+                                        amount=Money(amount_minor=1999, currency="USD"), status="succeeded", kind="subscription",
+                                        period=None, occurred_at=clock.now(), failure=None))
+        await ledger.append(NewLedgerEntry(customer_id="c", pool="paid", kind="grant", amount=1000, unit_price_minor=1, currency="USD",
+                                           source="subscription", reference=LedgerReference(payment_id="pay_1"),
+                                           idempotency_key="grant:s", actor="t", reason="remainder_minor:999"))
+        cases: list[str] = []
+
+        class Cs:
+            async def open_reconcile_mismatch_case(self, *, reason: str, **kwargs) -> None:
+                cases.append(reason)
+
+        out = []
+        for ref, minor in (("re_1", 1000), ("re_2", 999)):
+            event = NormalizedEvent(id=f"evt_{ref}", provider="stripe", type="refund.created", occurred_at=clock.now(), customer_ref=None,
+                                    subscription_ref=None, payment_ref="in_1", refund_ref=ref,
+                                    amount=Money(amount_minor=minor, currency="USD"), raw={})
+            r = await on_external_refund(OnExternalRefundInput(event=event, ledger=ledger, repo=repo, cs=Cs(), clock=clock,
+                                                               ids=SequentialIdGen(f"i_{ref}_")))
+            out.append(r.credits_revoked)
+        return out, cases, (await ledger.balance("c", None, clock.now())).available
+
+    assert asyncio.run(run()) == ([500, 500], [], 0)

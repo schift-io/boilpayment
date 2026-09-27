@@ -346,7 +346,20 @@ def normalize_payment_intent(pi: Any, invoice: Any | None = None) -> Payment:
         }
         if invoice is not None
         else pi,
+        provider_ref_aliases=_ref_aliases(  # EC:E24
+            [_get(invoice, "id") if invoice is not None else None, _get(pi, "invoice"), _get(pi, "latest_charge")]
+        ),
     )
+
+
+def _ref_aliases(values: list[Any]) -> list[str]:
+    """EC:E24 -- the other ids Stripe uses for one payment (invoice, PaymentIntent, charge)."""
+    out: list[str] = []
+    for v in values:
+        ref = v if isinstance(v, str) else _get(v, "id") if v is not None and not isinstance(v, (int, float, bool)) else None
+        if isinstance(ref, str) and ref and ref not in out:
+            out.append(ref)
+    return out
 
 
 # EC:F(Stripe) — normalize Invoice -> Payment (subscription kind, pure)
@@ -375,6 +388,9 @@ def normalize_invoice_as_payment(invoice: Any, pi: Any | None = None) -> Payment
                 **_invoice_subscription_metadata(invoice),
             },
         },
+        provider_ref_aliases=_ref_aliases(  # EC:E24
+            [invoice_payment_intent_ref(invoice), _get(pi, "latest_charge") if pi is not None else None]
+        ),
     )
 
 

@@ -160,7 +160,18 @@ export function normalizePaymentIntent(pi: Stripe.PaymentIntent, invoice?: Strip
     failure: failureFromLastError(pi.last_payment_error),
     cashReceipt: null,
     raw: invoice ? { ...pi, metadata: { ...pi.metadata, ...invoiceSubscriptionMetadata(invoice) } } : pi,
+    providerRefAliases: refAliases([invoice?.id, (pi as unknown as { invoice?: unknown }).invoice, pi.latest_charge]), // EC:E24
   };
+}
+
+/** EC:E24 — the other ids Stripe uses for one payment (invoice, PaymentIntent, charge), as strings. */
+function refAliases(values: unknown[]): string[] {
+  const out: string[] = [];
+  for (const v of values) {
+    const id = typeof v === 'string' ? v : v && typeof v === 'object' && typeof (v as { id?: unknown }).id === 'string' ? (v as { id: string }).id : null;
+    if (id && !out.includes(id)) out.push(id);
+  }
+  return out;
 }
 
 // EC:F(Stripe) — normalize Invoice -> Payment (subscription kind, pure)
@@ -181,6 +192,7 @@ export function normalizeInvoiceAsPayment(invoice: Stripe.Invoice, pi?: Stripe.P
     failure,
     cashReceipt: null,
     raw: { ...invoice, metadata: { ...invoice.metadata, ...invoiceSubscriptionMetadata(invoice) } },
+    providerRefAliases: refAliases([invoicePaymentIntentRef(invoice), pi?.latest_charge]), // EC:E24
   };
 }
 

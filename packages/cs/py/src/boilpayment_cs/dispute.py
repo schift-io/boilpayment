@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from boilpayment_core import (
     Clock,
@@ -14,6 +14,7 @@ from boilpayment_core import (
     NewLedgerEntry,
     NormalizedEvent,
     Notifier,
+    PaymentKitError,
     Policy,
     Repo,
 )
@@ -209,9 +210,10 @@ async def dispute(input: DisputeInput) -> CsCase:
             else []
         )
         payment = payments[0] if payments else None
-        customer_id = (
-            payment.customer_id if payment else (event.customer_ref or "unknown")
-        )
+        # EC:E24 -- the local customer: the payment's, else the one holding this provider customer ref.
+        customer_id = payment.customer_id if payment else await _local_customer_id(input.repo, event)
+        if not customer_id:
+            raise PaymentKitError("dispute names no local payment or customer", "unmatched_dispute")
         case = await open_case(
             OpenCaseInput(
                 customer_id=customer_id,
@@ -257,12 +259,15 @@ async def dispute(input: DisputeInput) -> CsCase:
         existing = await input.repo.cs_cases.list(
             kind="dispute", reference_id=reference_id
         )
+        closed_customer = None if existing else await _local_customer_id(input.repo, event)
+        if not existing and not closed_customer:
+            raise PaymentKitError("dispute names no local payment or customer", "unmatched_dispute")
         case = (
             existing[0]
             if existing
             else await open_case(
                 OpenCaseInput(
-                    customer_id=event.customer_ref or "unknown",
+                    customer_id=closed_customer or "",
                     kind="dispute",
                     reference_id=reference_id,
                     policy=input.policy,
@@ -350,3 +355,19 @@ async def dispute(input: DisputeInput) -> CsCase:
         )
 
     raise ValueError(f"cs.dispute: unsupported event type '{event.type}'")
+
+
+async def _local_customer_id(repo: Any, event: Any) -> str | None:
+    """EC:E24 -- the local customer for a provider event: via the disputed payment, else the provider customer ref."""
+    if event.payment_ref:
+        found = await repo.payments.list(provider_ref=event.payment_ref)
+        if found:
+            return found[0].customer_id
+    if not event.customer_ref:
+        return None
+    for c in await repo.customers.list():
+        if any(r.provider == event.provider and r.ref == event.customer_ref for r in c.provider_refs):
+            return c.id
+    # A caller that already holds the local customer id may pass it as customer_ref.
+    local = await repo.customers.get(event.customer_ref)
+    return local.id if local is not None else None

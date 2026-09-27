@@ -498,3 +498,26 @@ In the A45 branch the payment passed to `onRenewalPaid` carries `period = stored
 attempt row's period). The provider's copy is not used (PortOne's has none; falling back to
 `sub.currentPeriod` would grant a period that already ended, e.g. twice for a trial conversion). A
 stored row without a period is only recorded succeeded; the scheduler's attempt path completes it.
+
+## [EC:E24] 환불·분쟁 이벤트의 결제 참조를 로컬 결제로 풀기
+
+```pseudo
+onPaymentRecordedOrRefetched(payment, remote):
+   for ref in remote.providerRefAliases: operations.put("payment-ref-alias:{provider}:{ref}" -> payment.id)  # 이미 있으면 유지
+
+localizePaymentEvent(event, kind):            # kind = refund | dispute
+   if not event.paymentRef: return event
+   p = payments(providerRef = event.paymentRef) ?? alias(event.paymentRef)
+   if not p:
+      remote = provider.getPayment(event.paymentRef)            # 실패하면 null
+      p = first local payment named by remote.providerRefAliases
+      if not p and remote.customer is a local customer:        # 별칭 이전에 기록된 행
+         for c in that customer's recent payments (24): if event.paymentRef in provider.getPayment(c).aliases: p = c
+      if p: record alias(event.paymentRef -> p)
+   if p: return event with paymentRef = p.providerRef
+   notify once cs.needs_human {kind: unmatched_<kind>}; raise (record failed, retried up to maxAttempts)
+```
+
+refund·cs 는 로컬 결제의 `providerRef` 로만 찾으므로 이 단계가 먼저 돈다. 결제도 고객도 모르는 이벤트로
+`'unknown'` 고객 케이스를 열지 않는다(Postgres 에서 `cs_cases` FK 위반).
+
