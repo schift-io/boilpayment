@@ -17,7 +17,8 @@ from boilpayment_core import (
     Subscription,
     deserialize_ledger_entry,
     deserialize_subscription,
-    iso_z,
+    ledger_instant_key,
+    operation_instant_key,
     run_idempotent,
     serialize_ledger_entry,
     serialize_subscription,
@@ -113,9 +114,11 @@ async def cancel(input: CancelInput) -> CancelResult:
         raise PaymentKitError(
             "cancel.credits=keep_forever is not supported by the append-only ledger", "unsupported"
         )
-    key = input.idempotency_key or (
-        f"cancel:{input.sub.id}:{iso_z(input.sub.current_period.start)}"
+    # EC:J13 (A7-3) -- an earlier release's key for this cancel, in an older time form, is reused.
+    key, stamp = await operation_instant_key(
+        input.repo, "lifecycle.cancel", f"cancel:{input.sub.id}:", input.sub.current_period.start
     )
+    key = input.idempotency_key or key
 
     result = await run_idempotent(
         repo=input.repo,
@@ -124,7 +127,7 @@ async def cancel(input: CancelInput) -> CancelResult:
         kind="lifecycle.cancel",
         payload={
             "sub_id": input.sub.id,
-            "period_start": iso_z(input.sub.current_period.start),
+            "period_start": stamp,
         },
         serialize=_serialize,
         deserialize=_deserialize,
@@ -172,7 +175,9 @@ async def _do_cancel(input: CancelInput) -> CancelResult:
                         subscription_id=sub.id, period_start=sub.current_period.start
                     ),
                     actor="system",
-                    idempotency_key=f"revoke:cancel:{sub.id}:{iso_z(sub.current_period.start)}",
+                    idempotency_key=await ledger_instant_key(
+                        ledger, sub.customer_id, f"revoke:cancel:{sub.id}:", sub.current_period.start
+                    ),
                     shortfall="clamp_to_zero",
                 )
             )

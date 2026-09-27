@@ -17,7 +17,9 @@ from boilpayment_core import (
     Subscription,
     SubscriptionStatus,
     deserialize_subscription,
-    iso_z,
+    key_matches_instant,
+    ledger_instant_key,
+    operation_instant_key,
     run_idempotent,
     serialize_subscription,
 )
@@ -91,10 +93,10 @@ def _deserialize(v: dict) -> ReactivateResult:
 async def _restore_canceled_credits(
     *, ledger: LedgerStore, customer_id: str, sub_id: str, period_start
 ) -> RestoredCredits:
-    revoke_key = f"revoke:cancel:{sub_id}:{iso_z(period_start)}"
+    # EC:J13 (A7-3) -- the cancel may have been written by an earlier release in an older time form.
     all_entries = await ledger.entries(customer_id, pool="paid")
     revoke_entry = next(
-        (e for e in all_entries if e.idempotency_key == revoke_key), None
+        (e for e in all_entries if key_matches_instant(e.idempotency_key, f"revoke:cancel:{sub_id}:", period_start)), None
     )
     if revoke_entry is None:
         return RestoredCredits(
@@ -148,7 +150,9 @@ async def _restore_canceled_credits(
                 reference=LedgerReference(
                     subscription_id=sub_id, period_start=period_start, grant_id=grant.id
                 ),
-                idempotency_key=f"restore:reactivate:{sub_id}:{iso_z(period_start)}:{grant.id}",
+                idempotency_key=await ledger_instant_key(
+                    ledger, customer_id, f"restore:reactivate:{sub_id}:", period_start, f":{grant.id}"
+                ),
                 actor="system",
                 reason="A23 reactivate — restoring credits revoked at cancel",
                 unit_price_minor=grant.unit_price_minor,
@@ -170,7 +174,9 @@ async def _restore_canceled_credits(
                 reference=LedgerReference(
                     subscription_id=sub_id, period_start=period_start
                 ),
-                idempotency_key=f"restore:reactivate:{sub_id}:{iso_z(period_start)}:remainder",
+                idempotency_key=await ledger_instant_key(
+                    ledger, customer_id, f"restore:reactivate:{sub_id}:", period_start, ":remainder"
+                ),
                 actor="system",
                 reason="A23 reactivate — restoring credits revoked at cancel (unattributed remainder)",
                 unit_price_minor=None,
@@ -190,9 +196,9 @@ async def _restore_canceled_credits(
 # EC:J1-J5 -- wrapped in run_idempotent so a retry replays the first result instead of re-restoring.
 async def reactivate(input: ReactivateInput) -> ReactivateResult:
     sub = input.sub
-    key = input.idempotency_key or (
-        f"reactivate:{sub.id}:{iso_z(sub.current_period.start)}"
-    )
+    # EC:J13 (A7-3) -- an earlier release's key for this reactivation, in an older time form, is reused.
+    key, stamp = await operation_instant_key(input.repo, "lifecycle.reactivate", f"reactivate:{sub.id}:", sub.current_period.start)
+    key = input.idempotency_key or key
 
     result = await run_idempotent(
         repo=input.repo,
@@ -201,7 +207,7 @@ async def reactivate(input: ReactivateInput) -> ReactivateResult:
         kind="lifecycle.reactivate",
         payload={
             "sub_id": sub.id,
-            "period_start": iso_z(sub.current_period.start),
+            "period_start": stamp,
         },
         serialize=_serialize,
         deserialize=_deserialize,

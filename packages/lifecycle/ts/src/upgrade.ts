@@ -20,6 +20,7 @@ import {
 import { prorationFraction, scaleMinor } from 'boilpayment-core';
 import { nextPeriod, prorationRatio } from './period.js';
 import { priceForSubscription, requirePriceForSubscription, resolvePriceRef, scopeProvider } from './internal.js';
+import { chargeUpgradeDelta } from './upgrade-charge.js';
 
 export interface UpgradeInput {
   sub: Subscription;
@@ -102,12 +103,10 @@ export async function upgrade(input: UpgradeInput): Promise<UpgradeResult> {
           // EC:J5 — deterministic (not clock.now()-derived): a retry of this same upgrade operation
           // must reuse the same provider-side charge idempotency key.
           const chargeKey = `charge:upgrade:${sub.id}:${newPlan.id}:${sub.currentPeriod.start.toISOString()}`;
-          const payment = await scopedProvider.chargeBillingKey({
-            billingKey: sub.billingKey,
+          // EC:A57 — a valid provider orderId; an earlier release's raw-key order is looked up first.
+          const payment = await chargeUpgradeDelta({
+            provider: scopedProvider, repo, sub, opKey: key, chargeKey, legacyOrderIds: [chargeKey],
             amount: { amountMinor: proratedMoneyDelta, currency: newPrice.currency },
-            orderId: chargeKey,
-            customerRef: sub.customerId,
-            idempotencyKey: chargeKey,
           });
           if (payment.status !== 'succeeded') {
             throw new PaymentKitError('upgrade charge did not succeed', 'upgrade_charge_failed', { payment });

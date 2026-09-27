@@ -17,7 +17,8 @@ from boilpayment_core import (
     Subscription,
     deserialize_ledger_entry,
     deserialize_subscription,
-    iso_z,
+    ledger_instant_key,
+    operation_instant_key,
     run_idempotent,
     serialize_ledger_entry,
     serialize_subscription,
@@ -89,9 +90,11 @@ def _deserialize(v: dict) -> DowngradeResult:
 # EC:A3 A4 — downgrade, optionally clawing back the credit surplus immediately.
 # EC:J1-J5 — wrapped in run_idempotent so a retry replays the first result instead of re-clawing-back.
 async def downgrade(input: DowngradeInput) -> DowngradeResult:
-    key = input.idempotency_key or (
-        f"downgrade:{input.sub.id}:{input.new_plan.id}:{iso_z(input.sub.current_period.start)}"
+    # EC:J13 (A7-3) -- an earlier release's key for this downgrade, in an older time form, is reused.
+    key, stamp = await operation_instant_key(
+        input.repo, "lifecycle.downgrade", f"downgrade:{input.sub.id}:{input.new_plan.id}:", input.sub.current_period.start
     )
+    key = input.idempotency_key or key
 
     result = await run_idempotent(
         repo=input.repo,
@@ -101,7 +104,7 @@ async def downgrade(input: DowngradeInput) -> DowngradeResult:
         payload={
             "sub_id": input.sub.id,
             "new_plan_id": input.new_plan.id,
-            "period_start": iso_z(input.sub.current_period.start),
+            "period_start": stamp,
         },
         serialize=_serialize,
         deserialize=_deserialize,
@@ -148,8 +151,8 @@ async def _do_downgrade(input: DowngradeInput) -> DowngradeResult:
     if policy.downgrade.mode == "immediate_clawback":
         delta = old_plan.credits_per_period - new_plan.credits_per_period
         if delta > 0:
-            idempotency_key = (
-                f"revoke:downgrade:{sub.id}:{iso_z(sub.current_period.start)}"
+            idempotency_key = await ledger_instant_key(
+                ledger, sub.customer_id, f"revoke:downgrade:{sub.id}:", sub.current_period.start
             )
             clawback_result = await clawback(
                 ClawbackInput(

@@ -3,6 +3,10 @@
 // of the database session time zone. `keyMatchesInstant` also recognises keys written before this
 // rule (Python `datetime.isoformat()` forms such as `+09:00` / `+00:00`), so an upgrade never
 // grants a second time for a period granted under an old key.
+//
+// EC:J13 — only Python ever wrote the older forms, so only Python looks every date-bearing key up in
+// any form before writing it (ledger_instant_key / operation_instant_key). TypeScript has always
+// written `isoZ` keys and has nothing to look up.
 
 export function isoZ(date: Date): string {
   return date.toISOString();

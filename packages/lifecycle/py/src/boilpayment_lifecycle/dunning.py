@@ -23,6 +23,7 @@ from boilpayment_core import (
     Repo,
     Subscription,
     key_matches_instant,
+    ledger_instant_key,
 )
 from boilpayment_credits import (
     GrantForPeriodInput,
@@ -199,6 +200,10 @@ async def on_grace_expired(input: OnGraceExpiredInput) -> OnGraceExpiredResult:
             )
             remaining = max(0, grant.amount + used)
             if remaining > 0:
+                # EC:J13 (A7-3) -- an earlier release's key in an older time form is reused.
+                revoke_key = await ledger_instant_key(
+                    ledger, sub.customer_id, f"revoke:dunning:{sub.id}:", sub.current_period.start
+                )
                 result = await ledger.append(
                     NewLedgerEntry(
                         customer_id=sub.customer_id,
@@ -214,7 +219,7 @@ async def on_grace_expired(input: OnGraceExpiredInput) -> OnGraceExpiredResult:
                             period_start=sub.current_period.start,
                             grant_id=grant.id,
                         ),
-                        idempotency_key=f"revoke:dunning:{sub.id}:{iso_z(sub.current_period.start)}",
+                        idempotency_key=revoke_key,
                         actor="system",
                         reason="grace_expired_unpaid",
                     )
@@ -234,7 +239,10 @@ async def on_grace_expired(input: OnGraceExpiredInput) -> OnGraceExpiredResult:
                     expires_at=None,
                     source="subscription",
                     reference=LedgerReference(subscription_id=sub.id),
-                    idempotency_key=f"revoke:dunning-all:{sub.id}:{iso_z(sub.current_period.start)}",
+                    # EC:J13 (A7-3) -- an earlier release's key in an older time form is reused.
+                    idempotency_key=await ledger_instant_key(
+                        ledger, sub.customer_id, f"revoke:dunning-all:{sub.id}:", sub.current_period.start
+                    ),
                     actor="system",
                     reason="grace_expired_unpaid_all",
                 )

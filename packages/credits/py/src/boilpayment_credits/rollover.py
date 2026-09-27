@@ -13,7 +13,7 @@ from boilpayment_core import (
     Period,
     Policy,
     Subscription,
-    iso_z,
+    ledger_instant_key,
 )
 
 
@@ -120,7 +120,8 @@ async def rollover_on_renewal(input: RolloverInput) -> RolloverResult:
                 reference=LedgerReference(
                     subscription_id=sub.id, period_start=new_period.start
                 ),
-                idempotency_key=f"rollover:{sub.id}:{iso_z(new_period.start)}",
+                # EC:J13 (A7-3) -- an earlier release's key in an older time form is reused.
+                idempotency_key=await ledger_instant_key(ledger, sub.customer_id, f"rollover:{sub.id}:", new_period.start),
                 actor="system",
                 reason=None,
             )

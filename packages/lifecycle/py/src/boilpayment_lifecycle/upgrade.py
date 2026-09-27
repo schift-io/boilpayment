@@ -23,6 +23,8 @@ from boilpayment_core import (
     deserialize_ledger_entry,
     deserialize_subscription,
     iso_z,
+    ledger_instant_key,
+    operation_instant_key,
     proration_fraction,
     run_idempotent,
     scale_minor,
@@ -37,6 +39,7 @@ from .internal import (
     scope_provider,
 )
 from .period import next_period, proration_ratio
+from .upgrade_charge import charge_upgrade_delta
 
 
 @dataclass(kw_only=True, slots=True)
@@ -85,9 +88,12 @@ def _deserialize(v: dict) -> UpgradeResult:
 # run_idempotent so a retry after a partial failure replays the first result instead of
 # re-charging/re-granting. See spec/lifecycle.pseudo.md [EC:A1 A2 A8] "멱등성" note.
 async def upgrade(input: UpgradeInput) -> UpgradeResult:
-    key = input.idempotency_key or (
-        f"upgrade:{input.sub.id}:{input.new_plan.id}:{iso_z(input.sub.current_period.start)}"
+    # EC:J13 (A7-3) -- an earlier release's key for this upgrade, in an older time form, is reused, and so
+    # is the time text its charge key carried.
+    key, stamp = await operation_instant_key(
+        input.repo, "lifecycle.upgrade", f"upgrade:{input.sub.id}:{input.new_plan.id}:", input.sub.current_period.start
     )
+    key = input.idempotency_key or key
 
     result = await run_idempotent(
         repo=input.repo,
@@ -97,16 +103,16 @@ async def upgrade(input: UpgradeInput) -> UpgradeResult:
         payload={
             "sub_id": input.sub.id,
             "new_plan_id": input.new_plan.id,
-            "period_start": iso_z(input.sub.current_period.start),
+            "period_start": stamp,
         },
         serialize=_serialize,
         deserialize=_deserialize,
-        fn=lambda: _do_upgrade(input),
+        fn=lambda: _do_upgrade(input, key, stamp),
     )
     return result.result
 
 
-async def _do_upgrade(input: UpgradeInput) -> UpgradeResult:
+async def _do_upgrade(input: UpgradeInput, op_key: str, stamp: str) -> UpgradeResult:
     sub, new_plan, policy, provider, ledger, repo, clock = (
         input.sub,
         input.new_plan,
@@ -173,14 +179,12 @@ async def _do_upgrade(input: UpgradeInput) -> UpgradeResult:
             # EC:J5 — deterministic (not clock.now()-derived): a retry of this same upgrade
             # operation must reuse the same provider-side charge idempotency key.
             charge_key = f"charge:upgrade:{sub.id}:{new_plan.id}:{iso_z(sub.current_period.start)}"
-            payment = await scoped_provider.charge_billing_key(
-                billing_key=sub.billing_key,
-                amount=Money(
-                    amount_minor=prorated_money_delta, currency=new_price.currency
-                ),
-                order_id=charge_key,
-                customer_ref=sub.customer_id,
-                idempotency_key=charge_key,
+            # EC:A57 -- a valid provider orderId; an earlier release's raw-key order (in its own time
+            # form, A7-3) is looked up first.
+            payment = await charge_upgrade_delta(
+                provider=scoped_provider, repo=repo, sub=sub, op_key=op_key, charge_key=charge_key,
+                legacy_order_ids=[charge_key, f"charge:upgrade:{sub.id}:{new_plan.id}:{stamp}"],
+                amount=Money(amount_minor=prorated_money_delta, currency=new_price.currency),
             )
             if payment.status != "succeeded":
                 raise PaymentKitError(
@@ -218,7 +222,9 @@ async def _do_upgrade(input: UpgradeInput) -> UpgradeResult:
     if delta > 0:
         # EC:J5 — deterministic ledger idempotency key (sub + target plan + *original* period
         # start, not clock.now()); see docs/EDGE_CASES.md §J J5.
-        idempotency_key = f"grant:upgrade:{sub.id}:{new_plan.id}:{iso_z(sub.current_period.start)}"
+        idempotency_key = await ledger_instant_key(
+            ledger, sub.customer_id, f"grant:upgrade:{sub.id}:{new_plan.id}:", sub.current_period.start
+        )
         expires_at = None if policy.credits.rollover == "full" else current_period.end
         result = await ledger.append(
             NewLedgerEntry(

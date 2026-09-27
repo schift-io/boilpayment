@@ -51,6 +51,7 @@ from boilpayment_lifecycle import (
     scheduler,
     trial,
     upgrade,
+    upgrade_charge,
 )
 
 __all__ = [
@@ -101,4 +102,5 @@ __all__ = [
     "scheduler",
     "trial",
     "upgrade",
+    "upgrade_charge",
 ]

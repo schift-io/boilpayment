@@ -22,6 +22,8 @@ from .idempotent import (  # noqa: F401
 )
 from .keys import iso_z as iso_z
 from .keys import key_matches_instant as key_matches_instant
+from .keys import ledger_instant_key as ledger_instant_key
+from .keys import operation_instant_key as operation_instant_key
 from .logger import (  # noqa: F401
     BaseLogger,
     CollectingLogger,
