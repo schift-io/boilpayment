@@ -132,3 +132,10 @@ mock-produced `Transaction.Paid` webhook flows through the real `webhook.receive
 never carries a `subscriptionRef` — it has no native subscription concept — so this path always
 goes through `credits.topup`, never `lifecycle.onRenewalPaid`; that's a real contract fact, not a
 simplification made for the mock.)
+
+## Stripe renewals (`tools/mocks/stripe-renewals/server.mjs`)
+
+`stripe-mock` answers every call with a fixed fixture, so it cannot hold one invoice's state across
+its payment, a dashboard refund and a dispute. This mock keeps invoices, subscriptions and payment
+intents (with an expanded `latest_charge`) that a test sets with `POST /__set`, and `POST /v1/refunds`
+moves the charge's `amount_refunded`. Used by `apps/cli/test/generated-native-postgres.test.ts`.
