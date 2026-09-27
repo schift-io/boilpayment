@@ -177,8 +177,8 @@ export function generateIndexPy(config: PaykitConfig): string {
     l.push('');
   }
   l.push(`    class _CsDeps:`);
-  l.push(`        async def dispute(self, *, event: Any, policy: Any, ledger: Any, repo: Any, notifier: Any) -> Any:`);
-  l.push(`            return await dispute(DisputeInput(event=event, policy=policy, ledger=ledger, repo=repo, notifier=notifier, clock=clock, ids=ids, reporter=license_reporter))`);
+  l.push(`        async def dispute(self, *, event: Any, policy: Any, ledger: Any, repo: Any, notifier: Any, provider: Any = None) -> Any:`);
+  l.push(`            return await dispute(DisputeInput(event=event, policy=policy, ledger=ledger, repo=repo, notifier=notifier, clock=clock, ids=ids, reporter=license_reporter, provider=provider))`);
   l.push('');
 
   if (hasCredits) {
@@ -209,6 +209,27 @@ export function generateIndexPy(config: PaykitConfig): string {
     l.push(`            raise ValueError(f"provider not configured: {sub.provider}")`);
     l.push(`        return await lifecycle_upgrade(UpgradeInput(policy=policy, ledger=ledger, repo=repo, clock=clock, ids=ids, provider=provider, **kwargs))`);
     l.push('');
+    if (hasSelfScheduler) {
+      l.push(`    async def start_subscription(*, provider: str | None = None, **kwargs: Any):`);
+      l.push(`        """EC:A65 — start a ${selfSchedulingProviders.join('/')} subscription from a billing key (INTEGRATION.md §2)."""`);
+      l.push(`        prov = providers.get(provider or "${selfSchedulingProviders[0]}")`);
+      l.push(`        if prov is None:`);
+      l.push(`            raise ValueError(f"provider not configured: {provider}")`);
+      l.push(`        return await lifecycle_start_subscription(StartSubscriptionInput(provider=prov, policy=policy, ledger=ledger, repo=repo, clock=clock, notifier=notifier, **kwargs))`);
+      l.push('');
+      l.push(`    async def resolve_held_attempt(*, payment_id: str, decision: str, actor: str, note: str | None = None):`);
+      l.push(`        """EC:A53 A58 — decide a renewal attempt held for review: settle, void or close."""`);
+      l.push(`        row = await repo.payments.get(payment_id)`);
+      l.push(`        prov = providers.get(row.provider) if row is not None else None`);
+      l.push(`        if prov is None:`);
+      l.push(`            raise PaymentKitError("payment is not an attempt held for review", "attempt_not_held", {"payment_id": payment_id})`);
+      l.push(`        return await lifecycle_resolve_held_attempt(payment_id=payment_id, decision=decision, actor=actor, note=note, provider=prov, policy=policy, ledger=ledger, repo=repo, clock=clock, notifier=notifier)  # type: ignore[arg-type]`);
+      l.push('');
+      l.push(`    async def resume_parked(*, subscription_id: str, actor: str):`);
+      l.push(`        """EC:A54 — resume a subscription parked by missed_periods: 'needs_human_only'."""`);
+      l.push(`        return await lifecycle_resume_parked(subscription_id=subscription_id, actor=actor, policy=policy, repo=repo, clock=clock, notifier=notifier)`);
+      l.push('');
+    }
     l.push(`    async def downgrade(**kwargs: Any):`);
     l.push(`        """EC:A3 A4 J1-J5 — downgrade, optionally clawing back the credit surplus immediately (per policy)."""`);
     l.push(`        sub = kwargs["sub"]`);
@@ -242,8 +263,15 @@ export function generateIndexPy(config: PaykitConfig): string {
       l.push(`        return max(subs, key=lambda s: s.created_at) if subs else None`);
       l.push('');
     }
+    l.push(`    async def assert_customer_can_spend(customer_id: str) -> None:`);
+    l.push(`        """EC:A66 — a customer frozen by an open dispute, or banned after losing one, spends nothing."""`);
+    l.push(`        customer = await repo.customers.get(customer_id)`);
+    l.push(`        if customer is not None and customer.status != "active":`);
+    l.push(`            raise PaymentKitError(f"customer {customer_id} is {customer.status}", f"customer_{customer.status}")`);
+    l.push('');
     l.push(`    async def consume(**kwargs: Any):`);
     l.push(`        """EC:B3 B4 B5 B14 — atomic consume against the ledger."""`);
+    l.push(`        await assert_customer_can_spend(kwargs["customer_id"])`);
     if (hasSubscription) {
       l.push(`        # EC:C11 — an unpaid subscription (paused, incomplete) spends nothing; canceled/expired keep bought credits.`);
       l.push(`        sub = await current_subscription(kwargs["customer_id"])`);
@@ -412,6 +440,11 @@ export function generateIndexPy(config: PaykitConfig): string {
     l.push(`        "downgrade": downgrade,`);
     l.push(`        "cancel": cancel,`);
     l.push(`        "reactivate": reactivate,`);
+    if (hasSelfScheduler) {
+      l.push(`        "start_subscription": start_subscription,`);
+      l.push(`        "resolve_held_attempt": resolve_held_attempt,`);
+      l.push(`        "resume_parked": resume_parked,`);
+    }
   }
   l.push(`        "refund": refund,`);
   l.push(`        "support": support,`);

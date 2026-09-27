@@ -212,6 +212,20 @@ export async function missedPeriodsPrecheck(sp: SchemaPostgres, url: string): Pr
       lines.push(pc.yellow(`사람 확인을 기다리는 갱신 청구 ${held.length}건 (EC:A50, lifecycle.resolveHeldAttempt 로 정리, EC:A53):`));
       lines.push(...held.map((r) => `  ${String(r.id)}  구독 ${String(r.subscription_id)}  ${iso(r.occurred_at)}`));
     }
+    // EC:A69 (round-8 A8-1) — an older release still running writes its renewal grant keys in its own
+    // time form (0.1.0 Python: '+09:00'); two releases at once can charge one renewal twice.
+    const stale = await pool.query(
+      `select customer_id, idempotency_key, created_at from ledger_entries
+       where kind = 'grant' and source = 'subscription' and idempotency_key like 'grant:%'
+         and idempotency_key !~ 'T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$'
+         and created_at > (select max(applied_at) from paykit_migrations)
+       order by created_at desc limit 20`,
+    );
+    if (stale.rows.length > 0) {
+      lines.push(pc.red(`마지막 마이그레이션 뒤에 옛 형식 키로 지급된 갱신 ${stale.rows.length}건 — 옛 버전 워커가 아직 돌고 있습니다 (EC:A69):`));
+      lines.push(...stale.rows.map((r) => `  ${String(r.customer_id)}  ${String(r.idempotency_key)}  ${iso(r.created_at)}`));
+      lines.push('  옛 워커를 모두 내리세요. 두 버전이 함께 돌면 같은 갱신을 두 번 청구할 수 있습니다.');
+    }
     return lines;
   } catch (err) {
     return [pc.yellow(`밀린 구독 점검을 건너뜀: ${(err as Error).message}`)];

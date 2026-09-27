@@ -97,7 +97,7 @@ describe('EC:F upgrade on a self-scheduling (Toss-shaped) provider', () => {
     const sub = mkSub({ id: 'sub_toss_1', customerId: 'cust_toss_1', provider: 'toss', providerRef: 'toss_sub_1', billingKey: 'bk_toss_1' });
     await repo.subscriptions.put(sub);
     const provider = new FakeSelfSchedulingProvider();
-    const policy = resolvePolicy();
+    const policy = resolvePolicy({ upgrade: { mode: 'immediate_prorate_keep_anchor' } });
 
     const res = await upgrade({ sub, newPlan: planB, policy, provider, ledger, repo, clock, ids });
     expect(res.creditDelta).toBe(200);
@@ -106,6 +106,22 @@ describe('EC:F upgrade on a self-scheduling (Toss-shaped) provider', () => {
     expect(provider.lastCharge?.currency).toBe('USD');
     const bal = await ledger.balance('cust_toss_1', undefined, clock.now());
     expect(bal.available).toBe(200); // only the upgrade credit delta itself (no prior period grant in this test)
+  });
+
+  it('[EC:A59] reset_anchor charges the new price less the unused share of the old one (3000 - ceil(1000*16/31) = 2483) and grants 300 - floor(100*16/31) = 249 credits', async () => {
+    const { clock, ledger, repo, ids } = await setup();
+    const sub = mkSub({ id: 'sub_toss_r', customerId: 'cust_toss_r', provider: 'toss', providerRef: null, billingKey: 'bk_toss_r' });
+    await repo.subscriptions.put(sub);
+    const provider = new FakeSelfSchedulingProvider();
+
+    const res = await upgrade({ sub, newPlan: planB, policy: resolvePolicy(), provider, ledger, repo, clock, ids });
+    expect(provider.lastCharge?.amountMinor).toBe(2483);
+    expect(res.creditDelta).toBe(249);
+    expect(res.sub.currentPeriod.start).toEqual(clock.now());
+    // EC:A62 — the charge has a local row and the credits it bought point at it.
+    const rows = await repo.payments.list({ subscriptionId: sub.id } as never);
+    expect(rows.map((r) => [r.status, r.amount.amountMinor, r.period])).toEqual([['succeeded', 2483, null]]);
+    expect(res.grant?.reference.paymentId).toBe(rows[0]!.id);
   });
 
   it('throws billing_key_required when the subscription has no billing key', async () => {
@@ -170,7 +186,7 @@ describe('[EC:J7] self-scheduled upgrade proration is exact', () => {
     const sub = mkSub({ provider: 'toss', providerRef: null, billingKey: 'bk', currentPeriod: { start: new Date(now.getTime() - 21.3 * DAY), end: new Date(now.getTime() + 8.7 * DAY) } });
     await repo.subscriptions.put(sub);
     const provider = new FakeSelfSchedulingProvider();
-    await upgrade({ sub, newPlan: b, policy: resolvePolicy({ proration: { denominator: 'fixed_30' } }), provider, ledger, repo, clock, ids });
+    await upgrade({ sub, newPlan: b, policy: resolvePolicy({ proration: { denominator: 'fixed_30' }, upgrade: { mode: 'immediate_prorate_keep_anchor' } }), provider, ledger, repo, clock, ids });
     expect(provider.lastCharge?.amountMinor).toBe(29);
   });
 });

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta, timezone
 
 from boilpayment_core import (
     Clock,
@@ -22,6 +23,7 @@ from boilpayment_core import (
     Subscription,
     deserialize_ledger_entry,
     deserialize_subscription,
+    hash_payload,
     iso_z,
     ledger_instant_key,
     operation_instant_key,
@@ -32,6 +34,7 @@ from boilpayment_core import (
     serialize_subscription,
 )
 
+from .charge_attempt import with_attempt_lease
 from .internal import (
     replace_sub,
     require_price_for_subscription,
@@ -87,34 +90,113 @@ def _deserialize(v: dict) -> UpgradeResult:
 # EC:J1-J5 — the whole operation (provider calls + grant + subscription update) is wrapped in
 # run_idempotent so a retry after a partial failure replays the first result instead of
 # re-charging/re-granting. See spec/lifecycle.pseudo.md [EC:A1 A2 A8] "멱등성" note.
+# EC:A61 — the change is decided against the stored row, under a per-subscription lease taken before any
+# charge: two upgrades at once (pro and max) cannot both charge, and a stale snapshot is refused.
 async def upgrade(input: UpgradeInput) -> UpgradeResult:
     # EC:J13 (A7-3) -- an earlier release's key for this upgrade, in an older time form, is reused, and so
     # is the time text its charge key carried.
     key, stamp = await operation_instant_key(
         input.repo, "lifecycle.upgrade", f"upgrade:{input.sub.id}:{input.new_plan.id}:", input.sub.current_period.start
     )
-    key = input.idempotency_key or key
+    if input.idempotency_key:
+        key = input.idempotency_key
+        # EC:A63 (A8-6) -- a caller key an earlier release started hashed the period start in its own time form.
+        stamp = await _caller_key_stamp(input, key, stamp)
+
+    async def run() -> UpgradeResult:
+        held, value = await with_attempt_lease(
+            input.repo, input.clock, f"upgrade:{input.sub.id}", lambda: _do_upgrade(input, stamp)
+        )
+        if not held:
+            raise PaymentKitError(
+                "another change of this subscription is in progress", "subscription_change_in_flight",
+                {"subscription_id": input.sub.id},
+            )
+        return value
 
     result = await run_idempotent(
         repo=input.repo,
         clock=input.clock,
         key=key,
         kind="lifecycle.upgrade",
-        payload={
-            "sub_id": input.sub.id,
-            "new_plan_id": input.new_plan.id,
-            "period_start": stamp,
-        },
+        payload=_payload(input, stamp),
         serialize=_serialize,
         deserialize=_deserialize,
-        fn=lambda: _do_upgrade(input, key, stamp),
+        fn=run,
     )
     return result.result
 
 
-async def _do_upgrade(input: UpgradeInput, op_key: str, stamp: str) -> UpgradeResult:
-    sub, new_plan, policy, provider, ledger, repo, clock = (
-        input.sub,
+def _payload(input: UpgradeInput, stamp: str) -> dict:
+    return {"sub_id": input.sub.id, "new_plan_id": input.new_plan.id, "period_start": stamp}
+
+
+def _instant_forms(at: datetime) -> list[str]:
+    """Every text an earlier release could have written for ``at``: iso_z, and isoformat() in any UTC offset
+    (the database session's time zone decided it)."""
+    forms = [iso_z(at)]
+    for minutes in range(-12 * 60, 14 * 60 + 1, 15):
+        forms.append(at.astimezone(timezone(timedelta(minutes=minutes))).isoformat())
+    return forms
+
+
+async def _caller_key_stamp(input: UpgradeInput, key: str, stamp: str) -> str:
+    existing = await input.repo.operations.get(key)
+    if existing is None or existing.payload_hash == hash_payload(_payload(input, stamp)):
+        return stamp
+    for form in _instant_forms(input.sub.current_period.start):
+        if existing.payload_hash == hash_payload(_payload(input, form)):
+            return form
+    return stamp
+
+
+# EC:A61 C11 -- the states an upgrade applies to; anything else is refused before any charge.
+_UPGRADABLE = ("active", "trialing")
+
+
+async def read_for_change(repo: Repo, sub: Subscription, target_plan_id: str) -> Subscription | None:
+    """EC:A61 -- the stored row this change applies to, checked before any charge. None when the change is
+    already applied (a retry after it was written, or the same change from another request)."""
+    stored = await repo.subscriptions.get(sub.id)
+    if stored is None:
+        raise PaymentKitError(f"subscription not found: {sub.id}", "subscription_not_found")
+    if stored.plan_id == target_plan_id and stored.scheduled_plan_id is None and sub.plan_id != target_plan_id:
+        return None
+    if (stored.version or 0) != (sub.version or 0):
+        raise PaymentKitError(
+            "the subscription changed since it was read; read it again and retry", "subscription_changed",
+            {"subscription_id": sub.id, "read_version": sub.version, "stored_version": stored.version,
+             "stored_plan_id": stored.plan_id},
+        )
+    if stored.status not in _UPGRADABLE:
+        raise PaymentKitError(
+            f"a {stored.status} subscription cannot change plan", "subscription_inactive",
+            {"subscription_id": sub.id, "status": stored.status},
+        )
+    return stored
+
+
+async def apply_change(repo: Repo, read: Subscription, change) -> Subscription:  # type: ignore[no-untyped-def]
+    """EC:A61 -- write a change that already charged: a concurrent writer bumping the version must not
+    leave the money without the plan. The change is re-applied to the row as it is now."""
+    base = read
+    for attempt in range(5):
+        nxt = change(base)
+        try:
+            await repo.subscriptions.put(nxt)
+            return nxt
+        except PaymentKitError as err:
+            if err.code != "subscription_version_conflict" or attempt >= 4:
+                raise
+            fresh = await repo.subscriptions.get(read.id)
+            if fresh is None:
+                raise
+            base = fresh
+    raise AssertionError("unreachable")
+
+
+async def _do_upgrade(input: UpgradeInput, stamp: str) -> UpgradeResult:
+    new_plan, policy, provider, ledger, repo, clock = (
         input.new_plan,
         input.policy,
         input.provider,
@@ -122,6 +204,12 @@ async def _do_upgrade(input: UpgradeInput, op_key: str, stamp: str) -> UpgradeRe
         input.repo,
         input.clock,
     )
+    read = await read_for_change(repo, input.sub, new_plan.id)
+    if read is None:
+        current = await repo.subscriptions.get(input.sub.id)
+        assert current is not None
+        return UpgradeResult(sub=current, grant=None, credit_delta=0)
+    sub = read
 
     old_plan = await repo.plans.get(sub.plan_id)
     if old_plan is None:
@@ -142,6 +230,10 @@ async def _do_upgrade(input: UpgradeInput, op_key: str, stamp: str) -> UpgradeRe
 
     reset_anchor = effective_mode == "immediate_prorate_reset_anchor"
     now = clock.now()
+    native = provider.capabilities().native_subscriptions
+    # EC:J7 -- exact integer proration: the unused share of the old period.
+    num, den = proration_fraction(sub.current_period, now, policy.proration.denominator)
+    payment = None
 
     # EC:F — Toss/PortOne (self-scheduling) don't track subscription state on their side:
     # get_subscription/change_subscription/cancel_subscription all raise PaymentKitError('unsupported').
@@ -149,7 +241,7 @@ async def _do_upgrade(input: UpgradeInput, op_key: str, stamp: str) -> UpgradeRe
     # via the billing key (change_subscription would otherwise have triggered the provider's own
     # proration invoice).
     scoped_provider = scope_provider(provider, input.correlation_id)
-    if provider.capabilities().native_subscriptions:
+    if native:
         if sub.provider_ref is None:
             raise PaymentKitError("native subscription mutation requires its provider reference", "subscription_provider_ref_required")
         price_ref = resolve_price_ref(new_plan, sub.provider, sub.currency)
@@ -169,22 +261,24 @@ async def _do_upgrade(input: UpgradeInput, op_key: str, stamp: str) -> UpgradeRe
         # EC:A33 -- a missing old price is refused, not read as 0 (the whole new price as the delta).
         old_price = require_price_for_subscription(old_plan, sub)
         new_price = require_price_for_subscription(new_plan, sub)
-        price_delta_minor = (new_price.amount_minor if new_price else 0) - (
-            old_price.amount_minor if old_price else 0
-        )
-        # EC:J7 -- exact integer proration (a float ratio can land one minor unit short).
-        num, den = proration_fraction(sub.current_period, now, policy.proration.denominator)
-        prorated_money_delta = scale_minor(price_delta_minor, num, den, "floor")
-        if prorated_money_delta > 0 and new_price is not None:
+        # EC:A59 -- reset_anchor starts a whole new period now: it costs the new price less the unused share
+        # of the old one (what Stripe's billing_cycle_anchor=now charges). keep_anchor charges the price
+        # difference for the rest of the current period.
+        if reset_anchor:
+            money = new_price.amount_minor - scale_minor(old_price.amount_minor, num, den, "ceil")
+        else:
+            money = scale_minor(new_price.amount_minor - old_price.amount_minor, num, den, "floor")
+        if money > 0:
             # EC:J5 — deterministic (not clock.now()-derived): a retry of this same upgrade
             # operation must reuse the same provider-side charge idempotency key.
             charge_key = f"charge:upgrade:{sub.id}:{new_plan.id}:{iso_z(sub.current_period.start)}"
-            # EC:A57 -- a valid provider orderId; an earlier release's raw-key order (in its own time
-            # form, A7-3) is looked up first.
+            # EC:A57 A62 -- a valid provider orderId and a local payment row; an earlier release's raw-key
+            # order (in its own time form, A7-3/A8-6) is looked up first.
             payment = await charge_upgrade_delta(
-                provider=scoped_provider, repo=repo, sub=sub, op_key=op_key, charge_key=charge_key,
-                legacy_order_ids=[charge_key, f"charge:upgrade:{sub.id}:{new_plan.id}:{stamp}"],
-                amount=Money(amount_minor=prorated_money_delta, currency=new_price.currency),
+                provider=scoped_provider, repo=repo, clock=clock, sub=sub, plan_id=new_plan.id, charge_key=charge_key,
+                legacy_order_ids=[charge_key, f"charge:upgrade:{sub.id}:{new_plan.id}:{stamp}",
+                                  f"charge:upgrade:{sub.id}:{new_plan.id}:{sub.current_period.start.astimezone(UTC).isoformat()}"],
+                amount=Money(amount_minor=money, currency=new_price.currency),
             )
             if payment.status != "succeeded":
                 raise PaymentKitError(
@@ -211,8 +305,12 @@ async def _do_upgrade(input: UpgradeInput, op_key: str, stamp: str) -> UpgradeRe
         )
 
     # EC:A2 — credit delta, computed against the *original* (pre-upgrade) period's remaining ratio.
+    # EC:A59 -- a self-scheduled reset_anchor upgrade bought a whole new period less the old period's unused
+    # share, so it grants the new plan's credits less the old plan's unused share (either credit_delta).
     full_delta = new_plan.credits_per_period - old_plan.credits_per_period
-    if policy.upgrade.credit_delta == "full_delta":
+    if reset_anchor and not native:
+        delta = new_plan.credits_per_period - scale_minor(old_plan.credits_per_period, num, den, "floor")
+    elif policy.upgrade.credit_delta == "full_delta":
         delta = full_delta
     else:
         ratio = proration_ratio(sub.current_period, now, policy.proration.denominator)
@@ -236,8 +334,10 @@ async def _do_upgrade(input: UpgradeInput, op_key: str, stamp: str) -> UpgradeRe
                 currency=None,
                 expires_at=expires_at,
                 source="subscription",
+                # EC:A62 -- the credits a refund of the upgrade charge takes back (EC:D20) are the ones it bought.
                 reference=LedgerReference(
-                    subscription_id=sub.id, period_start=current_period.start
+                    subscription_id=sub.id, period_start=current_period.start,
+                    payment_id=payment.id if payment is not None else None,
                 ),
                 idempotency_key=idempotency_key,
                 actor="system",
@@ -246,13 +346,10 @@ async def _do_upgrade(input: UpgradeInput, op_key: str, stamp: str) -> UpgradeRe
         )
         grant = result.entry
 
-    updated = replace_sub(
-        sub,
-        plan_id=new_plan.id,
-        current_period=current_period,
-        anchor_day=anchor_day,
-        scheduled_plan_id=None,
-    )
-    await repo.subscriptions.put(updated)
+    def change(base: Subscription) -> Subscription:
+        if reset_anchor:
+            return replace_sub(base, plan_id=new_plan.id, scheduled_plan_id=None, current_period=current_period, anchor_day=anchor_day)
+        return replace_sub(base, plan_id=new_plan.id, scheduled_plan_id=None)
 
+    updated = await apply_change(repo, sub, change)
     return UpgradeResult(sub=updated, grant=grant, credit_delta=delta)

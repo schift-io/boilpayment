@@ -124,6 +124,13 @@ async def _do_downgrade(input: DowngradeInput) -> DowngradeResult:
         input.repo,
     )
 
+    # EC:A61 C11 -- an ended or unpaid subscription does not change plan.
+    stored = await repo.subscriptions.get(sub.id)
+    if stored is not None and stored.status not in ("active", "trialing"):
+        raise PaymentKitError(
+            f"a {stored.status} subscription cannot change plan", "subscription_inactive",
+            {"subscription_id": sub.id, "status": stored.status},
+        )
     old_plan = await repo.plans.get(sub.plan_id)
     if old_plan is None:
         raise PaymentKitError(f"plan not found: {sub.plan_id}", "plan_not_found")

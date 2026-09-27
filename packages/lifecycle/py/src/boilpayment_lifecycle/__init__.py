@@ -38,6 +38,12 @@ from .renewal import (  # noqa: F401
     on_renewal_paid,
 )
 from .retry import retry_on_version_conflict  # noqa: F401
+from .start import (  # noqa: F401  EC:A65
+    StartSubscriptionInput,
+    StartSubscriptionResult,
+    start_subscription,
+    started_subscription_id,
+)
 from .trial import (  # noqa: F401
     ConvertTrialInput,
     ConvertTrialResult,

@@ -54,6 +54,10 @@ const MOVED_MONEY = new Set(['succeeded', 'partially_refunded', 'disputed', 'pen
  */
 export async function resolveHeldAttempt(input: ResolveHeldAttemptInput): Promise<ResolveHeldAttemptResult> {
   const { paymentId, repo, clock } = input;
+  // I-2 — the provider is asked about the order before `void`; a missing one is a clear error, not a TypeError.
+  if (!input.provider || typeof input.provider.capabilities !== 'function') {
+    throw new PaymentKitError('resolveHeldAttempt needs the provider of this attempt', 'provider_required', { paymentId });
+  }
   const first = await repo.payments.get(paymentId);
   if (!first || first.status !== 'pending' || !isUnderReview(first)) {
     throw new PaymentKitError('payment is not an attempt held for review', 'attempt_not_held', { paymentId });

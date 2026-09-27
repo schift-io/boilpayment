@@ -18,11 +18,17 @@ credit 이동(grant/rollover/clawback)은 이 패키지가 아니라 `boilpaymen
 
 ---
 
-## [EC:A1 A2 A8] upgrade — 중간 주기 업그레이드
+## [EC:A1 A2 A8 A59 A60 A61 A62] upgrade — 중간 주기 업그레이드
 
 ```pseudo
 input: { sub, newPlan, policy, provider, ledger, repo, clock, ids }
 steps:
+  0. EC:A61 — 구독 단위 리스('upgrade:<sub.id>') 안에서 실행. 못 잡으면 throw 'subscription_change_in_flight'.
+     stored = repo.subscriptions.get(sub.id)
+       stored.planId == newPlan.id (그리고 호출자 스냅숏은 옛 플랜) -> 청구 없이 { sub: stored, grant: null, creditDelta: 0 }
+       stored.version != sub.version -> throw 'subscription_changed' (다시 읽고 재시도)
+       stored.status ∉ {active, trialing} -> throw 'subscription_inactive'
+     이하 sub = stored
   1. oldPlan = repo.plans.get(sub.planId)  — 없으면 에러
   2. EC:A8 — intervalChanged = oldPlan.interval != newPlan.interval
      effectiveMode = intervalChanged and policy.intervalChange.mode == 'next_period'
@@ -43,14 +49,15 @@ steps:
                 "차액 즉시 청구" 를 우리가 직접 한다:
                   sub.billingKey 없으면 -> throw PaymentKitError('billing_key_required')
                   oldPrice = oldPlan.prices[0], newPrice = newPlan.prices[0]  (대표 price 1개, 계약 변경 제안 #4)
-                  priceDeltaMinor = newPrice.amountMinor - oldPrice.amountMinor
-                  moneyRatio = core.prorationRatio(sub.currentPeriod, now, policy.proration.denominator)
-                  proratedMoneyDelta = floor(priceDeltaMinor * moneyRatio)
-                  proratedMoneyDelta > 0 이면:
-                    chargeKey = "charge:upgrade:{sub.id}:{now.toISOString()}"
-                    payment = provider.chargeBillingKey({ billingKey: sub.billingKey,
-                      amount: {amountMinor: proratedMoneyDelta, currency: newPrice.currency},
-                      orderId: chargeKey, customerRef: sub.customerId, idempotencyKey: chargeKey })
+                  r = core.prorationFraction(sub.currentPeriod, now, policy.proration.denominator)  # 옛 기간 남은 비율
+                  EC:A59 — money = reset_anchor
+                                 ? newPrice.amountMinor - ceil(oldPrice.amountMinor * r)   # 새 기간 통째 − 옛 기간 미사용분
+                                 : floor((newPrice.amountMinor - oldPrice.amountMinor) * r) # keep_anchor: 남은 기간의 가격 차
+                  money > 0 이면:
+                    chargeKey = "charge:upgrade:{sub.id}:{newPlan.id}:{sub.currentPeriod.start ISO}"
+                    EC:A57 A62 — payment = chargeUpgradeDelta(...): 행(pay_up_<hash>, kind subscription, period null)을 먼저 쓰고,
+                      결제사에 orderId(ord_<40hex>)·옛 원시 키를 먼저 조회한 뒤, 없을 때만 chargeBillingKey({ billingKey,
+                      amount, orderId, customerRef: EC:A60 billingCustomerRef(sub), idempotencyKey: orderId })
                     payment.status != 'succeeded' 이면 -> throw PaymentKitError('upgrade_charge_failed')
      reset_anchor:
        anchorDay = now 의 UTC 일자 (EC:G3 — UTC 저장 원칙. 비-UTC tz civil day 는 core 내부 전용이라
@@ -61,7 +68,8 @@ steps:
        currentPeriod = newPeriod   # {start: now, end: computed}
      keep_anchor:
        currentPeriod = sub.currentPeriod (불변), anchorDay 불변
-  6. EC:A2 — creditDelta:
+  6. EC:A59 — 자체 청구 + reset_anchor: delta = newPlan.creditsPerPeriod - floor(oldPlan.creditsPerPeriod * r) (creditDelta 무관)
+     그 밖에는 EC:A2 — creditDelta:
        fullDelta = newPlan.creditsPerPeriod - oldPlan.creditsPerPeriod
        policy.upgrade.creditDelta == 'full_delta'     -> delta = fullDelta
        policy.upgrade.creditDelta == 'prorated_delta' -> delta = floor(fullDelta *
@@ -73,7 +81,8 @@ steps:
          reference:{subscriptionId, periodStart: currentPeriod.start}, idempotencyKey,
          actor:'system', reason:"upgrade:{oldPlan.id}->{newPlan.id}" })
   8. sub' = { ...sub, planId:newPlan.id, currentPeriod, anchorDay, scheduledPlanId:null }
-     repo.subscriptions.put(sub')
+     EC:A61 — put 이 버전 충돌이면 최신 행에 같은 변경을 다시 적용(최대 5회): 청구된 돈이 플랜 없이 남지 않는다.
+     지급 reference.paymentId = payment.id (EC:A62, 환불 D20 이 이 크레딧을 회수)
 output: { sub, grant: LedgerEntry|null, creditDelta: int }
 idempotencyKey: grant:upgrade:{sub.id}:{now ISO}
 ```
@@ -827,3 +836,22 @@ resumeParked({subscriptionId, actor}):
    # the next tick renews cu.target once (at most one period behind: the ordinary renewal)
 ```
 
+
+## [EC:A65 A66] startSubscription — 빌링키로 자체 청구 구독 시작
+
+```
+input: { customerId, planId, currency, billingKey, customerRef?, requestId, provider, policy, ledger, repo, clock, notifier? }
+steps:
+  1. provider.capabilities().nativeSubscriptions -> throw 'use_checkout' (Stripe/Polar 는 체크아웃으로 시작)
+  2. plan = repo.plans.get(planId), interval 없으면 throw 'plan_not_found'
+  3. customer 없으면 만든다(providerRefs=[{provider, ref: customerRef ?? customerId}]); active 가 아니면 throw 'customer_<status>' (EC:A66)
+  4. id = 'sub_' + sha256("start:{customerId}:{requestId}")[:24]
+     있으면: planId·billingKey 가 다르면 throw 'idempotency_key_reused'
+     없으면: 첫 기간 [now, nextPeriod) 로 status='incomplete', billingKey, billingCustomerRef=customerRef ?? customerId 를 쓴다
+  5. outcome = chargeAttempt(sub, price, period=sub.currentPeriod, attemptKey=renewalAttemptKey(sub, period))  # EC:A34 조회 먼저
+     succeeded -> onRenewalPaid(payment.period = sub.currentPeriod) (지급 + active), 이미 active 면 그대로 반환
+     declined  -> throw 'subscription_start_declined' (구독은 incomplete, 스케줄러가 청구하지 않음)
+     unresolved-> throw 'subscription_start_unresolved' (같은 requestId 로 다시)
+     in_flight -> throw 'subscription_start_in_flight'
+output: { sub, payment }
+```

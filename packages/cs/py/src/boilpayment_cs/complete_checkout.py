@@ -44,8 +44,17 @@ async def register_completed_checkout(input: RegisterCompletedCheckoutInput) -> 
         raise PaymentKitError(
             "checkout provider unavailable", "checkout_evidence_missing"
         )
+    # EC:A65 -- a Toss/PortOne subscription starts from a billing key (start_subscription), not a checkout payment.
+    bound = snapshot.provider in ("toss", "portone")
+    if snapshot.plan.interval is not None and bound:
+        raise PaymentKitError(
+            f"{snapshot.provider} subscriptions start with start_subscription (billing key), not a checkout payment",
+            "use_start_subscription",
+        )
     live = await provider.get_payment(input.payment_ref)
-    listed = await provider.list_payments(
+    # EC:A67 -- Toss and PortOne bind the payment to this checkout by its own order id (checked below), so
+    # the customer's payment list (which lags a fresh payment and has no customer filter on Toss) is not asked.
+    listed = [] if bound else await provider.list_payments(
         customer_ref=snapshot.customer_ref,
         since=datetime.fromisoformat(snapshot.captured_at),
     )
@@ -56,7 +65,7 @@ async def register_completed_checkout(input: RegisterCompletedCheckoutInput) -> 
         or live.status != "succeeded"
         or live.amount.amount_minor != snapshot.price.amount_minor
         or live.amount.currency != snapshot.price.currency
-        or not any(payment.provider_ref == input.payment_ref for payment in listed)
+        or (not bound and not any(payment.provider_ref == input.payment_ref for payment in listed))
         or live.customer_id not in ("", snapshot.customer_id, snapshot.customer_ref)
     ):
         raise PaymentKitError(

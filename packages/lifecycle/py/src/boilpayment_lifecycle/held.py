@@ -61,7 +61,7 @@ async def resolve_held_attempt(
     payment_id: str,
     decision: HeldDecision,
     actor: str,
-    provider: PaymentProvider,
+    provider: PaymentProvider | None = None,
     policy: Policy,
     ledger: LedgerStore,
     repo: Repo,
@@ -76,6 +76,9 @@ async def resolve_held_attempt(
     ``close``: money moved but the kit neither grants nor charges again; the subscription moves past
     the period and a person handles any refund. Raises ``attempt_not_held`` for any other row and
     ``attempt_in_flight`` while another worker holds the attempt's lease (EC:A37)."""
+    # I-2 -- the provider is asked about the order before ``void``; a missing one is a clear error.
+    if provider is None:
+        raise PaymentKitError("resolve_held_attempt needs the provider of this attempt", "provider_required", {"payment_id": payment_id})
     first = await repo.payments.get(payment_id)
     if first is None or first.status != "pending" or not is_under_review(first):
         raise _not_held(payment_id)

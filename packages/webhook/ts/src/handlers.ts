@@ -70,7 +70,7 @@ export interface RefundDeps {
   onExternalRefund(input: { event: HandlerCtx['event']; ledger: LedgerStore; repo: Repo; cs?: CsDeps | null }): Promise<unknown>;
 }
 export interface CsDeps {
-  dispute(input: { event: HandlerCtx['event']; policy: Policy; ledger: LedgerStore; repo: Repo; notifier: Notifier }): Promise<unknown>;
+  dispute(input: { event: HandlerCtx['event']; policy: Policy; ledger: LedgerStore; repo: Repo; notifier: Notifier; provider?: PaymentProvider }): Promise<unknown>;
 }
 
 // EC:K2-K7 — duck-typed against TossProvider/PortoneProvider's `issueCashReceipt` extra method
@@ -325,7 +325,7 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
     // EC:L5 — see onPaymentSucceeded above.
     if (!cs) return;
     const event = await localizePaymentEvent(ctx, ctx.event, 'dispute', repo, clock, notifier);
-    await cs.dispute({ event, policy, ledger: withCorrelationId(ledger, ctx.correlationId), repo, notifier }); // EC:B11 D9
+    await cs.dispute({ event, policy, ledger: withCorrelationId(ledger, ctx.correlationId), repo, notifier, provider: ctx.provider }); // EC:B11 D9 A66
   };
 
   const onUnknown: Handler = async () => { /* ignored, no-op */ };

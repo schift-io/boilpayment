@@ -19,6 +19,7 @@ export function extrasFunctionsPy(hasReservations: boolean, hasReports: boolean,
     if (hasSubscription) {
       l.push(`    async def _reserve(*, customer_id: str, job_id: str, amount: int, subscription_id: str | None = None):`);
       l.push(`        """EC:C10 — hold budget before long-running work starts. EC:C11 — an unentitled subscription is refused."""`);
+      l.push(`        await assert_customer_can_spend(customer_id)  # EC:A66`);
       l.push(`        sub = await repo.subscriptions.get(subscription_id) if subscription_id else await current_subscription(customer_id)`);
       l.push(`        # EC:A44 — only the customer's own subscription counts; grace blocks spending when the policy says so.`);
       l.push(`        if sub is not None and sub.customer_id != customer_id:`);
@@ -29,6 +30,7 @@ export function extrasFunctionsPy(hasReservations: boolean, hasReports: boolean,
     } else {
       l.push(`    async def _reserve(*, customer_id: str, job_id: str, amount: int):`);
       l.push(`        """EC:C10 — hold budget before long-running work starts."""`);
+      l.push(`        await assert_customer_can_spend(customer_id)  # EC:A66`);
       l.push(`        return await reserve_budget(customer_id=customer_id, job_id=job_id, amount=amount, policy=policy, ledger=ledger, clock=clock)`);
     }
     l.push('');

@@ -13,8 +13,10 @@ from boilpayment_core import (
     LedgerStore,
     NewLedgerEntry,
     NormalizedEvent,
+    Notification,
     Notifier,
     PaymentKitError,
+    PaymentProvider,
     Policy,
     Repo,
 )
@@ -48,6 +50,8 @@ class DisputeInput:
     # EC:L5 -- optional delivery-scoped id, merged into reference.correlation_id on every
     # revoke/restore entry this call writes.
     correlation_id: str | None = None
+    # EC:A66 -- the provider the event came from: a banned customer's subscriptions with it are canceled there too.
+    provider: PaymentProvider | None = None
 
 
 async def _revoke_disputed_grants(
@@ -312,6 +316,7 @@ async def dispute(input: DisputeInput) -> CsCase:
             ):
                 customer.status = "banned"
                 await input.repo.customers.put(customer)
+                await _end_banned_subscriptions(input, customer.id)
             return await resolve(
                 ResolveInput(
                     case=case,
@@ -390,3 +395,41 @@ async def _local_customer_id(repo: Any, event: Any) -> str | None:
     # A caller that already holds the local customer id may pass it as customer_ref.
     local = await repo.customers.get(event.customer_ref)
     return local.id if local is not None else None
+
+
+_LIVE = ("active", "past_due", "trialing", "paused", "incomplete")
+
+
+async def _end_banned_subscriptions(input: DisputeInput, customer_id: str) -> None:
+    """EC:A66 -- a banned customer is not billed or granted again: every live subscription ends now (the
+    scheduler never charges a canceled one). A native subscription is canceled at the provider when it is
+    the provider this event came from; otherwise, or when that call fails, a person is told to cancel it."""
+    import dataclasses
+
+    provider = input.provider
+    for listed in await input.repo.subscriptions.list(customer_id=customer_id):
+        if listed.status not in _LIVE:
+            continue
+        provider_canceled = listed.provider_ref is None  # self-scheduled: ending it here stops the charges
+        if (listed.provider_ref is not None and provider is not None and provider.name == listed.provider
+                and provider.capabilities().native_subscriptions):
+            try:
+                await provider.cancel_subscription(listed.provider_ref, at_period_end=False)
+                provider_canceled = True
+            except Exception:  # noqa: BLE001 -- a person is told below
+                provider_canceled = False
+        for attempt in range(5):
+            fresh = await input.repo.subscriptions.get(listed.id)
+            if fresh is None or fresh.status not in _LIVE:
+                break
+            try:
+                await input.repo.subscriptions.put(dataclasses.replace(fresh, status="canceled", cancel_at_period_end=False, grace_until=None))
+                break
+            except PaymentKitError as err:
+                if err.code != "subscription_version_conflict" or attempt == 4:
+                    raise
+        if not provider_canceled:
+            await input.notifier.send(Notification(type="cs.needs_human", customer_id=customer_id, payload={
+                "kind": "banned_customer_subscription", "subscriptionId": listed.id, "provider": listed.provider,
+                "providerRef": listed.provider_ref}))
+

@@ -272,6 +272,23 @@ dispute.closed with no verdict: no restore, no revoke, the customer stays as dis
                                 escalate(case, 'dispute closed without a verdict')   # cs.needs_human
 ```
 
+## [EC:A66] dispute lost + revoke_and_ban — 밴된 고객의 구독 종료
+
+```
+customer.status = 'banned' 뒤: 그 고객의 살아 있는 구독(active·past_due·trialing·paused·incomplete)마다
+  providerRef 가 있고 이벤트를 보낸 provider 가 네이티브면 provider.cancelSubscription(ref, {atPeriodEnd:false})
+  로컬 행은 status='canceled' (버전 충돌 시 다시 읽고 최대 5회)
+  결제사에서 못 끊었으면(다른 결제사·실패) cs.needs_human { kind:'banned_customer_subscription', subscriptionId, provider, providerRef }
+```
+
+## [EC:A65] [EC:A67] registerCompletedCheckout — Toss·PortOne
+
+```
+Toss·PortOne 구독 플랜 -> throw 'use_start_subscription' (빌링키로 lifecycle.startSubscription)
+Toss·PortOne 결제는 주문번호(orderId / paymentId)가 이 체크아웃과 같은지로 묶는다: listPayments 를 묻지 않는다
+  (Toss 거래 조회는 새 결제를 늦게 보이고, endDate 는 다음 초로 올린다)
+```
+
 ## [EC:B11][EC:D9] dispute
 
 ```pseudo

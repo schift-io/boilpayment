@@ -68,6 +68,13 @@ export async function onRenewalPaid(input: OnRenewalPaidInput): Promise<OnRenewa
     });
   }
 
+  // EC:A66 — a banned customer's renewal payment buys nothing (the ban ended the subscription): the
+  // record fails, so the payment stays in front of a person, who refunds it.
+  const owner = await repo.customers.get(sub.customerId);
+  if (owner?.status === 'banned') {
+    throw new PaymentKitError('customer is banned; this renewal payment is not granted', 'customer_banned', { subscriptionId: sub.id, paymentId: payment.id });
+  }
+
   const wasRecovering = sub.status === 'past_due';
 
   const plan = await repo.plans.get(sub.scheduledPlanId ?? sub.planId);

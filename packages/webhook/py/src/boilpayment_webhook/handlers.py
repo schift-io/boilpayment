@@ -28,6 +28,7 @@ from boilpayment_core import (
     Notifier,
     Payment,
     PaymentKitError,
+    PaymentProvider,
     Policy,
     Repo,
     Subscription,
@@ -116,6 +117,7 @@ class CsDeps(Protocol):
         ledger: LedgerStore,
         repo: Repo,
         notifier: Notifier,
+        provider: PaymentProvider | None = None,
     ) -> object: ...
 
 
@@ -470,7 +472,8 @@ def default_handlers(
                 ledger=with_correlation_id(ledger, ctx.correlation_id),
                 repo=repo,
                 notifier=notifier,
-            )  # EC:B11 D9
+                provider=ctx.provider,
+            )  # EC:B11 D9 A66
 
     async def on_unknown(ctx: HandlerCtx) -> None:
         pass  # ignored, no-op

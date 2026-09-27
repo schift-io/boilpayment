@@ -58,11 +58,18 @@ export async function registerCompletedCheckout(input: RegisterCompletedCheckout
   if (snapshot.customerId !== input.customerId) throw new PaymentKitError('checkout customer mismatch', 'checkout_evidence_mismatch');
   const provider = input.providers[snapshot.provider];
   if (!provider) throw new PaymentKitError('checkout provider unavailable', 'checkout_evidence_missing');
+  // EC:A65 — a Toss/PortOne subscription starts from a billing key (startSubscription), not a checkout payment.
+  const bound = snapshot.provider === 'toss' || snapshot.provider === 'portone';
+  if (snapshot.plan.interval !== null && bound) {
+    throw new PaymentKitError(`${snapshot.provider} subscriptions start with startSubscription (billing key), not a checkout payment`, 'use_start_subscription');
+  }
   const live = await provider.getPayment(input.paymentRef);
-  const listed = await provider.listPayments({ customerRef: snapshot.customerRef, since: new Date(snapshot.capturedAt) });
+  // EC:A67 — Toss and PortOne bind the payment to this checkout by its own order id (checked below), so the
+  // customer's payment list (which lags a fresh payment and has no customer filter on Toss) is not asked.
+  const listed = bound ? [] : await provider.listPayments({ customerRef: snapshot.customerRef, since: new Date(snapshot.capturedAt) });
   if (!matchesCheckoutPayment(snapshot, live.raw, input.paymentRef) || live.providerRef !== input.paymentRef || live.provider !== snapshot.provider || live.status !== 'succeeded'
     || live.amount.amountMinor !== snapshot.price.amountMinor || live.amount.currency !== snapshot.price.currency
-    || !listed.some((payment) => payment.providerRef === input.paymentRef)
+    || (!bound && !listed.some((payment) => payment.providerRef === input.paymentRef))
     || (live.customerId !== '' && live.customerId !== snapshot.customerId && live.customerId !== snapshot.customerRef)) {
     throw new PaymentKitError('provider payment does not match captured sale', 'checkout_evidence_mismatch');
   }

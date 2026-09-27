@@ -105,6 +105,15 @@ async def on_renewal_paid(input: OnRenewalPaidInput) -> OnRenewalPaidResult:
             {"subscriptionId": sub.id, "paymentId": payment.id, "status": payment.status},
         )
 
+    # EC:A66 -- a banned customer's renewal payment buys nothing (the ban ended the subscription): the
+    # record fails, so the payment stays in front of a person, who refunds it.
+    owner = await repo.customers.get(sub.customer_id)
+    if owner is not None and owner.status == "banned":
+        raise PaymentKitError(
+            "customer is banned; this renewal payment is not granted", "customer_banned",
+            {"subscription_id": sub.id, "payment_id": payment.id},
+        )
+
     was_recovering = sub.status == "past_due"
 
     plan_id = sub.scheduled_plan_id or sub.plan_id

@@ -1,5 +1,5 @@
 // spec/cs.pseudo.md — EC:B11 D9
-import { Clock, CsCase, IdGen, LedgerStore, NormalizedEvent, Notifier, PaymentKitError, Policy, Repo } from 'boilpayment-core';
+import { Clock, CsCase, IdGen, LedgerStore, NormalizedEvent, Notifier, PaymentKitError, PaymentProvider, Policy, Repo, Subscription } from 'boilpayment-core';
 import { escalate, OnCaseEvent, openCase, resolve } from './cases.js';
 import { LicenseReporter } from './metrics.js';
 
@@ -17,6 +17,8 @@ export interface DisputeInput {
   /** EC:L5 — optional delivery-scoped id, merged into `reference.correlationId` on every
    *  revoke/restore entry this call writes. */
   correlationId?: string;
+  /** EC:A66 — the provider the event came from: a banned customer's subscriptions with it are canceled there too. */
+  provider?: PaymentProvider;
 }
 
 /**
@@ -147,6 +149,7 @@ export async function dispute(input: DisputeInput): Promise<CsCase> {
       if (policy.dispute.onLost === 'revoke_and_ban' && customer) {
         customer.status = 'banned';
         await repo.customers.put(customer);
+        await endBannedSubscriptions({ repo, notifier, provider: input.provider, customerId: customer.id });
       }
       return resolve({ case: csCase, by: 'human', decision: { outcome: 'lost', revoked }, repo, clock, onCaseEvent, reporter });
     }
@@ -190,4 +193,41 @@ async function localCustomerId(repo: DisputeInput['repo'], event: DisputeInput['
   if (match) return match.id;
   // A caller that already holds the local customer id may pass it as customerRef.
   return (await repo.customers.get(event.customerRef))?.id ?? null;
+}
+
+const LIVE: ReadonlySet<Subscription['status']> = new Set(['active', 'past_due', 'trialing', 'paused', 'incomplete']);
+
+/**
+ * EC:A66 — a banned customer is not billed or granted again: every live subscription ends now (the
+ * scheduler never charges a canceled one). A native subscription is canceled at the provider when it is
+ * the provider this event came from; otherwise, or when that call fails, a person is told to cancel it.
+ */
+async function endBannedSubscriptions(opts: { repo: Repo; notifier: Notifier; provider?: PaymentProvider; customerId: string }): Promise<void> {
+  const { repo, notifier, provider, customerId } = opts;
+  for (const listed of await repo.subscriptions.list({ customerId })) {
+    if (!LIVE.has(listed.status)) continue;
+    let providerCanceled = listed.providerRef === null; // self-scheduled: ending it here stops the charges
+    if (listed.providerRef !== null && provider && provider.name === listed.provider && provider.capabilities().nativeSubscriptions) {
+      try {
+        await provider.cancelSubscription(listed.providerRef, { atPeriodEnd: false });
+        providerCanceled = true;
+      } catch {
+        providerCanceled = false;
+      }
+    }
+    for (let i = 0; i < 5; i++) {
+      const fresh = await repo.subscriptions.get(listed.id);
+      if (!fresh || !LIVE.has(fresh.status)) break;
+      try {
+        await repo.subscriptions.put({ ...fresh, status: 'canceled', cancelAtPeriodEnd: false, graceUntil: null });
+        break;
+      } catch (err) {
+        if (!(err instanceof PaymentKitError && err.code === 'subscription_version_conflict') || i === 4) throw err;
+      }
+    }
+    if (!providerCanceled) {
+      await notifier.send({ type: 'cs.needs_human', customerId, payload: {
+        kind: 'banned_customer_subscription', subscriptionId: listed.id, provider: listed.provider, providerRef: listed.providerRef } });
+    }
+  }
 }

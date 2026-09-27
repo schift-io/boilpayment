@@ -89,7 +89,7 @@ export function generateIndexTs(config: PaykitConfig): string {
       // own thin `upgrade`/`downgrade`/`cancel`/`reactivate` wrappers below (threading policy/
       // ledger/repo/clock/ids + resolving `provider` from `sub.provider`) without shadowing the
       // imported function.
-      `import { upgrade as lifecycleUpgrade, downgrade as lifecycleDowngrade, cancel as lifecycleCancel, reactivate as lifecycleReactivate, convertTrial, onRenewalPaid, dunning, retryOnVersionConflict${hasSelfScheduler ? ', scheduler' : ''} } from 'boilpayment-sdk/lifecycle';`,
+      `import { upgrade as lifecycleUpgrade, downgrade as lifecycleDowngrade, cancel as lifecycleCancel, reactivate as lifecycleReactivate, convertTrial, onRenewalPaid, dunning, retryOnVersionConflict${hasSelfScheduler ? ', scheduler, startSubscription as lifecycleStartSubscription, resolveHeldAttempt as lifecycleResolveHeldAttempt, resumeParked as lifecycleResumeParked' : ''} } from 'boilpayment-sdk/lifecycle';`,
     );
   }
   l.push(`import { evaluate as evaluateRefund, execute as executeRefund, onExternalRefund } from 'boilpayment-sdk/refund';`);
@@ -239,6 +239,27 @@ export function generateIndexTs(config: PaykitConfig): string {
     l.push(`    return lifecycleUpgrade({ ...input, provider, policy, ledger: full.ledger, repo: full.repo, clock: full.clock, ids: full.ids });`);
     l.push(`  }`);
     l.push('');
+    if (hasSelfScheduler) {
+      l.push(`  /** EC:A65 — start a ${selfSchedulingProviders.join('/')} subscription from a billing key (INTEGRATION.md §2). */`);
+      l.push(`  async function startSubscription(input: Omit<Parameters<typeof lifecycleStartSubscription>[0], 'policy' | 'ledger' | 'repo' | 'clock' | 'provider' | 'notifier'> & { provider?: ProviderName }) {`);
+      l.push(`    const { provider: name, ...rest } = input;`);
+      l.push(`    const provider = providers[name ?? '${selfSchedulingProviders[0]}'];`);
+      l.push(`    if (!provider) throw new Error(\`provider not configured: \${name}\`);`);
+      l.push(`    return lifecycleStartSubscription({ ...rest, provider, policy, ledger: full.ledger, repo: full.repo, clock: full.clock, notifier });`);
+      l.push(`  }`);
+      l.push('');
+      l.push(`  /** EC:A53 A58 — decide a renewal attempt held for review: settle, void or close (INTEGRATION.md). */`);
+      l.push(`  async function resolveHeldAttempt(input: { paymentId: string; decision: 'settle' | 'void' | 'close'; actor: string; note?: string }) {`);
+      l.push(`    const row = await full.repo.payments.get(input.paymentId);`);
+      l.push(`    const provider = row ? providers[row.provider] : undefined;`);
+      l.push(`    if (!provider) throw new PaymentKitError('payment is not an attempt held for review', 'attempt_not_held', { paymentId: input.paymentId });`);
+      l.push(`    return lifecycleResolveHeldAttempt({ ...input, provider, policy, ledger: full.ledger, repo: full.repo, clock: full.clock, notifier });`);
+      l.push(`  }`);
+      l.push('');
+      l.push(`  /** EC:A54 — resume a subscription parked by missedPeriods: 'needs_human_only'. */`);
+      l.push(`  const resumeParked = (input: { subscriptionId: string; actor: string }) => lifecycleResumeParked({ ...input, policy, repo: full.repo, clock: full.clock, notifier });`);
+      l.push('');
+    }
     l.push(`  /** EC:A3 A4 J1-J5 — downgrade, optionally clawing back the credit surplus immediately (per policy). */`);
     l.push(`  async function downgrade(input: Omit<Parameters<typeof lifecycleDowngrade>[0], 'policy' | 'ledger' | 'repo' | 'clock' | 'ids' | 'provider'> & { provider?: PaymentProvider }) {`);
     l.push(`    const provider = input.provider ?? providers[input.sub.provider];`);
@@ -269,8 +290,14 @@ export function generateIndexTs(config: PaykitConfig): string {
     l.push(`  }`);
   }
   if (hasCredits) {
+    l.push(`  /** EC:A66 — a customer frozen by an open dispute, or banned after losing one, spends nothing. */`);
+    l.push(`  async function assertCustomerCanSpend(customerId: string) {`);
+    l.push(`    const customer = await full.repo.customers.get(customerId);`);
+    l.push(`    if (customer && customer.status !== 'active') throw new PaymentKitError(\`customer \${customerId} is \${customer.status}\`, \`customer_\${customer.status}\`);`);
+    l.push(`  }`);
     l.push(`  /** EC:B3 B4 B5 B14 — atomic consume against the ledger. */`);
     l.push(`  async function consume(input: Omit<Parameters<typeof consumeCredits>[0], 'policy' | 'ledger' | 'clock'>) {`);
+    l.push(`    await assertCustomerCanSpend(input.customerId);`);
     if (hasSubscription) {
       l.push(`    // EC:C11 — an unpaid subscription (paused, incomplete) spends nothing; canceled/expired keep bought credits.`);
       l.push(`    const sub = await currentSubscription(input.customerId);`);
@@ -302,6 +329,7 @@ export function generateIndexTs(config: PaykitConfig): string {
     if (hasSubscription) {
       l.push(`    // EC:C11 — the subscription is passed so a paused/incomplete/canceled/expired one is refused.`);
       l.push(`    reserve: async (input: { customerId: string; jobId: string; amount: number; subscriptionId?: string }) => {`);
+      l.push(`      await assertCustomerCanSpend(input.customerId);`);
       l.push(`      const sub = input.subscriptionId ? await full.repo.subscriptions.get(input.subscriptionId) : await currentSubscription(input.customerId);`);
       l.push(`      // EC:A44 — only the customer's own subscription counts; grace blocks spending when the policy says so.`);
       l.push(`      if (sub && sub.customerId !== input.customerId) throw new PaymentKitError('subscription does not belong to this customer', 'subscription_not_owned');`);
@@ -309,7 +337,7 @@ export function generateIndexTs(config: PaykitConfig): string {
       l.push(`      return reserveBudget({ customerId: input.customerId, jobId: input.jobId, amount: input.amount, sub: sub ?? undefined, policy, ledger: full.ledger, clock: full.clock });`);
       l.push(`    },`);
     } else {
-      l.push(`    reserve: (input: { customerId: string; jobId: string; amount: number }) => reserveBudget({ ...input, policy, ledger: full.ledger, clock: full.clock }),`);
+      l.push(`    reserve: async (input: { customerId: string; jobId: string; amount: number }) => { await assertCustomerCanSpend(input.customerId); return reserveBudget({ ...input, policy, ledger: full.ledger, clock: full.clock }); },`);
     }
     l.push(`    commit: (input: { customerId: string; jobId: string; amount: number }) => commitReservation({ ...input, policy, ledger: full.ledger, clock: full.clock }),`);
     l.push(`    release: (input: { customerId: string; jobId: string }) => releaseReservation({ ...input, policy, ledger: full.ledger, clock: full.clock }),`);
@@ -437,7 +465,7 @@ export function generateIndexTs(config: PaykitConfig): string {
   l.push(`    }`);
   l.push(`  }`);
   l.push('');
-  l.push(`  return { handleWebhook, consume${hasUsage ? ', record, checkQuota' : ''}, checkout${hasSubscription ? ', upgrade, downgrade, cancel, reactivate' : ''}, registerCompletedCheckout, initialize, refund, support${hasReservations ? ', reservations' : ''}${hasReports ? ', reports' : ''}, cron, verifySchema: verifyDbSchema, deps: full, licenseReporter };`);
+  l.push(`  return { handleWebhook, consume${hasUsage ? ', record, checkQuota' : ''}, checkout${hasSubscription ? ', upgrade, downgrade, cancel, reactivate' : ''}${hasSelfScheduler ? ', startSubscription, resolveHeldAttempt, resumeParked' : ''}, registerCompletedCheckout, initialize, refund, support${hasReservations ? ', reservations' : ''}${hasReports ? ', reports' : ''}, cron, verifySchema: verifyDbSchema, deps: full, licenseReporter };`);
   l.push(`}`);
   l.push('');
 

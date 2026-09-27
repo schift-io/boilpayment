@@ -178,3 +178,73 @@ asyncio.run(main())
     expect(JSON.parse(pyRes.stdout.trim().split('\n').pop()!)).toEqual(expected);
   }, 120_000);
 });
+
+describe('[EC:A66] generated consume and reserve refuse a frozen or banned customer', () => {
+  it('frozen and banned customers spend nothing; an active one does (TS and Python)', async () => {
+    const config = kitchenSinkConfig();
+    config.providers = ['toss'];
+    config.models = ['subscription', 'topup'];
+    config.goods = ['credits'];
+    config.cs.enabled = false;
+    (config as { reservations?: boolean }).reservations = true;
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'paykit-frozen-'));
+    dirs.push(dir);
+    await fs.writeFile(path.join(dir, 'package.json'), JSON.stringify({ type: 'module' }));
+    await generateAll(config, dir);
+    const env = envFromExample(await fs.readFile(path.join(dir, '.env.example'), 'utf8'));
+    await fs.mkdir(path.join(dir, 'node_modules'), { recursive: true });
+    await fs.symlink(path.join(ROOT, 'packages/sdk/ts'), path.join(dir, 'node_modules/boilpayment-sdk'), 'dir');
+    const ts = `
+import { createPaymentKit } from './paykit/index.js';
+import { InMemoryRepo, InMemoryLedger, FixedClock, SequentialIdGen, NoopLogger } from 'boilpayment-sdk/core';
+import config from './paykit.config.json' with { type: 'json' };
+const clock = new FixedClock(new Date('2026-03-01T00:00:00Z'));
+const ids = new SequentialIdGen('t');
+const repo = new InMemoryRepo(); const ledger = new InMemoryLedger(ids, clock);
+const kit = createPaymentKit(config as any, { clock, ids, repo, ledger, logger: new NoopLogger(), env: ${JSON.stringify(env)} } as any);
+await ledger.append({ customerId: 'c1', pool: 'paid', kind: 'grant', amount: 100, unitPriceMinor: null, currency: null, expiresAt: null, source: 'topup', reference: {}, idempotencyKey: 'g', actor: 't', reason: null });
+const out: unknown[] = [];
+for (const status of ['frozen', 'banned', 'active']) {
+  await repo.customers.put({ id: 'c1', email: null, providerRefs: [], status, createdAt: clock.now() } as any);
+  try { await kit.consume({ customerId: 'c1', amount: 10, idempotencyKey: 'k' + status }); out.push('consumed'); } catch (e) { out.push((e as { code?: string }).code); }
+  try { await kit.reservations.reserve({ customerId: 'c1', jobId: 'j' + status, amount: 10 }); out.push('reserved'); } catch (e) { out.push((e as { code?: string }).code); }
+}
+console.log(JSON.stringify(out));
+`;
+    await fs.writeFile(path.join(dir, 'harness.ts'), ts);
+    const py = `
+import asyncio, importlib.util, json
+from datetime import datetime, timezone
+from boilpayment_core import Customer, Deps, InMemoryRepo, InMemoryLedger, FixedClock, SequentialIdGen, NoopLogger, NewLedgerEntry, LedgerReference
+spec = importlib.util.spec_from_file_location('generated', ${JSON.stringify(path.join(dir, 'paykit/index.py'))})
+mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+async def main():
+    clock = FixedClock(datetime(2026, 3, 1, tzinfo=timezone.utc)); ids = SequentialIdGen('t')
+    repo = InMemoryRepo(); ledger = InMemoryLedger(ids, clock)
+    config = json.load(open(${JSON.stringify(path.join(dir, 'paykit.config.json'))}))
+    kit = mod.create_payment_kit(config, Deps(clock=clock, ids=ids, repo=repo, ledger=ledger, logger=NoopLogger(), notifier=None, providers={}, policy=None), json.loads(${JSON.stringify(JSON.stringify(env))}))
+    await ledger.append(NewLedgerEntry(customer_id='c1', pool='paid', kind='grant', amount=100, unit_price_minor=None, currency=None, expires_at=None, source='topup', reference=LedgerReference(), idempotency_key='g', actor='t'))
+    out = []
+    for status in ('frozen', 'banned', 'active'):
+        await repo.customers.put(Customer(id='c1', email=None, provider_refs=[], status=status, created_at=clock.now()))
+        try:
+            await kit['consume'](customer_id='c1', amount=10, idempotency_key='k' + status); out.append('consumed')
+        except Exception as e:
+            out.append(getattr(e, 'code', str(e)))
+        try:
+            await kit['reservations']['reserve'](customer_id='c1', job_id='j' + status, amount=10); out.append('reserved')
+        except Exception as e:
+            out.append(getattr(e, 'code', str(e)))
+    print(json.dumps(out))
+asyncio.run(main())
+`;
+    await fs.writeFile(path.join(dir, 'harness.py'), py);
+    const tsRes = spawnSync(path.join(ROOT, 'apps/cli/node_modules/.bin/tsx'), ['harness.ts'], { cwd: dir, encoding: 'utf8' });
+    const pyRes = spawnSync(path.join(ROOT, '.venv/bin/python'), [path.join(dir, 'harness.py')], { encoding: 'utf8' });
+    expect(tsRes.status, `${tsRes.stdout}\n${tsRes.stderr}`).toBe(0);
+    expect(pyRes.status, `${pyRes.stdout}\n${pyRes.stderr}`).toBe(0);
+    const expected = ['customer_frozen', 'customer_frozen', 'customer_banned', 'customer_banned', 'consumed', 'reserved'];
+    expect(JSON.parse(tsRes.stdout.trim().split('\n').pop()!)).toEqual(expected);
+    expect(JSON.parse(pyRes.stdout.trim().split('\n').pop()!)).toEqual(expected);
+  }, 120_000);
+});

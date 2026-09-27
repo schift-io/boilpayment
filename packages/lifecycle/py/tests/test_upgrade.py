@@ -209,7 +209,7 @@ def test_ec_f_self_scheduling_upgrade_charges_prorated_money_delta():
         )
         await repo.subscriptions.put(sub)
         provider = FakeSelfSchedulingProvider()
-        policy = resolve_policy()
+        policy = resolve_policy({"upgrade": {"mode": "immediate_prorate_keep_anchor"}})
 
         res = await upgrade(
             UpgradeInput(

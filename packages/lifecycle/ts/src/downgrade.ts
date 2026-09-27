@@ -63,6 +63,11 @@ export async function downgrade(input: DowngradeInput): Promise<DowngradeResult>
     serialize: (r) => ({ sub: serializeSubscription(r.sub), clawback: serializeClawback(r.clawback) }),
     deserialize: (v: any) => ({ sub: deserializeSubscription(v.sub), clawback: deserializeClawback(v.clawback) }),
     fn: async () => {
+      // EC:A61 C11 — an ended or unpaid subscription does not change plan.
+      const stored = await repo.subscriptions.get(sub.id);
+      if (stored && stored.status !== 'active' && stored.status !== 'trialing') {
+        throw new PaymentKitError(`a ${stored.status} subscription cannot change plan`, 'subscription_inactive', { subscriptionId: sub.id, status: stored.status });
+      }
       const oldPlan = await repo.plans.get(sub.planId);
       if (!oldPlan) throw new PaymentKitError(`plan not found: ${sub.planId}`, 'plan_not_found');
 

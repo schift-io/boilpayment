@@ -20,6 +20,8 @@ from .process import accepts_kwarg
 
 @dataclass(kw_only=True, slots=True)
 class ReceiveResult:
+    """EC:A68 -- a dataclass: a web handler answers with ``result.status`` (``result["status"]`` raises)."""
+
     status: Literal[200, 400]
     event_id: str | None = None
     duplicated: bool | None = None

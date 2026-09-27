@@ -63,12 +63,18 @@ export function generateIntegrationMd(config: PaykitConfig): string {
   if (py(config)) l.push('pip install boilpayment');
   l.push('```');
   l.push('');
-  l.push('**호스트 프로젝트는 ESM 이어야 합니다** — `package.json` 에 `"type": "module"`.');
-  l.push('킷의 모든 패키지가 ESM 전용이라 CommonJS 에서 `require()` 하면');
-  l.push('`ERR_PACKAGE_PATH_NOT_EXPORTED` 가 납니다. 패키지가 깨진 게 아니라 `require` 조건이 없어서입니다.');
-  l.push('프로젝트를 통째로 옮길 수 없다면 호출부에서 동적 import 를 쓰세요:');
-  l.push('`const kit = await import(\'./paykit/index.js\');`');
+  l.push('레지스트리에 아직 없는 버전을 쓸 때는 받은 패키지 파일을 그대로 설치합니다');
+  l.push(`(${[ts(config) ? '`npm i ./boilpayment-sdk-<버전>.tgz`' : '', py(config) ? '`pip install ./boilpayment-<버전>-py3-none-any.whl`' : ''].filter(Boolean).join(', ')}).`);
+  l.push('마이그레이션 CLI 는 Node 로 돕니다(`npx boilpayment`). 설치한 SDK 와 같은 버전을 쓰세요: `npx boilpayment@<버전> migrate`.');
   l.push('');
+  if (ts(config)) {
+    l.push('**호스트 프로젝트는 ESM 이어야 합니다** — `package.json` 에 `"type": "module"`.');
+    l.push('킷의 모든 패키지가 ESM 전용이라 CommonJS 에서 `require()` 하면');
+    l.push('`ERR_PACKAGE_PATH_NOT_EXPORTED` 가 납니다. 패키지가 깨진 게 아니라 `require` 조건이 없어서입니다.');
+    l.push('프로젝트를 통째로 옮길 수 없다면 호출부에서 동적 import 를 쓰세요:');
+    l.push('`const kit = await import(\'./paykit/index.js\');`');
+    l.push('');
+  }
   l.push('그다음 순서대로:');
   l.push('');
   l.push('```bash');
@@ -113,8 +119,10 @@ export function generateIntegrationMd(config: PaykitConfig): string {
   l.push('');
   if (config.models.includes('subscription') && config.providers.some((p) => p === 'toss' || p === 'portone')) {
     // Round-6 I-2: an older worker does not follow the attempt-lease rules of the new one (EC:A48).
-    l.push('**cron·워커는 옛 버전을 모두 내린 뒤 새 버전을 띄우세요.** 옛 버전과 새 버전이 같은 갱신 청구를');
-    l.push('동시에 잡으면 청구는 한 번이지만 한쪽이 답을 못 받아 구독이 잠시 past_due 로 보일 수 있습니다.');
+    // Round-8 A8-1: 0.1.0 Python sent another idempotency key (its own time form), so two releases at once charge twice.
+    l.push('**cron·워커는 옛 버전을 모두 내린 뒤 새 버전을 띄우세요.** 두 버전이 동시에 돌면 같은 갱신을');
+    l.push('서로 다른 주문번호로 두 번 청구할 수 있습니다(0.1.0 Python 이 그렇습니다). 새 버전은 옛 버전의 청구를');
+    l.push('조회로 찾지만, 둘이 같은 순간에 청구하면 서로를 볼 수 없습니다.');
     l.push('올린 뒤 첫 `schedulerTick` 전에 `npx boilpayment check` 로 밀린 구독과 결과를 모르는 청구를 확인하세요.');
     l.push('');
     l.push('### 담당자 알림(`cs.needs_human`)이 오면');
@@ -175,10 +183,38 @@ export function generateIntegrationMd(config: PaykitConfig): string {
     l.push('3. 서버: provider 어댑터의 `confirmPayment` 를 호출합니다. **금액을 반드시 대조**하세요 —');
     l.push('   클라이언트가 보낸 금액을 그대로 믿으면 안 됩니다.');
     l.push('');
-    if (config.providers.includes('toss')) {
-      l.push('반복 결제(자동결제)를 쓸 경우 빌링키를 먼저 발급받아 구독에 저장해 두어야 합니다.');
-      l.push('그래야 아래 5번의 스케줄러가 매 주기 결제를 걸 수 있습니다.');
-      l.push('');
+    if (config.models.includes('subscription')) {
+      const self = widget.filter((p) => p === 'toss' || p === 'portone');
+      if (self.length > 0) {
+        l.push(`**${self.join(' · ')} 구독은 결제창이 아니라 빌링키로 시작합니다** (EC:A65). 결제창 결제를`);
+        l.push('`registerCompletedCheckout` 로 등록하면 `use_start_subscription` 오류가 납니다.');
+        l.push('');
+        l.push('1. 클라이언트: 카드 등록창을 띄웁니다 (Toss `requestBillingAuth({ customerKey })`, PortOne `requestIssueBillingKey`).');
+        l.push('2. 서버: 빌링키를 발급받습니다 (Toss 는 성공 콜백의 `authKey` 와 같은 `customerKey` 로 `issueBillingKey`).');
+        l.push('3. 서버: `startSubscription` 으로 첫 기간을 청구하고 구독을 엽니다. 같은 `requestId` 로 다시 불러도 한 번만 청구합니다.');
+        l.push('');
+        if (ts(config)) {
+          l.push('```ts');
+          l.push('const { sub } = await kit.startSubscription({');
+          l.push('  customerId, planId, currency: \'KRW\',');
+          l.push('  billingKey,               // 2번에서 받은 값');
+          l.push('  customerRef: customerKey, // Toss: 빌링키를 발급받은 customerKey');
+          l.push('  requestId: signupAttemptId,');
+          l.push('});');
+          l.push('```');
+          l.push('');
+        }
+        if (py(config)) {
+          l.push('```python');
+          l.push('result = await kit["start_subscription"](customer_id=customer_id, plan_id=plan_id, currency="KRW",');
+          l.push('                                         billing_key=billing_key, customer_ref=customer_key, request_id=signup_attempt_id)');
+          l.push('```');
+          l.push('');
+        }
+        l.push('첫 청구가 거절되면 `subscription_start_declined`, 결과를 모르면 `subscription_start_unresolved` 입니다.');
+        l.push('뒤의 경우 같은 `requestId` 로 다시 부르면 결제사에 먼저 물어보고 이어서 처리합니다.');
+        l.push('');
+      }
     }
   }
 
@@ -199,15 +235,31 @@ export function generateIntegrationMd(config: PaykitConfig): string {
   l.push('**서명 검증은 원본 바디(raw body)를 그대로 넘겨야 통과합니다.** 프레임워크가 JSON 으로');
   l.push('파싱한 객체를 다시 문자열로 만들면 바이트가 달라져 검증이 실패합니다.');
   l.push('');
+  const tossHook = config.providers.includes('toss');
+  if (tossHook) {
+    l.push('**Toss 웹훅은 서명이 없어 Toss 가 공개한 발신 주소에서 온 것만 받습니다** (EC:E18). 그래서 연결한');
+    l.push('소켓의 주소를 `remoteAddress` 로 넘겨야 합니다. 헤더(`X-Forwarded-For`)는 누구나 쓸 수 있어 쓰지 않습니다.');
+    l.push('Next.js 라우트 핸들러는 소켓 주소를 주지 않으므로 Toss 웹훅은 Express 같은 서버로 받으세요.');
+    l.push('');
+  }
   if (ts(config)) {
     l.push('```ts');
-    l.push('// Next.js app router — app' + webhookPath + '/route.ts');
-    l.push("export async function POST(req: Request) {");
-    l.push('  const raw = await req.text();                 // ← 파싱하지 말 것');
-    l.push('  const headers = Object.fromEntries(req.headers);');
-    l.push('  const res = await kit.handleWebhook(raw, headers);');
-    l.push('  return new Response(null, { status: res.status });');
-    l.push('}');
+    if (tossHook) {
+      l.push('// Express — raw body 로 받습니다');
+      l.push(`app.post('${webhookPath}', express.raw({ type: '*/*' }), async (req, res) => {`);
+      l.push('  const raw = req.body.toString(\'utf8\');       // ← 파싱하지 말 것');
+      l.push('  const result = await kit.handleWebhook(raw, req.headers as Record<string, string>, { remoteAddress: req.socket.remoteAddress });');
+      l.push('  res.status(result.status).end();');
+      l.push('});');
+    } else {
+      l.push('// Next.js app router — app' + webhookPath + '/route.ts');
+      l.push("export async function POST(req: Request) {");
+      l.push('  const raw = await req.text();                 // ← 파싱하지 말 것');
+      l.push('  const headers = Object.fromEntries(req.headers);');
+      l.push('  const res = await kit.handleWebhook(raw, headers);');
+      l.push('  return new Response(null, { status: res.status });');
+      l.push('}');
+    }
     l.push('```');
     l.push('');
   }
@@ -217,8 +269,8 @@ export function generateIntegrationMd(config: PaykitConfig): string {
     l.push(`@app.post("${webhookPath}")`);
     l.push('async def paykit_webhook(request: Request):');
     l.push('    raw = (await request.body()).decode()        # ← 파싱하지 말 것');
-    l.push('    res = await kit["handle_webhook"](raw, dict(request.headers))');
-    l.push('    return Response(status_code=res["status"])');
+    l.push(`    res = await kit["handle_webhook"](raw, dict(request.headers)${tossHook ? ', remote_address=request.client.host if request.client else None' : ''})`);
+    l.push('    return Response(status_code=res.status)            # ReceiveResult: 속성으로 읽습니다');
     l.push('```');
     l.push('');
   }
@@ -240,6 +292,10 @@ export function generateIntegrationMd(config: PaykitConfig): string {
     rows.push('| 다운그레이드 | `downgrade({ sub, newPlan })` |');
     rows.push('| 취소 | `cancel({ sub, churnReason })` |');
     rows.push('| 취소 철회 | `reactivate({ sub })` |');
+    if (config.providers.some((p) => p === 'toss' || p === 'portone')) {
+      rows.push('| 빌링키로 구독 시작 (EC:A65) | `startSubscription({ customerId, planId, currency, billingKey, customerRef, requestId })` |');
+      rows.push('| 검토 보류된 갱신 결정 (EC:A58) | `resolveHeldAttempt({ paymentId, decision, actor })` |');
+    }
   }
   rows.push('| 규칙에 따른 환불 | `support.requestRefund({ customerId, paymentId, requestId, requestedAmount })` |');
   if (hasCredits) rows.push('| 미지급 복구 | `support.recoverMissingGrant({ customerId, paymentId })` |');

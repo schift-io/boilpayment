@@ -64,7 +64,13 @@ export function importsPy(config: PaykitConfig): string[] {
     l.push(`    reactivate as lifecycle_reactivate,`);
     l.push(`    retry_on_version_conflict,`);
     l.push(`    upgrade as lifecycle_upgrade,`);
-    if (hasSelfScheduler) l.push(`    scheduler,`);
+    if (hasSelfScheduler) {
+      l.push(`    scheduler,`);
+      l.push(`    StartSubscriptionInput,`);
+      l.push(`    start_subscription as lifecycle_start_subscription,`);
+      l.push(`    resolve_held_attempt as lifecycle_resolve_held_attempt,`);
+      l.push(`    resume_parked as lifecycle_resume_parked,`);
+    }
     l.push(`)`);
   }
   l.push(`from boilpayment.refund import (`);

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from boilpayment_core import (
     Clock,
@@ -86,8 +86,14 @@ async def notify_expiring(input: NotifyExpiringInput) -> NotifyExpiringResult:
             dedup_id = (
                 f"credits-expiry-notice:{cid}:{iso_z(bucket.expires_at)}:{today}"
             )
-            already = await input.repo.outbox.get(dedup_id)
-            if already is not None:
+            # EC:A70 (round-8 A8-12) -- an earlier release wrote this marker with isoformat() in the
+            # database session's zone; a marker in either older form also counts as sent today.
+            forms = {
+                dedup_id,
+                f"credits-expiry-notice:{cid}:{bucket.expires_at.isoformat()}:{today}",
+                f"credits-expiry-notice:{cid}:{bucket.expires_at.astimezone(UTC).isoformat()}:{today}",
+            }
+            if any([await input.repo.outbox.get(form) is not None for form in sorted(forms)]):
                 continue
 
             marker = OutboxItem(
