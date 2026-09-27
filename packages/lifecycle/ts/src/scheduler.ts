@@ -1,5 +1,5 @@
 // spec: packages/lifecycle/spec/lifecycle.pseudo.md — EC:F (Toss/Portone self-scheduling)
-import { Clock, IdGen, NoopNotifier, Notifier, PaymentKitError, PaymentProvider, Policy, Repo, LedgerStore, Subscription } from 'boilpayment-core';
+import { Clock, IdGen, NoopNotifier, Notifier, PaymentKitError, PaymentProvider, Period, Plan, Policy, Repo, LedgerStore, Subscription } from 'boilpayment-core';
 import { onRenewalPaid } from './renewal.js';
 import { onPaymentFailed } from './dunning.js';
 import { nextPeriod } from './period.js';
@@ -7,7 +7,7 @@ import { retryOnVersionConflict } from './retry.js';
 import { priceForSubscription, renewalPlanId } from './internal.js';
 import { attemptKeyOf, attemptsFor, chargeAttempt, isLegacyAttempt, isUnderReview, markUnresolved, renewalAttemptKey } from './charge-attempt.js';
 import { checkLegacyDunning, settleLegacyEnded, settleOrphanAttempts } from './legacy-attempts.js';
-import { applyMissedPeriods, settleOpenAttemptIfBehind } from './missed-periods.js';
+import { applyMissedPeriods, catchUpPeriods, settleOpenAttemptIfBehind } from './missed-periods.js';
 
 export interface DueSubscriptionsInput {
   repo: Repo;
@@ -158,7 +158,8 @@ async function renewOne(input: SchedulerTickInput, dueSub: Subscription, notifie
       }
       if (now.status === 'failed') open = undefined;
     }
-    if (!open && !legacyOpen && sub.status !== 'active') return null; // every attempt answered: dunning owns the next charge
+    // every attempt answered: dunning owns the next charge — except EC:A56 below
+    if (!open && !legacyOpen && sub.status !== 'active' && !(await closedUnsentWhileBehind(repo, sub, plan, policy, clock.now(), chargedPeriod))) return null;
     if (!open) {
       // EC:A39 — a dunning charge of an earlier release (no row) may already have paid this period.
       const legacy = await checkLegacyDunning({ provider, repo, clock, sub, period: chargedPeriod, price, notifier });
@@ -219,4 +220,15 @@ async function renewOne(input: SchedulerTickInput, dueSub: Subscription, notifie
     }
   });
   return outcome;
+}
+
+/**
+ * EC:A56 — the subscription went past_due only because an attempt had no answer (markUnresolved: grace
+ * running, no dunning retries), the cron then stopped past that period, and the lookup has since shown
+ * the provider never received the order. Nothing else would ever charge it, so it goes through the
+ * A47 missed-period rule like an active subscription. Parked subscriptions (grace null) are excluded.
+ */
+async function closedUnsentWhileBehind(repo: Repo, sub: Subscription, plan: Plan, policy: Policy, now: Date, period: Period): Promise<boolean> {
+  if (sub.status !== 'past_due' || sub.graceUntil === null || !catchUpPeriods(sub, plan, policy, now)) return false;
+  return (await attemptsFor(repo, sub, period)).some((p) => p.status === 'failed' && p.failure?.code === 'order_not_found');
 }

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from boilpayment_core import (
     Clock,
@@ -15,6 +16,8 @@ from boilpayment_core import (
     Notifier,
     PaymentKitError,
     PaymentProvider,
+    Period,
+    Plan,
     Policy,
     Repo,
     Subscription,
@@ -38,7 +41,11 @@ from .legacy_attempts import (
     settle_legacy_ended,
     settle_orphan_attempts,
 )
-from .missed_periods import apply_missed_periods, settle_open_attempt_if_behind
+from .missed_periods import (
+    apply_missed_periods,
+    catch_up_periods,
+    settle_open_attempt_if_behind,
+)
 from .period import next_period
 from .renewal import OnRenewalPaidInput, on_renewal_paid
 from .retry import retry_on_version_conflict
@@ -199,8 +206,9 @@ async def tick(input: SchedulerTickInput) -> SchedulerTickResult:
                     return ("charged", resumed.sub)
                 if now_row.status == "failed":
                     open_row = None
-            if open_row is None and not legacy_open and sub.status != "active":
-                return None  # every attempt answered: dunning owns the next charge
+            if (open_row is None and not legacy_open and sub.status != "active"
+                    and not await _closed_unsent_while_behind(repo, sub, plan, policy, clock.now(), charged_period)):
+                return None  # every attempt answered: dunning owns the next charge (EC:A56 aside)
             if open_row is None:
                 # EC:A39 -- a dunning charge of an earlier release (no row) may already have paid this period.
                 legacy = await check_legacy_dunning(provider=provider, repo=repo, clock=clock, sub=sub, period=charged_period,
@@ -300,3 +308,12 @@ async def tick(input: SchedulerTickInput) -> SchedulerTickResult:
 
     return SchedulerTickResult(charged=charged, failed=failed, errors=errors)
 
+
+async def _closed_unsent_while_behind(repo: Repo, sub: Subscription, plan: Plan, policy: Policy, now: datetime,
+                                      period: Period) -> bool:
+    """EC:A56 -- see closedUnsentWhileBehind in scheduler.ts: past_due only through an unanswered
+    attempt (grace running), behind, and the lookup showed the order never arrived -> the A47 rule."""
+    if sub.status != "past_due" or sub.grace_until is None or catch_up_periods(sub, plan, policy, now) is None:
+        return False
+    return any(p.status == "failed" and p.failure is not None and p.failure.code == "order_not_found"
+               for p in await attempts_for(repo, sub, period))

@@ -38,6 +38,10 @@ export async function checkLegacyDunning(input: {
     i.createdAt.getTime() >= sub.currentPeriod.end.getTime());
   if (!items.length) return { kind: 'none' };
   const unverified: string[] = [];
+  let paid: Payment | null = null;
+  // EC:A55 — every key is looked up, not only the first that paid: an earlier release that lost an
+  // answer retried and may have charged twice. The first success pays the period; any later one is a
+  // second charge for the same period and a person is told (once: only when its row settles here).
   for (const item of items) {
     const attempt = Number((item.payload as { attempt?: unknown }).attempt);
     if (!Number.isInteger(attempt)) continue;
@@ -56,13 +60,23 @@ export async function checkLegacyDunning(input: {
       };
       await repo.payments.put(row);
     }
-    const settled = row.status === 'pending'
+    const wasPending = row.status === 'pending';
+    const settled = wasPending
       ? await settleAttemptByLookup({ provider, repo, clock, row, expected: input.price ?? null, notifier: input.notifier })
       : row;
     if (!settled) { unverified.push(key); continue; }
-    if (settled.status === 'succeeded') return { kind: 'paid', payment: settled };
+    if (settled.status !== 'succeeded') continue;
+    if (!paid) { paid = settled; continue; }
+    if (wasPending) await notifyDoubleCharge(input.notifier, sub, settled.id, paid.id);
   }
+  if (paid) return { kind: 'paid', payment: paid };
   return unverified.length ? { kind: 'unverified', orderIds: unverified } : { kind: 'none' };
+}
+
+/** EC:A55 — a second payment that moved money for a period another payment already bought. */
+export async function notifyDoubleCharge(notifier: Notifier | undefined, sub: Subscription, paymentId: string, firstPaymentId: string | null): Promise<void> {
+  await notifier?.send({ type: 'cs.needs_human', customerId: sub.customerId, payload: {
+    kind: 'renewal_double_charge', subscriptionId: sub.id, paymentId, firstPaymentId } });
 }
 
 /**
@@ -149,6 +163,12 @@ export async function settleOrphanAttempts(input: {
     settled.push({ subscriptionId: row.subscriptionId as string, paymentId: row.id, status: done.status });
     if (done.status === 'succeeded' && sub) {
       const result = await onRenewalPaid({ sub, payment: done, policy, ledger, repo, clock });
+      // EC:A55 — the period was already bought by another payment: this one is a second charge.
+      const other = result.duplicated ? result.grant.entry?.reference.paymentId ?? null : null;
+      if (other && other !== done.id) {
+        await notifyDoubleCharge(notifier, sub, done.id, other);
+        continue;
+      }
       if (!renewing || !result.duplicated) {
         await notifier.send({ type: 'cs.needs_human', customerId: sub.customerId, payload: {
           kind: 'renewal_settled_after_end', subscriptionId: sub.id, paymentId: done.id, status: sub.status } });

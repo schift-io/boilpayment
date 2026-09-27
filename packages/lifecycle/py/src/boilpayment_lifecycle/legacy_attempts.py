@@ -60,6 +60,8 @@ async def check_legacy_dunning(*, provider: PaymentProvider, repo: Repo, clock: 
     if not items:
         return LegacyCheck(kind="none")
     unverified: list[str] = []
+    paid: Payment | None = None
+    # EC:A55 -- every key is looked up, not only the first that paid (see legacy-attempts.ts).
     for item in items:
         try:
             attempt = int(item.payload.get("attempt"))
@@ -80,16 +82,33 @@ async def check_legacy_dunning(*, provider: PaymentProvider, repo: Repo, clock: 
                 raw={"boilpaymentAttemptKey": key, "boilpaymentLegacyOrderId": key},
             )
             await repo.payments.put(row)
+        was_pending = row.status == "pending"
         settled = (
             await settle_attempt_by_lookup(provider=provider, repo=repo, clock=clock, row=row, expected=price, notifier=notifier)
-            if row.status == "pending" else row
+            if was_pending else row
         )
         if settled is None:
             unverified.append(key)
             continue
-        if settled.status == "succeeded":
-            return LegacyCheck(kind="paid", payment=settled)
+        if settled.status != "succeeded":
+            continue
+        if paid is None:
+            paid = settled
+            continue
+        if was_pending:
+            await notify_double_charge(notifier, sub, settled.id, paid.id)
+    if paid is not None:
+        return LegacyCheck(kind="paid", payment=paid)
     return LegacyCheck(kind="unverified", order_ids=unverified) if unverified else LegacyCheck(kind="none")
+
+
+async def notify_double_charge(notifier: Notifier | None, sub: Subscription, payment_id: str, first_payment_id: str | None) -> None:
+    """EC:A55 -- a second payment that moved money for a period another payment already bought."""
+    if notifier is None:
+        return
+    await notifier.send(Notification(type="cs.needs_human", customer_id=sub.customer_id, payload={
+        "kind": "renewal_double_charge", "subscription_id": sub.id, "payment_id": payment_id,
+        "first_payment_id": first_payment_id}))
 
 
 @dataclass(kw_only=True, slots=True)
@@ -124,6 +143,12 @@ async def settle_orphan_attempts(
         settled.append(LateSettlement(subscription_id=row.subscription_id or "", payment_id=row.id, status=done.status))
         if done.status == "succeeded" and sub is not None:
             result = await on_renewal_paid(OnRenewalPaidInput(sub=sub, payment=done, policy=policy, ledger=ledger, repo=repo, clock=clock))
+            # EC:A55 -- the period was already bought by another payment: this one is a second charge.
+            entry = result.grant.entry if result.duplicated else None
+            other = entry.reference.payment_id if entry is not None else None
+            if other and other != done.id:
+                await notify_double_charge(notifier, sub, done.id, other)
+                continue
             if not renewing or not result.duplicated:
                 await notifier.send(Notification(type="cs.needs_human", customer_id=sub.customer_id, payload={
                     "kind": "renewal_settled_after_end", "subscription_id": sub.id, "payment_id": done.id, "status": sub.status}))
