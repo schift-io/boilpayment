@@ -279,10 +279,7 @@ async def dispute(input: DisputeInput) -> CsCase:
             )
         )
 
-        # D9 -- outcome isn't a first-class NormalizedEvent field (provider-specific); read it from
-        # event.raw["outcome"] ("won" | "lost"). Documented contract gap -- see final report.
-        raw = event.raw
-        outcome = raw.get("outcome") if isinstance(raw, dict) else None
+        outcome = _dispute_outcome(event)
         customer = await input.repo.customers.get(case.customer_id)
 
         disputed_payments = (
@@ -327,17 +324,28 @@ async def dispute(input: DisputeInput) -> CsCase:
                 )
             )
 
-        # EC:D9 -- won (or an unknown outcome that did not go against us): the charge stands, so give
-        # back every credit this dispute revoked and lift the freeze.
-        restored = (
-            await _restore_disputed_grants(
-                ledger=input.ledger,
-                customer_id=case.customer_id,
-                case_id=case.id,
-                correlation_id=input.correlation_id,
+        if outcome != "won":
+            # EC:D21 -- the provider closed the dispute without saying who won (PortOne, Stripe
+            # warning_closed, a caller without the field). Neither restore nor revoke on a guess:
+            # the customer stays as dispute.opened left them and a person decides.
+            return await escalate(
+                EscalateInput(
+                    case=case,
+                    repo=input.repo,
+                    clock=input.clock,
+                    notifier=input.notifier,
+                    reason="dispute closed without a verdict",
+                    on_case_event=input.on_case_event,
+                )
             )
-            if outcome == "won"
-            else 0
+
+        # EC:D9 -- won: the charge stands, so give back every credit this dispute revoked and lift
+        # the freeze.
+        restored = await _restore_disputed_grants(
+            ledger=input.ledger,
+            customer_id=case.customer_id,
+            case_id=case.id,
+            correlation_id=input.correlation_id,
         )
         if customer is not None and customer.status == "frozen":
             customer.status = "active"
@@ -346,7 +354,7 @@ async def dispute(input: DisputeInput) -> CsCase:
             ResolveInput(
                 case=case,
                 by="human",
-                decision={"outcome": outcome or "unknown", "restored": restored},
+                decision={"outcome": outcome, "restored": restored},
                 repo=input.repo,
                 clock=input.clock,
                 on_case_event=input.on_case_event,
@@ -355,6 +363,17 @@ async def dispute(input: DisputeInput) -> CsCase:
         )
 
     raise ValueError(f"cs.dispute: unsupported event type '{event.type}'")
+
+
+def _dispute_outcome(event: Any) -> str | None:
+    """EC:D21 -- the verdict of a closed dispute: the adapter's dispute_outcome, else raw["outcome"]
+    (a caller building the event by hand). Anything but won/lost is no verdict."""
+    own = getattr(event, "dispute_outcome", None)
+    if own in ("won", "lost"):
+        return own
+    raw = event.raw
+    from_raw = raw.get("outcome") if isinstance(raw, dict) else None
+    return from_raw if from_raw in ("won", "lost") else None
 
 
 async def _local_customer_id(repo: Any, event: Any) -> str | None:

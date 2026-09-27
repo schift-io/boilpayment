@@ -574,6 +574,17 @@ describe('[EC:F(Stripe)] toNormalizedEvent — field extraction per event type',
     expect(toNormalizedEvent(event).type).toBe('dispute.closed');
   });
 
+  it('[EC:D21] charge.dispute.closed carries the verdict from dispute.status: won, lost, anything else none', () => {
+    const closed = (status: string) => toNormalizedEvent({ id: `evt_${status}`, type: 'charge.dispute.closed', created: NOW,
+      data: { object: { payment_intent: 'pi_1', amount: 3000, currency: 'krw', status } } } as unknown as Stripe.Event);
+    expect(closed('won').disputeOutcome).toBe('won');
+    expect(closed('lost').disputeOutcome).toBe('lost');
+    expect(closed('warning_closed').disputeOutcome).toBeNull();
+    const opened = toNormalizedEvent({ id: 'evt_o', type: 'charge.dispute.created', created: NOW,
+      data: { object: { payment_intent: 'pi_1', amount: 3000, currency: 'krw', status: 'needs_response' } } } as unknown as Stripe.Event);
+    expect(opened.disputeOutcome).toBeUndefined();
+  });
+
   it('unhandled event type -> unknown with all refs null and raw preserved', () => {
     const event = { id: 'evt_unknown', type: 'customer.created', created: NOW, data: { object: { id: 'cus_1' } } } as unknown as Stripe.Event;
     const result = toNormalizedEvent(event);

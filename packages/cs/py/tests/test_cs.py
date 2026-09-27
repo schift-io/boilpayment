@@ -1747,3 +1747,40 @@ def test_manual_regrant_approval_can_resume_the_same_case():
         assert len(await ledger.entries(CUSTOMER_ID, kind="grant")) == 1
 
     run(go())
+
+
+def _dispute_event(eid: str, kind: str, payment_ref: str, provider: str = "stripe", raw: dict | None = None,
+                   outcome: str | None = None) -> NormalizedEvent:
+    return NormalizedEvent(id=eid, provider=provider, type=kind, occurred_at=_clock().now(), customer_ref=CUSTOMER_ID,  # type: ignore[arg-type]
+                           subscription_ref=None, payment_ref=payment_ref, amount=None, raw=raw or {}, dispute_outcome=outcome)  # type: ignore[arg-type]
+
+
+def test_d21_the_adapter_verdict_decides_lost_bans():
+    async def go():
+        clock, ids, repo = _clock(), SequentialIdGen("id_"), InMemoryRepo()
+        ledger, notifier = InMemoryLedger(ids), CollectingNotifier()
+        await _put_customer(repo, clock)
+        deps = {"policy": DEFAULT_POLICY, "ledger": ledger, "repo": repo, "notifier": notifier, "clock": clock, "ids": ids}
+        await cs_dispute(DisputeInput(event=_dispute_event("evt_d21_o", "dispute.opened", "pi_d21"), **deps))
+        closed = await cs_dispute(DisputeInput(event=_dispute_event("evt_d21_c", "dispute.closed", "pi_d21", outcome="lost"), **deps))
+        assert closed.decision["outcome"] == "lost"
+        assert (await repo.customers.get(CUSTOMER_ID)).status == "banned"
+
+    run(go())
+
+
+def test_d21_a_close_without_a_verdict_keeps_the_customer_frozen_and_asks_a_person():
+    async def go():
+        clock, ids, repo = _clock(), SequentialIdGen("id_"), InMemoryRepo()
+        ledger, notifier = InMemoryLedger(ids), CollectingNotifier()
+        await _put_customer(repo, clock)
+        deps = {"policy": DEFAULT_POLICY, "ledger": ledger, "repo": repo, "notifier": notifier, "clock": clock, "ids": ids}
+        await cs_dispute(DisputeInput(event=_dispute_event("evt_d21u_o", "dispute.opened", "pi_d21u", provider="portone"), **deps))
+        before = len(notifier.sent)
+        closed = await cs_dispute(DisputeInput(event=_dispute_event(
+            "evt_d21u_c", "dispute.closed", "pi_d21u", provider="portone", raw={"type": "Transaction.DisputeResolved"}), **deps))
+        assert closed.status == "needs_human"
+        assert (await repo.customers.get(CUSTOMER_ID)).status == "frozen"
+        assert [n.type for n in notifier.sent[before:]] == ["cs.needs_human"]
+
+    run(go())

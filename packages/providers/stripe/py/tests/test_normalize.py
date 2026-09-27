@@ -684,6 +684,17 @@ def test_to_normalized_event_dispute_closed_type():
     assert to_normalized_event(event).type == "dispute.closed"
 
 
+def test_ec_d21_dispute_closed_carries_the_verdict_from_dispute_status():
+    def closed(status: str):  # type: ignore[no-untyped-def]
+        return to_normalized_event(_evt("charge.dispute.closed", {"payment_intent": "pi_1", "amount": 3000, "currency": "krw", "status": status}))
+
+    assert closed("won").dispute_outcome == "won"
+    assert closed("lost").dispute_outcome == "lost"
+    assert closed("warning_closed").dispute_outcome is None
+    opened = to_normalized_event(_evt("charge.dispute.created", {"payment_intent": "pi_1", "amount": 3000, "currency": "krw", "status": "needs_response"}))
+    assert opened.dispute_outcome is None
+
+
 def test_to_normalized_event_unhandled_type_all_refs_none():
     event = _evt("customer.created", {"id": "cus_1"})
     result = to_normalized_event(event)

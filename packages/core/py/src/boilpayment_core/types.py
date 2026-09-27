@@ -595,6 +595,9 @@ class NormalizedEvent:
     raw: Any
     # Actual provider refund identifier, never the webhook delivery ID.
     refund_ref: str | None = None
+    # EC:D21 -- on "dispute.closed": the provider's verdict. None = the provider did not say
+    # (cs.dispute keeps the customer frozen and asks a person).
+    dispute_outcome: Literal["won", "lost"] | None = None
 
 
 WebhookEventStatus = Literal["received", "processing", "processed", "failed", "ignored"]

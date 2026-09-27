@@ -617,6 +617,7 @@ def to_normalized_event(event: Any) -> NormalizedEvent:
     subscription_ref: str | None = None
     payment_ref: str | None = None
     refund_ref: str | None = None
+    dispute_outcome: Literal["won", "lost"] | None = None
     amount: Money | None = None
 
     if t in ("invoice.paid", "invoice.payment_failed"):
@@ -673,6 +674,10 @@ def to_normalized_event(event: Any) -> NormalizedEvent:
         pi = _get(obj, "payment_intent")
         payment_ref = pi if isinstance(pi, str) else _get(pi, "id")
         amount = _money(_get(obj, "amount"), _get(obj, "currency"))
+        if t == "charge.dispute.closed":
+            # EC:D21 -- the verdict lives on the Dispute object (status won | lost | warning_closed | ...).
+            status = _get(obj, "status")
+            dispute_outcome = "won" if status == "won" else "lost" if status == "lost" else None
 
     return NormalizedEvent(
         id=_get(event, "id"),
@@ -685,6 +690,7 @@ def to_normalized_event(event: Any) -> NormalizedEvent:
         refund_ref=refund_ref,
         amount=amount,
         raw=event,
+        dispute_outcome=dispute_outcome,
     )
 
 

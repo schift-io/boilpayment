@@ -292,6 +292,28 @@ describe('cs.dispute', () => {
     expect((await repo.customers.get(customerId))!.status).toBe('active');
   });
 
+  it('[EC:D21] the adapter verdict (disputeOutcome) decides: lost revokes and bans', async () => {
+    await putCustomer();
+    await dispute({ event: { id: 'evt_d21_o', provider: 'stripe', type: 'dispute.opened', occurredAt: clock.now(), customerRef: customerId,
+      subscriptionRef: null, paymentRef: 'pi_d21', amount: null, raw: {} }, policy, ledger, repo, notifier, clock, ids });
+    const closed = await dispute({ event: { id: 'evt_d21_c', provider: 'stripe', type: 'dispute.closed', occurredAt: clock.now(), customerRef: customerId,
+      subscriptionRef: null, paymentRef: 'pi_d21', amount: null, raw: { data: { object: { status: 'lost' } } }, disputeOutcome: 'lost' }, policy, ledger, repo, notifier, clock, ids });
+    expect(closed.decision).toMatchObject({ outcome: 'lost' });
+    expect((await repo.customers.get(customerId))!.status).toBe('banned');
+  });
+
+  it('[EC:D21] a close without a verdict keeps the customer frozen and asks a person, restoring nothing', async () => {
+    await putCustomer();
+    await dispute({ event: { id: 'evt_d21u_o', provider: 'portone', type: 'dispute.opened', occurredAt: clock.now(), customerRef: customerId,
+      subscriptionRef: null, paymentRef: 'pi_d21u', amount: null, raw: {} }, policy, ledger, repo, notifier, clock, ids });
+    const sentBefore = notifier.sent.length;
+    const closed = await dispute({ event: { id: 'evt_d21u_c', provider: 'portone', type: 'dispute.closed', occurredAt: clock.now(), customerRef: customerId,
+      subscriptionRef: null, paymentRef: 'pi_d21u', amount: null, raw: { type: 'Transaction.DisputeResolved' } }, policy, ledger, repo, notifier, clock, ids });
+    expect(closed.status).toBe('needs_human');
+    expect((await repo.customers.get(customerId))!.status).toBe('frozen');
+    expect(notifier.sent.slice(sentBefore).map((n) => n.type)).toEqual(['cs.needs_human']);
+  });
+
   it('[EC:D9] won AFTER revoke_disputed_grant restores every revoked credit (audit gap #1 regression)', async () => {
     await putCustomer();
     const pol = resolvePolicy({ dispute: { onOpen: 'revoke_disputed_grant' } });

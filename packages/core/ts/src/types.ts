@@ -379,6 +379,9 @@ export interface NormalizedEvent {
   raw: unknown;
   /** Actual provider refund identifier, never the webhook delivery ID. */
   refundRef?: string | null;
+  /** EC:D21 — on `dispute.closed`: the provider's verdict. null/absent = the provider did not say
+   *  (cs.dispute keeps the customer frozen and asks a person). */
+  disputeOutcome?: 'won' | 'lost' | null;
 }
 
 export type WebhookEventStatus = 'received' | 'processing' | 'processed' | 'failed' | 'ignored';

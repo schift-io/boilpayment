@@ -90,14 +90,14 @@ const TSX = path.join(ROOT, 'apps/cli/node_modules/.bin/tsx');
 const PY = path.join(ROOT, '.venv/bin/python');
 
 /** Shared expectations: one grant per period, the refunded period revoked in full, nothing left unprocessed. */
-function expectLedger(out: any, periods: number, refundedPeriod: number) {
+function expectLedger(out: any, periods: number, refundedPeriod: number, lostDisputePeriod: number | null = null) {
   expect(out.grantsPerPeriod, JSON.stringify(out)).toEqual(Array(periods).fill(1));
   expect(out.distinctGrantKeys).toBe(periods);
-  expect(out.revokes, JSON.stringify(out)).toEqual(out.revokes.map((_: number, i: number) => (i === refundedPeriod ? -1000 : 0)));
+  expect(out.revokes, JSON.stringify(out)).toEqual(out.revokes.map((_: number, i: number) => (i === refundedPeriod || i === lostDisputePeriod ? -1000 : 0)));
   expect(out.notProcessed, JSON.stringify(out)).toEqual([]);
 }
 
-describe('generated native renewals on Postgres (Asia/Seoul sessions): refunds, disputes, redelivery', () => {
+describe('generated native renewals on Postgres (Asia/Seoul sessions): refunds, disputes opened and lost, redelivery', () => {
   const stripeTs = (dsn: string, env: Record<string, string>) => `
 import { createHmac } from 'node:crypto';
 import { createPaymentKit } from './paykit/index.js';
@@ -143,6 +143,8 @@ await deliver('refund.created', refund, 'evt_re'); await deliver('refund.created
 at('2026-04-01T01:00:00Z'); await paid(2, '2026-04-01', '2026-05-01', ['evt_2']);
 at('2026-04-04T01:00:00Z');
 await deliver('charge.dispute.created', { id: 'dp_1', object: 'dispute', amount: 1999, currency: 'usd', charge: 'ch_2', payment_intent: 'pi_2', status: 'needs_response', reason: 'fraudulent', created: Math.floor(Date.now() / 1000) }, 'evt_dp');
+at('2026-04-20T01:00:00Z'); // EC:D21 — the card network decided against the merchant
+await deliver('charge.dispute.closed', { id: 'dp_1', object: 'dispute', amount: 1999, currency: 'usd', charge: 'ch_2', payment_intent: 'pi_2', status: 'lost', reason: 'fraudulent', created: Math.floor(Date.now() / 1000) }, 'evt_dp_closed');
 const rows = await repo.payments.list({ subscriptionId: 's1' } as any);
 const entries = await ledger.entries('c1');
 const rowOf = (i: number) => rows.find((r) => r.providerRef === 'in_' + i);
@@ -159,14 +161,14 @@ console.log(JSON.stringify({
 await pool.end();
 `;
 
-  it('Stripe TS: dashboard refund of a renewal revokes its credits, a dispute freezes the customer, redelivery grants nothing more', async () => {
+  it('Stripe TS: dashboard refund of a renewal revokes its credits, a dispute freezes the customer and a lost one revokes and bans, redelivery grants nothing more', async () => {
     const { dir, env } = await generate('stripe');
     await fs.writeFile(path.join(dir, 'harness.ts'), stripeTs(seoulDb('st'), env));
     const res = await run(TSX, ['harness.ts'], dir);
     expect(res.status, `${res.stdout}\n${res.stderr}`).toBe(0);
     const out = last(res.stdout);
-    expectLedger(out, 3, 1);
-    expect(out.customer).toBe('frozen');
+    expectLedger(out, 3, 1, 2);
+    expect(out.customer).toBe('banned'); // frozen when opened, banned when lost (EC:D9 D21)
     expect(out.disputeCases).toBe(1);
   }, 120_000);
 
@@ -223,6 +225,8 @@ async def main():
     at('2026-04-01T01:00:00Z'); await paid(12, '2026-04-01', '2026-05-01', ['evt_p2'])
     at('2026-04-04T01:00:00Z')
     await deliver('charge.dispute.created', {'id': 'dp_p1', 'object': 'dispute', 'amount': 1999, 'currency': 'usd', 'charge': 'ch_12', 'payment_intent': 'pi_12', 'status': 'needs_response', 'reason': 'fraudulent', 'created': int(time.time())}, 'evt_p_dp')
+    at('2026-04-20T01:00:00Z')  # EC:D21 -- the card network decided against the merchant
+    await deliver('charge.dispute.closed', {'id': 'dp_p1', 'object': 'dispute', 'amount': 1999, 'currency': 'usd', 'charge': 'ch_12', 'payment_intent': 'pi_12', 'status': 'lost', 'reason': 'fraudulent', 'created': int(time.time())}, 'evt_p_dp_closed')
     rows = await repo.payments.list(subscription_id='s1')
     entries = await ledger.entries('c1')
     row_of = {r.provider_ref: r.id for r in rows}
@@ -246,9 +250,9 @@ asyncio.run(main())
     const res = await run(PY, [path.join(dir, 'harness.py')], dir);
     expect(res.status, `${res.stdout}\n${res.stderr}`).toBe(0);
     const out = last(res.stdout);
-    expectLedger(out, 3, 1);
+    expectLedger(out, 3, 1, 2);
     expect(out.grantKeys.every((k: string) => /T00:00:00\.000Z$/.test(k)), JSON.stringify(out.grantKeys)).toBe(true);
-    expect(out.customer).toBe('frozen');
+    expect(out.customer).toBe('banned');
     expect(out.disputeCases).toBe(1);
   }, 120_000);
 

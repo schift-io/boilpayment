@@ -130,10 +130,7 @@ export async function dispute(input: DisputeInput): Promise<CsCase> {
     if (!existing[0] && !closedCustomer) throw new PaymentKitError('dispute names no local payment or customer', 'unmatched_dispute');
     const csCase = existing[0] ?? await openCase({ customerId: closedCustomer!, kind: 'dispute', referenceId, policy, repo, clock, ids, onCaseEvent });
 
-    // D9 — outcome isn't a first-class NormalizedEvent field (provider-specific); read it from
-    // event.raw.outcome ('won' | 'lost'). Documented contract gap — see final report.
-    const raw = event.raw as { outcome?: string } | null | undefined;
-    const outcome = raw && typeof raw === 'object' ? raw.outcome : undefined;
+    const outcome = disputeOutcome(event);
     const customer = await repo.customers.get(csCase.customerId);
 
     const disputedPayments = event.paymentRef ? await repo.payments.list({ providerRef: event.paymentRef }) : [];
@@ -154,17 +151,32 @@ export async function dispute(input: DisputeInput): Promise<CsCase> {
       return resolve({ case: csCase, by: 'human', decision: { outcome: 'lost', revoked }, repo, clock, onCaseEvent, reporter });
     }
 
-    // EC:D9 — won (or an unknown outcome that did not go against us): the charge stands, so give back
-    // every credit this dispute revoked and lift the freeze.
-    const restored = outcome === 'won' ? await restoreDisputedGrants({ ledger, customerId: csCase.customerId, caseId: csCase.id, correlationId }) : 0;
+    if (outcome !== 'won') {
+      // EC:D21 — the provider closed the dispute without saying who won (PortOne, Stripe
+      // warning_closed, a caller without the field). Neither restore nor revoke on a guess: the
+      // customer stays as dispute.opened left them and a person decides.
+      return escalate({ case: csCase, repo, clock, notifier, reason: 'dispute closed without a verdict', onCaseEvent });
+    }
+
+    // EC:D9 — won: the charge stands, so give back every credit this dispute revoked and lift the freeze.
+    const restored = await restoreDisputedGrants({ ledger, customerId: csCase.customerId, caseId: csCase.id, correlationId });
     if (customer && customer.status === 'frozen') {
       customer.status = 'active';
       await repo.customers.put(customer);
     }
-    return resolve({ case: csCase, by: 'human', decision: { outcome: outcome ?? 'unknown', restored }, repo, clock, onCaseEvent, reporter });
+    return resolve({ case: csCase, by: 'human', decision: { outcome, restored }, repo, clock, onCaseEvent, reporter });
   }
 
   throw new Error(`cs.dispute: unsupported event type '${event.type}'`);
+}
+
+/** EC:D21 — the verdict of a closed dispute: the adapter's `disputeOutcome`, else `raw.outcome` (a
+ *  caller building the event by hand). Anything but won/lost is no verdict. */
+function disputeOutcome(event: NormalizedEvent): 'won' | 'lost' | null {
+  if (event.disputeOutcome === 'won' || event.disputeOutcome === 'lost') return event.disputeOutcome;
+  const raw = event.raw as { outcome?: unknown } | null | undefined;
+  const fromRaw = raw && typeof raw === 'object' ? raw.outcome : undefined;
+  return fromRaw === 'won' || fromRaw === 'lost' ? fromRaw : null;
 }
 
 /** EC:E24 — the local customer for a provider event: via the disputed payment, else the provider customer ref. */

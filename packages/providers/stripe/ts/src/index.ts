@@ -346,6 +346,7 @@ export function toNormalizedEvent(event: Stripe.Event): NormalizedEvent {
   let subscriptionRef: string | null = null;
   let paymentRef: string | null = null;
   let refundRef: string | null = null;
+  let disputeOutcome: 'won' | 'lost' | null = null;
   let amount: Money | null = null;
 
   switch (event.type) {
@@ -404,6 +405,8 @@ export function toNormalizedEvent(event: Stripe.Event): NormalizedEvent {
       const dispute = obj as unknown as Stripe.Dispute;
       paymentRef = typeof dispute.payment_intent === 'string' ? dispute.payment_intent : (dispute.payment_intent?.id ?? null);
       amount = money(dispute.amount, dispute.currency);
+      // EC:D21 — the verdict lives on the Dispute object (status won | lost | warning_closed | ...).
+      if (event.type === 'charge.dispute.closed') disputeOutcome = dispute.status === 'won' ? 'won' : dispute.status === 'lost' ? 'lost' : null;
       break;
     }
     default:
@@ -420,6 +423,7 @@ export function toNormalizedEvent(event: Stripe.Event): NormalizedEvent {
     paymentRef,
     refundRef,
     amount,
+    ...(type === 'dispute.closed' ? { disputeOutcome } : {}),
     raw: event,
   };
 }
