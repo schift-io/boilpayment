@@ -17,11 +17,11 @@ import {
 import { grantForPeriod, GrantResult } from 'boilpayment-credits';
 import { retryOnVersionConflict } from './retry.js';
 import { priceForSubscription, renewalPlanId } from './internal.js';
-import { attemptKeyOf, attemptsFor, chargeAttempt, dunningAttemptKey, isLegacyAttempt } from './charge-attempt.js';
+import { attemptKeyOf, attemptsFor, chargeAttempt, dunningAttemptKey, isLegacyAttempt, isUnderReview } from './charge-attempt.js';
 import { nextPeriod } from './period.js';
 import { onRenewalPaid } from './renewal.js';
 import { checkLegacyDunning } from './legacy-attempts.js';
-import { applyMissedPeriods } from './missed-periods.js';
+import { applyMissedPeriods, settleOpenAttemptIfBehind } from './missed-periods.js';
 
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
@@ -322,6 +322,12 @@ export async function runRetry(input: RunRetryInput): Promise<RunRetryResult> {
     let chargedPeriod = nextPeriod(sub.currentPeriod, plan.interval ?? 'month', sub.anchorDay, policy.period.timezone, policy.period.monthEndAnchor);
     let attempts = await attemptsFor(repo, sub, chargedPeriod);
     let retrying = sub;
+    const staleOpen = attempts.find((p) => p.status === 'pending' && !isLegacyAttempt(p) && !isUnderReview(p));
+    if (staleOpen) {
+      // EC:A47 (A6-4) — an open attempt for a period that already ended, more periods behind: ask first.
+      await settleOpenAttemptIfBehind({ provider, repo, clock, notifier, sub, plan, policy, open: staleOpen });
+      attempts = await attemptsFor(repo, sub, chargedPeriod);
+    }
     if (!attempts.length) {
       // EC:A39 (A5-3) — an earlier release's dunning charge for this period (no row, recorded failed)
       // may already have moved money: ask before charging again.
@@ -338,7 +344,10 @@ export async function runRetry(input: RunRetryInput): Promise<RunRetryResult> {
         await repo.outbox.put(item);
         return { outcome: 'unresolved' as const, sub, grants: [] };
       }
-      // EC:A47 — a retry never bills a period that has already ended in full (long grace, stopped cron).
+    }
+    if (!attempts.some((p) => p.status !== 'failed')) {
+      // EC:A47 — a retry never bills a period that has already ended in full (long grace, stopped cron),
+      // whether nothing was tried for it yet or every try was declined or never sent (A6-4).
       const missed = await applyMissedPeriods({ sub, plan, policy, repo, notifier, clock });
       if (missed.kind === 'parked') {
         item.status = 'sent';

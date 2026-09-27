@@ -362,12 +362,12 @@ const operationsTable = (pool: Pool): OperationTable => ({
   async claim(row: Operation): Promise<Operation | null> {
     const res = await runner(pool).query(
       `insert into operations (key, kind, payload_hash, status, result, error, created_at, completed_at, attempts)
-       values ($1,$2,$3,'in_progress',null,null,$4,null,1)
-       on conflict (key) do update set status = 'in_progress', result = null, error = null,
+       values ($1,$2,$3,'in_progress',$5::jsonb,null,$4,null,1)
+       on conflict (key) do update set status = 'in_progress', result = excluded.result, error = null,
          completed_at = null, attempts = operations.attempts + 1
        where operations.status = 'failed' and operations.payload_hash = excluded.payload_hash
        returning *`,
-      [row.key, row.kind, row.payloadHash, row.createdAt],
+      [row.key, row.kind, row.payloadHash, row.createdAt, jsonb(row.result ?? null)],
     );
     return res.rows[0] ? rowToOperation(res.rows[0]) : null;
   },

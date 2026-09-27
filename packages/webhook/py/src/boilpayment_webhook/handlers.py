@@ -34,6 +34,7 @@ from boilpayment_core import (
     record_payment_ref_aliases,
 )
 
+from .attempt_row import complete_attempt_row
 from .correlation import with_correlation_id
 from .payment_ref import localize_payment_event
 from .process import Handler, HandlerCtx, HandlerMap
@@ -348,10 +349,8 @@ def default_handlers(
                     {"payment_id": payment.id, "status": payment.status},
                 )
             stored = await repo.payments.get(payment.id)
-            if stored is not None and stored.status == "pending":
-                await repo.payments.put(dataclasses.replace(
-                    stored, status="succeeded", provider_ref=payment.provider_ref, amount=payment.amount, failure=None,
-                ))
+            if not await complete_attempt_row(repo, notifier, stored, payment):
+                return  # EC:A50 (A6-6) -- held for a person
             # EC:A51 (A5-4) -- the renewal this pays for is the stored attempt's period (see handlers.ts).
             paid_period = stored.period if stored is not None else None
             if lifecycle is not None and paid_period is not None:

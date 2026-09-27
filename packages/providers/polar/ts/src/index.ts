@@ -82,6 +82,7 @@ export function normalizeOrder(order: Record<string, any>): Payment {
     occurredAt: new Date(order.created_at),
     failure: null,
     cashReceipt: null,
+    providerRefAliases: null, // EC:E24 — one ref per payment (py renders the key: parity)
     raw: order,
   };
 }

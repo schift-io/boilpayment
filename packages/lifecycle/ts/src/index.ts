@@ -10,3 +10,4 @@ export * as scheduler from './scheduler.js';
 export * as period from './period.js';
 export * from './backfill.js';
 export { attemptPaymentId, isDecline, providerOrderId } from './charge-attempt.js';
+export * from './held.js';

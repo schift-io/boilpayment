@@ -10,7 +10,7 @@ import { FakeProvider, jsonVerify } from './helpers.js';
 
 const period2 = { start: new Date('2026-03-01T00:00:00Z'), end: new Date('2026-04-01T00:00:00Z') };
 
-function setup(remoteStatus: Payment['status'], remotePeriod: Payment['period'] | undefined = undefined) {
+function setup(remoteStatus: Payment['status'], remotePeriod: Payment['period'] | undefined = undefined, remoteAmountMinor = 5000) {
   const clock = new FixedClock(new Date('2026-03-01T00:05:00Z'));
   const repo = new InMemoryRepo();
   const ledger = new InMemoryLedger(new SequentialIdGen('led_'));
@@ -26,7 +26,7 @@ function setup(remoteStatus: Payment['status'], remotePeriod: Payment['period'] 
   };
   const provider = new FakeProvider({
     name: 'portone', verify: jsonVerify('portone'),
-    getPaymentImpl: () => ({ ...row, id: 'remote', customerId: '', subscriptionId: null, status: remoteStatus,
+    getPaymentImpl: () => ({ ...row, id: 'remote', customerId: '', subscriptionId: null, status: remoteStatus, amount: { amountMinor: remoteAmountMinor, currency: 'KRW' },
       ...(remotePeriod !== undefined ? { period: remotePeriod } : {}) }),
   });
   const renewed: string[] = [];
@@ -35,8 +35,9 @@ function setup(remoteStatus: Payment['status'], remotePeriod: Payment['period'] 
     onRenewalPaid: async (input) => { renewed.push(`${input.sub.id}:${(input.payment as Payment).period?.start.toISOString()}`); },
     dunning: { onPaymentFailed: async () => {} },
   };
+  const notifier = new CollectingNotifier();
   const handlers = defaultHandlers({
-    policy: DEFAULT_POLICY, ledger, repo, notifier: new CollectingNotifier(), clock, ids: new SequentialIdGen('p_'), lifecycle,
+    policy: DEFAULT_POLICY, ledger, repo, notifier, clock, ids: new SequentialIdGen('p_'), lifecycle,
     credits: { topup: async () => { topups.push('topup'); } } as never,
   });
   const deliver = async (id: string) => {
@@ -45,7 +46,7 @@ function setup(remoteStatus: Payment['status'], remotePeriod: Payment['period'] 
     await processWebhook({ eventId: r.eventId!, providers: { portone: provider }, handlers, repo, clock });
     return repo.webhookEvents.get(r.eventId!);
   };
-  return { repo, sub, row, renewed, topups, deliver };
+  return { repo, sub, row, renewed, topups, deliver, notifier };
 }
 
 describe('EC:A45 self-scheduled renewal webhook', () => {
@@ -89,5 +90,28 @@ describe('EC:A45 self-scheduled renewal webhook', () => {
     expect(record?.status).toBe('processed');
     expect(t.renewed).toEqual([]);
     expect((await t.repo.payments.get('pay_rn_1'))?.status).toBe('succeeded');
+  });
+
+  it('EC:A50 (A6-6) a paid event of another amount than the attempt sent holds the row for a person: nothing granted', async () => {
+    const t = setup('succeeded', undefined, 6000);
+    await t.repo.subscriptions.put(t.sub);
+    await t.repo.payments.put(t.row);
+    const record = await t.deliver('evt_paid_5');
+    expect(record?.status).toBe('processed');
+    expect(t.renewed).toEqual([]);
+    const row = await t.repo.payments.get('pay_rn_1');
+    expect(row?.status).toBe('pending');
+    expect((row?.raw as { boilpaymentReview?: { reason?: string } }).boilpaymentReview?.reason).toBe('amount_mismatch');
+    expect(t.notifier.sent.filter((n) => (n.payload as { kind?: string }).kind === 'attempt_lookup_mismatch')).toHaveLength(1);
+  });
+
+  it('EC:A50 (A6-6) an attempt already held for review is not paid by the webhook', async () => {
+    const t = setup('succeeded');
+    await t.repo.subscriptions.put(t.sub);
+    await t.repo.payments.put({ ...t.row, raw: { ...(t.row.raw as object), boilpaymentReview: { reason: 'amount_mismatch' } } });
+    await t.deliver('evt_paid_6');
+    await t.deliver('evt_paid_7');
+    expect(t.renewed).toEqual([]);
+    expect((await t.repo.payments.get('pay_rn_1'))?.status).toBe('pending');
   });
 });

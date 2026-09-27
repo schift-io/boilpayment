@@ -182,6 +182,7 @@ export function normalizeTossPayment(raw: any): Payment {
     occurredAt: new Date(raw.approvedAt ?? raw.requestedAt ?? Date.now()),
     failure: status === 'failed' ? normalizeTossFailure(raw.failure) : null,
     cashReceipt: null,
+    providerRefAliases: null, // EC:E24 — one ref per payment (py renders the key: parity)
     raw,
   };
 }

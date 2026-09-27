@@ -900,7 +900,7 @@ class Table(Protocol[T]):
 
 
 class OperationTable(Table[Operation], Protocol):
-    async def claim(self, row: Operation) -> Operation | None: ...
+    async def claim(self, row: Operation) -> Operation | None: ...  # stores row.result (EC:A48)
 
     # EC:A48 -- optional compare and set (see TS OperationTable.compareAndSet); tables without it
     # fall back to a plain put.

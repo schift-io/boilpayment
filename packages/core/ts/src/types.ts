@@ -246,7 +246,7 @@ export interface Payment {
   raw?: unknown;
   /** EC:E24 — other refs the provider uses for this same payment (Stripe invoice ↔ PaymentIntent ↔ charge).
    *  Set by provider adapters on fetched payments; the webhook records them as aliases. Not stored on the row. */
-  providerRefAliases?: string[];
+  providerRefAliases?: string[] | null;
 }
 
 export interface PaymentFailure {
@@ -575,7 +575,8 @@ export interface Table<T extends { id: string }, F = Partial<T>> {
   list(filter?: F): Promise<T[]>;
 }
 export interface OperationTable extends Table<Operation> {
-  /** Atomically acquire an absent or matching failed operation; null means another caller owns it. */
+  /** Atomically acquire an absent or matching failed operation; null means another caller owns it.
+   *  The claimed row carries `row.result` (EC:A48 — a lease is written with its token in the same statement). */
   claim(row: Operation): Promise<Operation | null>;
   /**
    * EC:A48 — write `next` only if the stored row still has `expected`'s status and result (compare and

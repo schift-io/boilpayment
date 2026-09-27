@@ -6,8 +6,9 @@
 //   skip_and_notify  — charge only the period containing now (once); the missed periods are skipped
 //                      with no charge and no grant; one case lists them;
 //   needs_human_only — charge nothing; the subscription waits past_due (no grace clock) for a person.
-import { Clock, Notifier, Period, Plan, Policy, Repo, Subscription } from 'boilpayment-core';
+import { Clock, Notifier, Payment, PaymentProvider, Period, Plan, Policy, Repo, Subscription } from 'boilpayment-core';
 import { nextPeriod } from './period.js';
+import { settleAttemptByLookup } from './charge-attempt.js';
 
 export interface CatchUp {
   /** The last missed period; the subscription is moved here so the next period is `target`. */
@@ -56,4 +57,19 @@ export async function applyMissedPeriods(input: {
   await notifier.send({ type: 'cs.needs_human', customerId: sub.customerId, payload: {
     kind: 'missed_periods_skipped', subscriptionId: sub.id, skipped: cu.skipped.map(iso), charging: iso(cu.target) } });
   return { kind: 'skipped', sub: saved, target: cu.target };
+}
+
+/**
+ * EC:A47 (A6-4) — an attempt left open (written, maybe never sent) for a period that has already ended,
+ * with the subscription more than one period behind. Re-driving it would bill that ended period, so the
+ * provider is asked first: no such order closes the row (failed, order_not_found) and the missed periods
+ * are skipped like any other; a paid order settles it; no answer leaves it as it was (EC:A49 rules).
+ */
+export async function settleOpenAttemptIfBehind(input: {
+  provider: PaymentProvider; repo: Repo; clock: Clock; notifier: Notifier; sub: Subscription; plan: Plan; policy: Policy; open: Payment;
+}): Promise<Payment> {
+  const { provider, repo, clock, notifier, sub, plan, policy, open } = input;
+  if (!catchUpPeriods(sub, plan, policy, clock.now())) return open;
+  const done = await settleAttemptByLookup({ provider, repo, clock, row: open, notifier });
+  return done ?? (await repo.payments.get(open.id)) ?? open;
 }

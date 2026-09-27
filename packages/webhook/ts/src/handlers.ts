@@ -17,6 +17,10 @@ import { authoritativeRefundEvent } from './refund.js';
 import {
   INACTIVE_SUBSCRIPTION_STATUSES,
   PaymentKitError,
+  expectedAttemptAmount,
+  holdAttemptForReview,
+  isUnderReview,
+  lookupMismatch,
   recordPaymentRefAliases,
 } from 'boilpayment-core';
 import { localizePaymentEvent } from './payment-ref.js';
@@ -232,7 +236,14 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
         throw new PaymentKitError('Renewal payment has not succeeded', 'renewal_payment_not_succeeded', { paymentId: payment.id, status: payment.status });
       }
       const stored = await repo.payments.get(payment.id);
-      if (stored && stored.status === 'pending') await repo.payments.put({ ...stored, status: 'succeeded', providerRef: payment.providerRef, amount: payment.amount, failure: null });
+      // EC:A50 (A6-6) — a held attempt waits for a person here too, and a pending one is only completed
+      // when the provider's payment is the charge sent under its key (the same rule as the lookup).
+      if (stored && isUnderReview(stored)) return;
+      if (stored && stored.status === 'pending') {
+        const reason = lookupMismatch(payment, { amount: expectedAttemptAmount(stored), customerId: stored.customerId, currency: stored.amount.currency });
+        if (reason) { await holdAttemptForReview(repo, notifier, stored, payment, reason); return; }
+        await repo.payments.put({ ...stored, status: 'succeeded', providerRef: payment.providerRef, amount: payment.amount, failure: null });
+      }
       // EC:A51 (A5-4) — the renewal this pays for is the stored attempt's period. The provider's copy has
       // none (PortOne) or could name another; falling back to the subscription's current period would
       // grant a period that already ended (a trial conversion paid twice). No stored period: the row is

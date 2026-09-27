@@ -6,7 +6,8 @@
 // attempt, so every charge that may have moved money has a local row, and a retry of the same
 // attempt re-drives the same provider idempotency key instead of charging again.
 import { createHash } from 'node:crypto';
-import { Clock, Money, NoopNotifier, Notifier, Operation, Payment, PaymentProvider, PlanPrice, ProviderError, Repo, Subscription, keyMatchesInstant
+import { Clock, Money, NoopNotifier, Notifier, Operation, Payment, PaymentProvider, PlanPrice, ProviderError, Repo, Subscription, keyMatchesInstant,
+  expectedAttemptAmount, holdAttemptForReview, isLegacyAttemptRow, isUnderReview, lookupMismatch,
 } from 'boilpayment-core';
 import type { Period } from 'boilpayment-core';
 import { scopeProvider } from './internal.js';
@@ -66,43 +67,33 @@ export function isDuplicateOrder(err: unknown): boolean {
   return [d.code, d.type, err.failure.providerCode].some((c) => typeof c === 'string' && DUPLICATE_ORDER_CODES.has(c));
 }
 
-/**
- * EC:A50 — a looked-up order only settles an attempt when it is the charge the kit asked for: same
- * amount and currency, same customer, and not refunded or disputed since. Anything else is a reason a
- * person has to look (the attempt is held: no grant, and nothing is charged for the period meanwhile).
- */
-export function lookupMismatch(found: Payment, expected: { amount: Money | null; customerId: string }): string | null {
-  if (found.status === 'refunded' || found.status === 'partially_refunded' || found.status === 'disputed') return `order_${found.status}`;
-  if (expected.amount && expected.amount.amountMinor > 0) {
-    if (found.amount?.currency && found.amount.currency !== expected.amount.currency) return 'currency_mismatch';
-    if (found.amount && found.amount.amountMinor !== expected.amount.amountMinor) return 'amount_mismatch';
-  }
-  if (found.customerId && found.customerId !== expected.customerId) return 'customer_mismatch';
-  return null;
-}
-
-/** EC:A50 — an attempt a person has to look at: never charged, re-driven or granted by the kit. */
-export function isUnderReview(row: Payment): boolean {
-  return !!(row.raw as { boilpaymentReview?: unknown } | undefined)?.boilpaymentReview;
-}
+// EC:A50 — the match rules and the review hold live in core (the webhook's A45 branch applies them too).
+export { isUnderReview, lookupMismatch } from 'boilpayment-core';
 
 /**
  * EC:A49 A50 — apply a looked-up order to an attempt row. Returns the settled row, or null when it is
  * still pending at the provider or does not match (then held for review, one notice).
+ * A6-3 — the order must match what was sent under this attempt's key (the row's amount), never today's
+ * plan price. A legacy row (an earlier release's charge, amount unknown) settles at the provider's
+ * amount when currency and customer match; a person is told when that differs from `priceHint`.
  */
-async function applyLookup(repo: Repo, notifier: Notifier, row: Payment, found: Payment, expectedAmount: Money | null): Promise<Payment | null> {
-  const reason = lookupMismatch(found, { amount: expectedAmount ?? (row.amount.amountMinor > 0 ? row.amount : null), customerId: row.customerId });
+async function applyLookup(repo: Repo, notifier: Notifier, row: Payment, found: Payment, priceHint: Money | null): Promise<Payment | null> {
+  const legacy = isLegacyAttemptRow(row);
+  const expected = legacy ? null : (expectedAttemptAmount(row) ?? priceHint);
+  const reason = lookupMismatch(found, { amount: expected, customerId: row.customerId, currency: row.amount.currency });
   if (reason) {
-    await repo.payments.put({ ...row, raw: { ...(row.raw as object | undefined ?? {}), boilpaymentReview: {
-      reason, status: found.status, amount: found.amount ?? null, customerId: found.customerId ?? null, providerRef: found.providerRef ?? null } } });
-    await notifier.send({ type: 'cs.needs_human', customerId: row.customerId, payload: {
-      kind: 'attempt_lookup_mismatch', subscriptionId: row.subscriptionId, paymentId: row.id, reason } });
+    await holdAttemptForReview(repo, notifier, row, found, reason);
     return null;
   }
   if (found.status !== 'succeeded' && found.status !== 'failed') return null;
   const settled: Payment = { ...row, providerRef: found.providerRef || row.providerRef, amount: found.amount ?? row.amount, status: found.status,
     failure: found.failure, raw: { ...(row.raw as object | undefined ?? {}), provider: found.raw ?? null } };
   await repo.payments.put(settled);
+  if (legacy && settled.status === 'succeeded' && priceHint && found.amount && found.amount.amountMinor !== priceHint.amountMinor) {
+    await notifier.send({ type: 'cs.needs_human', customerId: row.customerId, payload: {
+      kind: 'legacy_settled_at_provider_amount', subscriptionId: row.subscriptionId, paymentId: row.id,
+      amount: found.amount, planPrice: priceHint } });
+  }
   return settled;
 }
 
@@ -158,9 +149,13 @@ function leaseIsStale(current: Operation, now: Date): boolean {
 export async function withAttemptLease<T>(repo: Repo, clock: Clock, attemptKey: string, fn: () => Promise<T>): Promise<{ held: true; value: T } | { held: false }> {
   const key = leaseKey(attemptKey);
   const now = clock.now();
+  // EC:A48 (I-1) — the lease and its owner token are written by the claim itself, so a claimed row never
+  // shows the bare {in_progress, null} value a late 'unleasedSince' writer could mistake for a stuck claim.
+  const token = `${now.getTime().toString(36)}.${(leaseSeq += 1).toString(36)}.${Math.random().toString(36).slice(2, 10)}`;
+  const lease: LeaseInfo = { leaseUntil: new Date(now.getTime() + ATTEMPT_LEASE_MS).toISOString(), token };
   const row: Operation = {
     id: key, key, kind: 'lifecycle.charge_attempt', payloadHash: LEASE_HASH, status: 'in_progress',
-    result: null, error: null, createdAt: now, completedAt: null, attempts: 0,
+    result: lease, error: null, createdAt: now, completedAt: null, attempts: 0,
   };
   const ops = repo.operations;
   // EC:A48 — every takeover and release is a compare and set against the row as read, so two callers
@@ -182,9 +177,12 @@ export async function withAttemptLease<T>(repo: Repo, clock: Clock, attemptKey: 
     }
   }
   if (!claimed) return { held: false };
-  const token = `${now.getTime().toString(36)}.${(leaseSeq += 1).toString(36)}.${Math.random().toString(36).slice(2, 10)}`;
-  const held: Operation = { ...claimed, result: { leaseUntil: new Date(now.getTime() + ATTEMPT_LEASE_MS).toISOString(), token } };
-  if (!(await write(claimed, held))) return { held: false };
+  // A Repo whose claim does not store the result (written before EC:A48 I-1) gets the lease as a second write.
+  let held: Operation = claimed;
+  if ((claimed.result as LeaseInfo | null)?.token !== token) {
+    held = { ...claimed, result: lease };
+    if (!(await write(claimed, held))) return { held: false };
+  }
   try {
     return { held: true, value: await fn() };
   } finally {
@@ -244,7 +242,7 @@ async function chargeAttemptHeld(input: ChargeAttemptInput): Promise<ChargeAttem
   if (stored) {
     // EC:A49 — a re-drive asks the provider first: the earlier call may have been paid (its answer
     // lost), and past the key-replay window a re-send would be a new charge.
-    const asked = await askProvider(input, stored, notifier, { amountMinor: price.amountMinor, currency: price.currency });
+    const asked = await askProvider(input, stored, notifier, { amountMinor: price.amountMinor, currency: price.currency }); // price is only a hint: the row's amount decides (A6-3)
     if (asked) return asked;
   }
 
@@ -269,7 +267,8 @@ async function chargeAttemptHeld(input: ChargeAttemptInput): Promise<ChargeAttem
   try {
     answer = await scopeProvider(provider, input.correlationId).chargeBillingKey({
       billingKey: sub.billingKey as string,
-      amount: { amountMinor: price.amountMinor, currency: price.currency },
+      // A6-3 — a re-drive re-sends what its key was first sent with (the row), not today's price.
+      amount: { ...pending.amount },
       orderId,
       customerRef: sub.customerId,
       idempotencyKey: attemptKey,
@@ -397,7 +396,7 @@ export async function settleAttemptByLookup(input: {
  * (Toss: 15 days), so re-sending it later could charge again.
  */
 export function isLegacyAttempt(row: Payment): boolean {
-  return typeof (row.raw as { boilpaymentLegacyOrderId?: unknown } | undefined)?.boilpaymentLegacyOrderId === 'string';
+  return isLegacyAttemptRow(row);
 }
 
 /** The orderId an attempt row was sent with (rows of earlier releases used the attempt key itself). */

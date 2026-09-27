@@ -96,7 +96,10 @@ export async function settleLegacyEnded(input: {
     // only keys not settled yet: a settled legacy row (succeeded or failed) is final
     const legacy = await checkLegacyDunningUnsettled({ provider, repo, clock, sub: pendingOnly, period, price, notifier });
     if (legacy.kind === 'paid') {
-      await onRenewalPaid({ sub, payment: legacy.payment, policy, ledger, repo, clock });
+      const result = await onRenewalPaid({ sub, payment: legacy.payment, policy, ledger, repo, clock });
+      // A6-5 — a key settled on an earlier tick is found again while another key is still open: its
+      // period is already granted (duplicated), so the person was already told.
+      if (result.duplicated) continue;
       await notifier.send({ type: 'cs.needs_human', customerId: sub.customerId, payload: {
         kind: 'renewal_settled_after_end', subscriptionId: sub.id, paymentId: legacy.payment.id, status: sub.status } });
       out.push({ subscriptionId: sub.id, paymentId: legacy.payment.id, status: 'succeeded' });

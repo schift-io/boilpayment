@@ -21,6 +21,11 @@ from .charge_attempt import (  # noqa: F401  EC:A34 A35
     provider_order_id,
 )
 from .downgrade import DowngradeInput, DowngradeResult, downgrade  # noqa: F401
+from .held import (  # noqa: F401  EC:A53 A54
+    ResolveHeldAttemptResult,
+    resolve_held_attempt,
+    resume_parked,
+)
 from .reactivate import (  # noqa: F401
     ReactivateInput,
     ReactivateResult,

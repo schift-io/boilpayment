@@ -29,7 +29,7 @@ PERIOD2 = Period(start=datetime(2026, 3, 1, tzinfo=UTC), end=datetime(2026, 4, 1
 _KEEP = object()
 
 
-def _setup(remote_status: str, remote_period=_KEEP):
+def _setup(remote_status: str, remote_period=_KEEP, remote_amount_minor: int = 5000):
     clock = FixedClock(datetime(2026, 3, 1, 0, 5, tzinfo=UTC))
     repo = InMemoryRepo()
     sub = Subscription(
@@ -43,10 +43,12 @@ def _setup(remote_status: str, remote_period=_KEEP):
         occurred_at=clock.now(), raw={"boilpaymentAttemptKey": "charge:sub_local:2026-03-01T00:00:00.000Z"},
     )
     remote = dataclasses.replace(row, id="remote", customer_id="", subscription_id=None, status=remote_status,
-                                 period=row.period if remote_period is _KEEP else remote_period)
+                                 period=row.period if remote_period is _KEEP else remote_period,
+                                 amount=Money(amount_minor=remote_amount_minor, currency="KRW"))
     provider = FakeProvider(verify=json_verify("portone"), name="portone", get_payment_impl=lambda ref: remote)
     renewed: list[str] = []
     topups: list[str] = []
+    notifier = CollectingNotifier()
 
     class FakeDunning:
         async def on_payment_failed(self, **kwargs):
@@ -63,7 +65,7 @@ def _setup(remote_status: str, remote_period=_KEEP):
             topups.append("topup")
 
     handlers = default_handlers(
-        policy=DEFAULT_POLICY, ledger=InMemoryLedger(SequentialIdGen("led_")), repo=repo, notifier=CollectingNotifier(),
+        policy=DEFAULT_POLICY, ledger=InMemoryLedger(SequentialIdGen("led_")), repo=repo, notifier=notifier,
         clock=clock, ids=SequentialIdGen("p_"), lifecycle=FakeLifecycle(), credits=FakeCredits(),
     )
 
@@ -126,3 +128,28 @@ def test_ec_a51_no_stored_period_records_only() -> None:
         assert (await repo.payments.get("pay_rn_1")).status == "succeeded"
 
     asyncio.run(run())
+
+
+def test_ec_a50_a6_6_other_amount_holds_the_attempt() -> None:
+    async def run():
+        repo, sub, row, renewed, _, deliver = _setup("succeeded", remote_amount_minor=6000)
+        await repo.subscriptions.put(sub)
+        await repo.payments.put(row)
+        record = await deliver("evt_paid_5")
+        stored = await repo.payments.get("pay_rn_1")
+        return record.status, renewed, stored.status, stored.raw["boilpaymentReview"]["reason"]
+
+    assert asyncio.run(run()) == ("processed", [], "pending", "amount_mismatch")
+
+
+def test_ec_a50_a6_6_held_attempt_is_not_paid_by_the_webhook() -> None:
+    async def run():
+        repo, sub, row, renewed, _, deliver = _setup("succeeded")
+        await repo.subscriptions.put(sub)
+        await repo.payments.put(dataclasses.replace(row, raw={**row.raw, "boilpaymentReview": {"reason": "amount_mismatch"}}))
+        await deliver("evt_paid_6")
+        await deliver("evt_paid_7")
+        return renewed, (await repo.payments.get("pay_rn_1")).status
+
+    assert asyncio.run(run()) == ([], "pending")
+

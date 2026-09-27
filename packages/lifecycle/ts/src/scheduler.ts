@@ -5,9 +5,9 @@ import { onPaymentFailed } from './dunning.js';
 import { nextPeriod } from './period.js';
 import { retryOnVersionConflict } from './retry.js';
 import { priceForSubscription, renewalPlanId } from './internal.js';
-import { attemptKeyOf, attemptsFor, chargeAttempt, isLegacyAttempt, markUnresolved, renewalAttemptKey } from './charge-attempt.js';
+import { attemptKeyOf, attemptsFor, chargeAttempt, isLegacyAttempt, isUnderReview, markUnresolved, renewalAttemptKey } from './charge-attempt.js';
 import { checkLegacyDunning, settleLegacyEnded, settleOrphanAttempts } from './legacy-attempts.js';
-import { applyMissedPeriods } from './missed-periods.js';
+import { applyMissedPeriods, settleOpenAttemptIfBehind } from './missed-periods.js';
 
 export interface DueSubscriptionsInput {
   repo: Repo;
@@ -149,6 +149,15 @@ async function renewOne(input: SchedulerTickInput, dueSub: Subscription, notifie
     }
     const legacyOpen = attempts.some((p) => p.status !== 'failed' && isLegacyAttempt(p));
     let open = attempts.find((p) => p.status !== 'failed' && !isLegacyAttempt(p));
+    if (open && !isUnderReview(open)) {
+      // EC:A47 (A6-4) — an open attempt for a period that already ended, more periods behind: ask first.
+      const now = await settleOpenAttemptIfBehind({ provider, repo, clock, notifier, sub, plan, policy, open });
+      if (now.status === 'succeeded') {
+        const result = await onRenewalPaid({ sub, payment: now, policy, ledger, repo, clock });
+        return { kind: 'charged' as const, sub: result.sub };
+      }
+      if (now.status === 'failed') open = undefined;
+    }
     if (!open && !legacyOpen && sub.status !== 'active') return null; // every attempt answered: dunning owns the next charge
     if (!open) {
       // EC:A39 — a dunning charge of an earlier release (no row) may already have paid this period.

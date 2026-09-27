@@ -92,7 +92,7 @@ class OperationMemTable(MemTable[Operation]):
         existing = self._rows.get(row.key)
         if existing is not None and (existing.status != "failed" or existing.payload_hash != row.payload_hash):
             return None
-        claimed = dataclasses.replace(row, kind=existing.kind if existing else row.kind, status="in_progress", result=None, error=None, completed_at=None, created_at=existing.created_at if existing else row.created_at, attempts=existing.attempts + 1 if existing else 1)
+        claimed = dataclasses.replace(row, kind=existing.kind if existing else row.kind, status="in_progress", result=row.result, error=None, completed_at=None, created_at=existing.created_at if existing else row.created_at, attempts=existing.attempts + 1 if existing else 1)
         self._rows[row.key] = claimed
         return claimed
 

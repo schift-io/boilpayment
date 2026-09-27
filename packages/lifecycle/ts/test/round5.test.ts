@@ -127,7 +127,8 @@ describe('round-5 regressions', () => {
   });
 
   it('EC:A50 (A5-6) a lookup whose amount, currency or customer differs is sent to a person: no grant, no new charge', async () => {
-    for (const bad of [{ amount: { amountMinor: 4000, currency: 'KRW' } }, { amount: { amountMinor: 5000, currency: 'USD' } }, { customerId: 'someone_else' }, { status: 'partially_refunded' as const }]) {
+    // A6-3 — a legacy row's amount is unknown, so an amount-only difference settles it (see the round-6 test).
+    for (const bad of [{ amount: { amountMinor: 5000, currency: 'USD' } }, { customerId: 'someone_else' }, { status: 'partially_refunded' as const }]) {
       const t = await setup(mkSub('2024-01-01T00:00:00Z', '2024-02-01T00:00:00Z'));
       await t.repo.outbox.put(retryItem(1, 'sent', '2024-02-01T01:00:00Z', '2024-02-02T01:00:00Z'));
       t.provider.seedOrder('dunning-retry:sub_1:1', 'succeeded');

@@ -26,6 +26,7 @@ from .charge_attempt import (
     attempts_for,
     charge_attempt,
     is_legacy_attempt,
+    is_under_review,
     iso_z,
     mark_unresolved,
     renewal_attempt_key,
@@ -37,7 +38,7 @@ from .legacy_attempts import (
     settle_legacy_ended,
     settle_orphan_attempts,
 )
-from .missed_periods import apply_missed_periods
+from .missed_periods import apply_missed_periods, settle_open_attempt_if_behind
 from .period import next_period
 from .renewal import OnRenewalPaidInput, on_renewal_paid
 from .retry import retry_on_version_conflict
@@ -187,6 +188,17 @@ async def tick(input: SchedulerTickInput) -> SchedulerTickResult:
                 return ("charged", resumed.sub)
             legacy_open = any(p.status != "failed" and is_legacy_attempt(p) for p in attempts)
             open_row = next((p for p in attempts if p.status != "failed" and not is_legacy_attempt(p)), None)
+            if open_row is not None and not is_under_review(open_row):
+                # EC:A47 (A6-4) -- an open attempt for a period that already ended, more periods behind: ask first.
+                now_row = await settle_open_attempt_if_behind(provider=provider, repo=repo, clock=clock, notifier=notifier,
+                                                              sub=sub, plan=plan, policy=policy, open_row=open_row)
+                if now_row.status == "succeeded":
+                    resumed = await on_renewal_paid(OnRenewalPaidInput(
+                        sub=sub, payment=now_row, policy=policy, ledger=ledger, repo=repo, clock=clock,
+                    ))
+                    return ("charged", resumed.sub)
+                if now_row.status == "failed":
+                    open_row = None
             if open_row is None and not legacy_open and sub.status != "active":
                 return None  # every attempt answered: dunning owns the next charge
             if open_row is None:

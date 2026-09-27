@@ -33,7 +33,12 @@ from boilpayment_core import (
     ProviderError,
     Repo,
     Subscription,
+    expected_attempt_amount,
+    hold_attempt_for_review,
+    is_legacy_attempt_row,
+    is_under_review,
     key_matches_instant,
+    lookup_mismatch,
 )
 
 from .internal import scope_provider
@@ -83,49 +88,30 @@ def is_duplicate_order(err: BaseException) -> bool:
     return any(isinstance(c, str) and c in _DUPLICATE_ORDER_CODES for c in codes)
 
 
-def lookup_mismatch(found: Payment, *, amount: Money | None, customer_id: str) -> str | None:
-    """EC:A50 -- a looked-up order settles an attempt only when it is the charge the kit asked for."""
-    if found.status in ("refunded", "partially_refunded", "disputed"):
-        return f"order_{found.status}"
-    if amount is not None and amount.amount_minor > 0:
-        if found.amount is not None and found.amount.currency and found.amount.currency != amount.currency:
-            return "currency_mismatch"
-        if found.amount is not None and found.amount.amount_minor != amount.amount_minor:
-            return "amount_mismatch"
-    if found.customer_id and found.customer_id != customer_id:
-        return "customer_mismatch"
-    return None
-
-
-def is_under_review(row: Payment) -> bool:
-    """EC:A50 -- an attempt a person has to look at: never charged, re-driven or granted by the kit."""
-    raw = row.raw if isinstance(row.raw, dict) else {}
-    return bool(raw.get("boilpaymentReview"))
-
-
-async def _apply_lookup(repo: Repo, notifier: Notifier, row: Payment, found: Payment, expected: Money | None) -> Payment | None:
-    """EC:A49 A50 -- apply a looked-up order to an attempt row (see applyLookup in charge-attempt.ts)."""
-    use = expected if expected is not None else (row.amount if row.amount.amount_minor > 0 else None)
-    reason = lookup_mismatch(found, amount=use, customer_id=row.customer_id)
-    raw = dict(row.raw) if isinstance(row.raw, dict) else {}
+async def _apply_lookup(repo: Repo, notifier: Notifier, row: Payment, found: Payment, price_hint: Money | None) -> Payment | None:
+    """EC:A49 A50 -- apply a looked-up order to an attempt row (see applyLookup in charge-attempt.ts).
+    A6-3 -- the order must match what was sent under this key (the row's amount), never today's price.
+    A legacy row settles at the provider's amount when currency and customer match (a person is told
+    when that differs from ``price_hint``)."""
+    legacy = is_legacy_attempt_row(row)
+    expected = None if legacy else (expected_attempt_amount(row) or price_hint)
+    reason = lookup_mismatch(found, amount=expected, customer_id=row.customer_id, currency=row.amount.currency)
     if reason:
-        raw["boilpaymentReview"] = {
-            "reason": reason,
-            "status": found.status,
-            "amount": {"amountMinor": found.amount.amount_minor, "currency": found.amount.currency} if found.amount else None,
-            "customerId": found.customer_id or None,
-            "providerRef": found.provider_ref or None,
-        }
-        await repo.payments.put(dataclasses.replace(row, raw=raw))
-        await notifier.send(Notification(type="cs.needs_human", customer_id=row.customer_id, payload={
-            "kind": "attempt_lookup_mismatch", "subscription_id": row.subscription_id, "payment_id": row.id, "reason": reason}))
+        await hold_attempt_for_review(repo, notifier, row, found, reason)
         return None
     if found.status not in ("succeeded", "failed"):
         return None
+    raw = dict(row.raw) if isinstance(row.raw, dict) else {}
     raw["provider"] = found.raw
     settled = dataclasses.replace(row, provider_ref=found.provider_ref or row.provider_ref, amount=found.amount or row.amount,
                                   status=found.status, failure=found.failure, raw=raw)
     await repo.payments.put(settled)
+    if (legacy and settled.status == "succeeded" and price_hint is not None and found.amount is not None
+            and found.amount.amount_minor != price_hint.amount_minor):
+        await notifier.send(Notification(type="cs.needs_human", customer_id=row.customer_id, payload={
+            "kind": "legacy_settled_at_provider_amount", "subscription_id": row.subscription_id, "payment_id": row.id,
+            "amount": {"amountMinor": found.amount.amount_minor, "currency": found.amount.currency},
+            "plan_price": {"amountMinor": price_hint.amount_minor, "currency": price_hint.currency}}))
     return settled
 
 
@@ -219,8 +205,11 @@ async def with_attempt_lease(repo: Repo, clock: Clock, attempt_key: str, fn):  #
         await ops.put(nxt)
         return True
 
+    # EC:A48 (I-1) -- the claim writes the lease and its owner token itself (see charge-attempt.ts).
+    token = f"{int(now.timestamp() * 1000):x}.{next(_lease_seq):x}.{secrets.token_hex(4)}"
+    lease = {"leaseUntil": _iso(now + ATTEMPT_LEASE), "token": token}
     row = Operation(id=key, key=key, kind="lifecycle.charge_attempt", payload_hash=_LEASE_HASH,
-                    status="in_progress", created_at=now, result=None, error=None, completed_at=None, attempts=0)
+                    status="in_progress", created_at=now, result=lease, error=None, completed_at=None, attempts=0)
     claimed = await ops.claim(row)
     if claimed is None:
         current = await ops.get(key)
@@ -232,10 +221,12 @@ async def with_attempt_lease(repo: Repo, clock: Clock, attempt_key: str, fn):  #
             await write(current, dataclasses.replace(current, result={"unleasedSince": _iso(now)}))
     if claimed is None:
         return False, None
-    token = f"{int(now.timestamp() * 1000):x}.{next(_lease_seq):x}.{secrets.token_hex(4)}"
-    held = dataclasses.replace(claimed, result={"leaseUntil": _iso(now + ATTEMPT_LEASE), "token": token})
-    if not await write(claimed, held):
-        return False, None
+    held = claimed
+    if not (isinstance(claimed.result, dict) and claimed.result.get("token") == token):
+        # a Repo whose claim does not store the result gets the lease as a second write
+        held = dataclasses.replace(claimed, result=lease)
+        if not await write(claimed, held):
+            return False, None
     try:
         return True, await fn()
     finally:
@@ -321,7 +312,7 @@ async def _charge_attempt_held(input: ChargeAttemptInput) -> ChargeAttemptOutcom
             input.provider, input.correlation_id
         ).charge_billing_key(
             billing_key=sub.billing_key or "",
-            amount=Money(amount_minor=price.amount_minor, currency=price.currency),
+            amount=pending.amount,  # A6-3 -- a re-drive re-sends what its key was first sent with
             order_id=order_id,
             customer_ref=sub.customer_id,
             idempotency_key=input.attempt_key,
@@ -423,8 +414,7 @@ async def mark_unresolved(
 def is_legacy_attempt(row: Payment) -> bool:
     """EC:A39 -- a row for a charge an earlier release made: settled by lookup only, never re-driven
     (a provider replays an idempotency key for a limited time; re-sending later could charge again)."""
-    raw = row.raw if isinstance(row.raw, dict) else {}
-    return isinstance(raw.get("boilpaymentLegacyOrderId"), str)
+    return is_legacy_attempt_row(row)
 
 
 def order_id_of(row: Payment) -> str:

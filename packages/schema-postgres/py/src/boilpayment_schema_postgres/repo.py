@@ -464,12 +464,12 @@ class OperationsTable:
         async with atomic(self._dsn) as conn, conn.cursor() as cur:
             await cur.execute(
                 """insert into operations (key, kind, payload_hash, status, result, error, created_at, completed_at, attempts)
-                values (%s,%s,%s,'in_progress',null,null,%s,null,1)
-                on conflict (key) do update set status='in_progress', result=null, error=null,
+                values (%s,%s,%s,'in_progress',%s::jsonb,null,%s,null,1)
+                on conflict (key) do update set status='in_progress', result=excluded.result, error=null,
                   completed_at=null, attempts=operations.attempts+1
                 where operations.status='failed' and operations.payload_hash=excluded.payload_hash
                 returning *""",
-                (row.key, row.kind, row.payload_hash, row.created_at),
+                (row.key, row.kind, row.payload_hash, jsonb(json_safe(row.result)), row.created_at),
             )
             claimed = await cur.fetchone()
             return _row_to_operation(claimed) if claimed else None

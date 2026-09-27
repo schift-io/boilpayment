@@ -38,11 +38,12 @@ from .charge_attempt import (
     charge_attempt,
     dunning_attempt_key,
     is_legacy_attempt,
+    is_under_review,
     iso_z,
 )
 from .internal import price_for_subscription, renewal_plan_id, replace_sub
 from .legacy_attempts import check_legacy_dunning
-from .missed_periods import apply_missed_periods
+from .missed_periods import apply_missed_periods, settle_open_attempt_if_behind
 from .period import next_period
 from .renewal import OnRenewalPaidInput, on_renewal_paid
 from .retry import retry_on_version_conflict
@@ -437,6 +438,12 @@ async def run_retry(input: RunRetryInput) -> RunRetryResult:
             policy.period.timezone, policy.period.month_end_anchor,
         )
         attempts = await attempts_for(repo, sub, charged_period)
+        stale_open = next((p for p in attempts if p.status == "pending" and not is_legacy_attempt(p) and not is_under_review(p)), None)
+        if stale_open is not None:
+            # EC:A47 (A6-4) -- an open attempt for a period that already ended, more periods behind: ask first.
+            await settle_open_attempt_if_behind(provider=provider, repo=repo, clock=clock, notifier=notifier,
+                                                sub=sub, plan=plan, policy=policy, open_row=stale_open)
+            attempts = await attempts_for(repo, sub, charged_period)
         if not attempts:
             # EC:A39 (A5-3) -- an earlier release's dunning charge for this period may already have moved
             # money (recorded failed, no row): ask before charging again.
@@ -455,7 +462,9 @@ async def run_retry(input: RunRetryInput) -> RunRetryResult:
                 item.next_attempt_at = clock.now() + timedelta(hours=1)
                 await repo.outbox.put(item)
                 return RunRetryResult(outcome="unresolved", sub=sub, grants=[])
-            # EC:A47 -- a retry never bills a period that has already ended in full.
+        if not any(p.status != "failed" for p in attempts):
+            # EC:A47 -- a retry never bills a period that has already ended in full, whether nothing was
+            # tried for it yet or every try was declined or never sent (A6-4).
             missed = await apply_missed_periods(sub=sub, plan=plan, policy=policy, repo=repo, notifier=notifier, clock=clock)
             if missed.kind == "parked" and missed.sub is not None:
                 item.status = "sent"

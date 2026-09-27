@@ -130,6 +130,7 @@ export function normalizePortonePayment(raw: any): Payment {
     occurredAt: new Date(raw.paidAt ?? raw.requestedAt ?? Date.now()),
     failure: status === 'failed' ? normalizePortoneFailure(raw.failure) : null,
     cashReceipt: null,
+    providerRefAliases: null, // EC:E24 — one ref per payment (py renders the key: parity)
     raw,
   };
 }

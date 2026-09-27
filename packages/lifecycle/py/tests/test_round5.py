@@ -285,8 +285,8 @@ def test_a39_expired_legacy_charge_gets_row_period_notice() -> None:
 
 def test_a50_lookup_mismatch_goes_to_a_person() -> None:
     async def body() -> None:
+        # A6-3 -- a legacy row's amount is unknown: an amount-only difference settles it (round-6 test).
         for bad in [
-            {"amount": Money(amount_minor=4000, currency="KRW")},
             {"amount": Money(amount_minor=5000, currency="USD")},
             {"customer_id": "someone_else"},
             {"status": "partially_refunded"},

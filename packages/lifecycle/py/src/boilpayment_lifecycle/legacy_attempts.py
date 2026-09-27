@@ -158,7 +158,9 @@ async def settle_legacy_ended(
             continue
         legacy = await check_legacy_dunning(provider=provider, repo=repo, clock=clock, sub=sub, period=period, price=expected, notifier=notifier)
         if legacy.kind == "paid" and legacy.payment is not None:
-            await on_renewal_paid(OnRenewalPaidInput(sub=sub, payment=legacy.payment, policy=policy, ledger=ledger, repo=repo, clock=clock))
+            result = await on_renewal_paid(OnRenewalPaidInput(sub=sub, payment=legacy.payment, policy=policy, ledger=ledger, repo=repo, clock=clock))
+            if result.duplicated:
+                continue  # A6-5 -- settled on an earlier tick: already granted, the person already told
             await notifier.send(Notification(type="cs.needs_human", customer_id=sub.customer_id, payload={
                 "kind": "renewal_settled_after_end", "subscription_id": sub.id, "payment_id": legacy.payment.id, "status": sub.status}))
             out.append(LateSettlement(subscription_id=sub.id, payment_id=legacy.payment.id, status="succeeded"))

@@ -18,6 +18,8 @@ from boilpayment_core import (
     Clock,
     Notification,
     Notifier,
+    Payment,
+    PaymentProvider,
     Period,
     Plan,
     Policy,
@@ -25,7 +27,7 @@ from boilpayment_core import (
     Subscription,
 )
 
-from .charge_attempt import iso_z
+from .charge_attempt import iso_z, settle_attempt_by_lookup
 from .period import next_period
 
 
@@ -80,3 +82,15 @@ async def apply_missed_periods(*, sub: Subscription, plan: Plan, policy: Policy,
         "kind": "missed_periods_skipped", "subscription_id": sub.id,
         "skipped": [iso_z(p.start) for p in cu.skipped], "charging": iso_z(cu.target.start)}))
     return MissedPeriodsOutcome(kind="skipped", sub=saved, target=cu.target)
+
+
+async def settle_open_attempt_if_behind(*, provider: PaymentProvider, repo: Repo, clock: Clock, notifier: Notifier,
+                                        sub: Subscription, plan: Plan, policy: Policy, open_row: Payment) -> Payment:
+    """EC:A47 (A6-4) -- an attempt left open (written, maybe never sent) for a period that has already
+    ended, more than one period behind: ask the provider before anything is (re-)sent. No such order
+    closes the row (failed, order_not_found) so the missed periods are skipped; a paid order settles it;
+    no answer leaves it as it was. Mirrors settleOpenAttemptIfBehind in missed-periods.ts."""
+    if catch_up_periods(sub, plan, policy, clock.now()) is None:
+        return open_row
+    done = await settle_attempt_by_lookup(provider=provider, repo=repo, clock=clock, row=open_row, notifier=notifier)
+    return done or await repo.payments.get(open_row.id) or open_row

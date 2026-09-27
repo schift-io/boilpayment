@@ -707,8 +707,11 @@ applyMissedPeriods(sub, plan, policy, ...):             # scheduler (no open att
    notify cs.needs_human {kind: missed_periods_skipped, skipped, charging: cu.target.start}
    return skipped(target = cu.target)                    # the caller charges cu.target once, its credits are usable
 ```
-An attempt already open or paid for the first missed period is finished first (money may have moved
-for it); the skip only happens when nothing was sent for it. `boilpayment check` lists
+An attempt already paid for the first missed period is finished first (money moved for it). An open
+one is looked up first when the period has already ended (round-6 A6-4): no such order at the provider
+closes it (failed, `order_not_found`) and the skip applies; a paid order settles it; no answer leaves it
+to the A49 re-drive rules. dunning.runRetry applies the skip when no attempt of the period is open or paid
+(none yet, or every one declined or closed). `boilpayment check` lists
 self-scheduled subscriptions that are more than one period behind before the first tick after an upgrade.
 
 ## [EC:A48] Attempt lease: compare and set
@@ -738,7 +741,11 @@ chargeAttemptHeld(input):
 ## [EC:A50] A looked-up order must match the attempt
 
 `lookupMismatch(found, expected)`: refunded, partially_refunded or disputed; a different currency or
-amount than the attempt row (legacy rows: the plan price); a different customer. Any mismatch keeps the
+amount than the attempt row (what was sent under its key, never today's plan price: round-6 A6-3); a
+different customer. A re-drive re-sends the row's amount. A legacy row (an earlier release's charge; its
+amount is unknown) is checked for currency and customer only and settles at the provider's amount;
+`legacy_settled_at_provider_amount` tells a person when that differs from the plan price. The webhook's
+A45 branch applies the same check and never pays a held row (A6-6). Any mismatch keeps the
 row pending with `raw.boilpaymentReview = {reason, found...}` and sends `attempt_lookup_mismatch` once.
 A row under review is never charged, re-driven or granted by the kit; its period waits for a person.
 
@@ -746,3 +753,30 @@ Note (round-5 audit Info I-2): with the defaults `graceDays: 7` and `retryInterv
 the third retry would run 216 h (9 days) after the failure, past the grace period, so it never runs;
 grace expiry (EC:A16) ends the subscription first. Pick intervals whose sum stays inside `graceDays`
 when every retry should run.
+
+## [EC:A53] Resolving an attempt held for review
+
+```pseudo
+resolveHeldAttempt({paymentId, decision, actor, note?}):
+   row = payments.get(paymentId); require row.status == pending and row under review   # else attempt_not_held
+   review = row.raw.boilpaymentReview; row.raw.boilpaymentReviewResolved = {...review, decision, actor, note, at}
+   if decision == settle:
+      require review.status == succeeded                                               # else held_order_not_paid
+      row -> succeeded, amount = review.amount, providerRef = review.providerRef
+      onRenewalPaid(sub, row)                            # grants row.period; an ended sub stays ended (A32)
+   else (void):
+      row -> failed {code: review_voided}
+      if sub is active or past_due: dunning.onPaymentFailed(sub)   # as for a decline: grace, retries
+```
+
+## [EC:A54] Resuming a subscription parked for missed periods
+
+```pseudo
+resumeParked({subscriptionId, actor}):
+   require sub.status == past_due and sub.graceUntil == null and catchUpPeriods(sub) != null   # else not_parked
+   cu = catchUpPeriods(sub)
+   sub -> active, currentPeriod = cu.previous           # missed periods: never billed, never granted
+   notify cs.needs_human {kind: missed_periods_resumed, skipped, charging: cu.target.start, actor}
+   # the next tick renews cu.target once (at most one period behind: the ordinary renewal)
+```
+

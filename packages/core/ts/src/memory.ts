@@ -102,7 +102,7 @@ export class OperationMemTable extends MemTable<Operation> {
   async claim(row: Operation): Promise<Operation | null> {
     const existing = this.rows.get(row.key);
     if (existing && (existing.status !== 'failed' || existing.payloadHash !== row.payloadHash)) return null;
-    const claimed: Operation = { ...row, kind: existing?.kind ?? row.kind, status: 'in_progress', result: null, error: null, completedAt: null, createdAt: existing?.createdAt ?? row.createdAt, attempts: (existing?.attempts ?? 0) + 1 };
+    const claimed: Operation = { ...row, kind: existing?.kind ?? row.kind, status: 'in_progress', result: row.result ?? null, error: null, completedAt: null, createdAt: existing?.createdAt ?? row.createdAt, attempts: (existing?.attempts ?? 0) + 1 };
     this.rows.set(row.key, claimed);
     return claimed;
   }
