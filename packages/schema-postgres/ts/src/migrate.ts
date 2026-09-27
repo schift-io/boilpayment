@@ -33,7 +33,7 @@ export interface MigrationFile {
 export const MODULE_UPDATES: Record<string, readonly string[]> = {
   credits: ['0009_ledger_idempotency_per_customer.sql', '0013_ledger_consume_key.sql'], // EC:B20 B21
   usage: ['0010_usage_idempotency_per_customer.sql'],
-  core: ['0011_subscription_status_paused_incomplete.sql', '0012_subscription_currency.sql'], // EC:A27 A28
+  core: ['0011_subscription_status_paused_incomplete.sql', '0012_subscription_currency.sql', '0014_subscription_billing_customer_ref.sql'], // EC:A27 A28 A60
 };
 
 /** Modules applied only when asked for by name (EC:N1): a default `migrate()` keeps its schema. */

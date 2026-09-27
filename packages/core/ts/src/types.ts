@@ -210,6 +210,12 @@ export interface Subscription {
    */
   currency?: string | null;
   /**
+   * EC:A60 — the provider customer key the billing key was issued under (Toss customerKey). Renewal
+   * and upgrade charges send it. Null/absent on rows written before it existed: they send the local
+   * customer id, as before.
+   */
+  billingCustomerRef?: string | null;
+  /**
    * EC:K1 — optimistic lock. Every writer must pass the row it read; `Repo.subscriptions.put` rejects
    * a stale version with `PaymentKitError('subscription_version_conflict')` and bumps it on success.
    * Without it an upgrade racing a renewal webhook silently loses one of the two writes.

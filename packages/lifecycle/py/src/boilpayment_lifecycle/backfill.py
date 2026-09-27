@@ -185,6 +185,14 @@ async def _plan_row(input: BackfillInput, row: BackfillRow) -> _RowPlan:
     ):
         _fail("invalid_period")
     assert row.period_start is not None and row.period_end is not None
+    # EC:A64 -- a billing key charges the card it was issued for: one already on another customer's
+    # subscription is refused (a copy-paste in the file would renew this customer on that card).
+    holders = [
+        s for s in await input.repo.subscriptions.list(provider=row.provider)
+        if s.billing_key == row.billing_key and s.customer_id != row.customer_id
+    ]
+    if holders:
+        _fail("billing_key_owned_by_other_customer")
     mine = await input.repo.subscriptions.list(
         customer_id=row.customer_id, provider=row.provider
     )
@@ -203,6 +211,7 @@ async def _plan_row(input: BackfillInput, row: BackfillRow) -> _RowPlan:
             "cancel_at_period_end": False,
             "grace_until": None,
             "billing_key": row.billing_key,
+            "billing_customer_ref": row.customer_ref,  # EC:A60 -- the key was issued under this customer key
             "scheduled_plan_id": None,
             # EC:A28
             "currency": row.currency or await _single_price_currency(input, row.plan_id),

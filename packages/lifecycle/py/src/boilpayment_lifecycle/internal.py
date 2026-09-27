@@ -14,8 +14,24 @@ from boilpayment_core import (
     Plan,
     PlanPrice,
     Pool,
+    Repo,
     Subscription,
 )
+
+
+async def billing_customer_ref(repo: Repo, sub: Subscription) -> str:
+    """EC:A60 -- the customer key a billing-key charge sends: the one the key was issued under (stored on
+    the subscription), else the customer's provider reference (backfilled and create_customer customers),
+    else the local id (rows written before either existed, as before). Toss refuses a billing-key charge
+    whose customerKey differs from the key's."""
+    if sub.billing_customer_ref:
+        return sub.billing_customer_ref
+    customer = await repo.customers.get(sub.customer_id)
+    if customer is not None:
+        for ref in customer.provider_refs:
+            if ref.provider == sub.provider:
+                return ref.ref
+    return sub.customer_id
 
 
 def replace_sub(sub: Subscription, **changes: object) -> Subscription:

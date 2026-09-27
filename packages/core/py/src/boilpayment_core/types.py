@@ -364,6 +364,9 @@ class Subscription:
     # proration charge the plan price in it. None on rows written before it existed (they keep the
     # plan's first price, as before).
     currency: str | None = None
+    # EC:A60 -- the provider customer key the billing key was issued under (Toss customerKey). Renewal
+    # and upgrade charges send it. None on rows written before it existed (they send the local customer id).
+    billing_customer_ref: str | None = None
 
 
 PaymentStatus = Literal[

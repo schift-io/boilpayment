@@ -23,6 +23,7 @@ const MODULE_FILES: { file: string; when: (c: PaykitConfig) => boolean }[] = [
   { file: '0010_usage_idempotency_per_customer.sql', when: (c) => c.models.includes('usage') || c.goods.includes('usage_quota') },
   { file: '0011_subscription_status_paused_incomplete.sql', when: () => true }, // EC:A27
   { file: '0012_subscription_currency.sql', when: () => true }, // EC:A28
+  { file: '0014_subscription_billing_customer_ref.sql', when: () => true }, // EC:A60
   { file: '0013_ledger_consume_key.sql', when: (c) => c.goods.includes('credits') }, // EC:B21
 ];
 

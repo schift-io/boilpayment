@@ -253,6 +253,7 @@ export function normalizeSubscription(sub: Stripe.Subscription): Subscription {
     cancelAtPeriodEnd: sub.cancel_at_period_end,
     graceUntil: null,
     billingKey: null,
+    billingCustomerRef: null, // EC:A60 — rendered like the Python dataclass field
     scheduledPlanId: null,
     currency: sub.currency ? sub.currency.toUpperCase() : null, // EC:A28
     version: 0, // provider-side row; the local repo row owns the EC:K1 optimistic lock
@@ -559,7 +560,12 @@ export class StripeProvider implements PaymentProvider {
     const item = current.items.data[0];
     const sub = await this.client.subscriptions.update(providerRef, {
       items: [{ id: item.id, price: input.newPriceRef }],
-      proration_behavior: input.proration === 'immediate' ? 'create_prorations' : 'none',
+      // I-4 — an immediate change invoices the proration now and fails when that payment fails, so the
+      // kit grants the upgrade's credits only for money Stripe collected (not a later invoice, and not an
+      // incomplete change Stripe applies under its default allow_incomplete).
+      ...(input.proration === 'immediate'
+        ? { proration_behavior: 'always_invoice' as const, payment_behavior: 'error_if_incomplete' as const }
+        : { proration_behavior: 'none' as const }),
       ...(input.resetAnchor ? { billing_cycle_anchor: 'now' } : {}),
     });
     return normalizeSubscription(sub);

@@ -114,6 +114,7 @@ export function normalizeSubscription(sub: Record<string, any>): Subscription {
     cancelAtPeriodEnd: !!sub.cancel_at_period_end,
     graceUntil: null,
     billingKey: null,
+    billingCustomerRef: null, // EC:A60 — rendered like the Python dataclass field
     scheduledPlanId: null,
     currency: typeof sub.currency === 'string' ? sub.currency.toUpperCase() : null, // EC:A28
     version: 0, // provider-side row; the local repo row owns the EC:K1 optimistic lock

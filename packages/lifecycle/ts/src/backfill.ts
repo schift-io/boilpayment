@@ -147,6 +147,12 @@ async function planRow(input: BackfillInput, row: BackfillRow): Promise<RowPlan>
   if (native) fail("billing_key_needs_self_scheduled_provider");
   if (!row.periodStart || !row.periodEnd || !(row.periodStart < row.periodEnd))
     fail("invalid_period");
+  // EC:A64 — a billing key charges the card it was issued for: one already on another customer's
+  // subscription is refused (a copy-paste in the file would renew this customer on that card).
+  const holders = (await input.repo.subscriptions.list({ provider: row.provider })).filter(
+    (s) => s.billingKey === row.billingKey && s.customerId !== row.customerId,
+  );
+  if (holders.length > 0) fail("billing_key_owned_by_other_customer");
   const mine = await input.repo.subscriptions.list({
     customerId: row.customerId,
     provider: row.provider,
@@ -166,6 +172,7 @@ async function planRow(input: BackfillInput, row: BackfillRow): Promise<RowPlan>
       cancelAtPeriodEnd: false,
       graceUntil: null,
       billingKey: row.billingKey,
+      billingCustomerRef: row.customerRef, // EC:A60 — the key was issued under this customer key
       scheduledPlanId: null,
       currency: row.currency ?? (await singlePriceCurrency(input, row.planId!)), // EC:A28
     },

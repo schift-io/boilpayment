@@ -52,6 +52,7 @@ MODULE_UPDATES: dict[str, tuple[str, ...]] = {
     "core": (
         "0011_subscription_status_paused_incomplete.sql",  # EC:A27
         "0012_subscription_currency.sql",  # EC:A28
+        "0014_subscription_billing_customer_ref.sql",  # EC:A60
     ),
 }
 

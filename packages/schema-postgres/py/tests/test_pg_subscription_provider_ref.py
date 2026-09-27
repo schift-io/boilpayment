@@ -24,6 +24,7 @@ def test_core_always_selects_provider_ref_followup():
         FOLLOWUP,
         "0011_subscription_status_paused_incomplete.sql",
         "0012_subscription_currency.sql",
+        "0014_subscription_billing_customer_ref.sql",
     ]
     assert FOLLOWUP in [file.name for file in load_migrations(["credits"])]
 

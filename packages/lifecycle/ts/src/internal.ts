@@ -1,5 +1,17 @@
 // Shared helpers, not part of the public spec surface.
-import { Clock, LedgerEntry, LedgerReference, LedgerStore, PaymentKitError, PaymentProvider, Plan, PlanPrice, Pool, ProviderName, Subscription } from 'boilpayment-core';
+import { Clock, LedgerEntry, LedgerReference, LedgerStore, PaymentKitError, PaymentProvider, Plan, PlanPrice, Pool, ProviderName, Repo, Subscription } from 'boilpayment-core';
+
+/**
+ * EC:A60 — the customer key a billing-key charge sends: the one the key was issued under (stored on the
+ * subscription), else the customer's provider reference (backfilled and `createCustomer` customers),
+ * else the local id (rows written before either existed, as before). Toss refuses a billing-key charge
+ * whose customerKey differs from the key's.
+ */
+export async function billingCustomerRef(repo: Repo, sub: Subscription): Promise<string> {
+  if (sub.billingCustomerRef) return sub.billingCustomerRef;
+  const customer = await repo.customers.get(sub.customerId);
+  return customer?.providerRefs.find((r) => r.provider === sub.provider)?.ref ?? sub.customerId;
+}
 
 export function resolvePriceRef(plan: Plan, provider: ProviderName, currency?: string | null): string {
   // EC:A28 A33 — a subscription with a currency only ever gets a price ref in that currency; a plan

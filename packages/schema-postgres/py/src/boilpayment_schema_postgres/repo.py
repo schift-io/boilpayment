@@ -67,7 +67,7 @@ def _customers_table(dsn: str) -> PgTable[Customer]:
 
 
 def _subscription_to_row(s: Subscription) -> dict[str, Any]:
-    return {
+    row: dict[str, Any] = {
         "id": s.id,
         "customer_id": s.customer_id,
         "plan_id": s.plan_id,
@@ -85,6 +85,10 @@ def _subscription_to_row(s: Subscription) -> dict[str, Any]:
         "version": getattr(s, "version", 0) or 0,  # EC:K1
         "created_at": s.created_at,
     }
+    # EC:A60 -- written only when set, so a database without 0014 keeps working for rows that lack it.
+    if getattr(s, "billing_customer_ref", None):
+        row["billing_customer_ref"] = s.billing_customer_ref
+    return row
 
 
 def _row_to_subscription(r: dict[str, Any]) -> Subscription:
@@ -102,6 +106,7 @@ def _row_to_subscription(r: dict[str, Any]) -> Subscription:
         billing_key=r["billing_key"],
         scheduled_plan_id=r["scheduled_plan_id"],
         currency=r.get("currency"),  # EC:A28
+        billing_customer_ref=r.get("billing_customer_ref"),  # EC:A60
         version=int(r.get("version") or 0),  # EC:K1
         created_at=r["created_at"],
     )

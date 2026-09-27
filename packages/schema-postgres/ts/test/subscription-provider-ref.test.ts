@@ -8,7 +8,7 @@ beforeAll(async () => { db = await createTestDb('nullable_provider_ref'); });
 afterAll(async () => { await dropTestDb(db); });
 
 it('always selects the core nullable-provider migration', () => {
-  expect(loadMigrations(['core']).map((file) => file.name)).toEqual(['0001_core.sql', followup, '0011_subscription_status_paused_incomplete.sql', '0012_subscription_currency.sql']);
+  expect(loadMigrations(['core']).map((file) => file.name)).toEqual(['0001_core.sql', followup, '0011_subscription_status_paused_incomplete.sql', '0012_subscription_currency.sql', '0014_subscription_billing_customer_ref.sql']);
   expect(loadMigrations(['credits']).map((file) => file.name)).toContain(followup);
 });
 

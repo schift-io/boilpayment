@@ -10,7 +10,7 @@ import { Clock, Money, NoopNotifier, Notifier, Operation, Payment, PaymentProvid
   expectedAttemptAmount, holdAttemptForReview, isLegacyAttemptRow, isUnderReview, lookupMismatch,
 } from 'boilpayment-core';
 import type { Period } from 'boilpayment-core';
-import { scopeProvider } from './internal.js';
+import { billingCustomerRef, scopeProvider } from './internal.js';
 
 const DAY_MS = 86_400_000;
 
@@ -270,7 +270,7 @@ async function chargeAttemptHeld(input: ChargeAttemptInput): Promise<ChargeAttem
       // A6-3 — a re-drive re-sends what its key was first sent with (the row), not today's price.
       amount: { ...pending.amount },
       orderId,
-      customerRef: sub.customerId,
+      customerRef: await billingCustomerRef(repo, sub), // EC:A60
       idempotencyKey: attemptKey,
     });
   } catch (err) {

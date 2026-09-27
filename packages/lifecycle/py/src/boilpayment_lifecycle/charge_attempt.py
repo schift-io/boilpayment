@@ -41,7 +41,7 @@ from boilpayment_core import (
     lookup_mismatch,
 )
 
-from .internal import scope_provider
+from .internal import billing_customer_ref, scope_provider
 
 
 def _sha256(value: str) -> str:
@@ -314,7 +314,7 @@ async def _charge_attempt_held(input: ChargeAttemptInput) -> ChargeAttemptOutcom
             billing_key=sub.billing_key or "",
             amount=pending.amount,  # A6-3 -- a re-drive re-sends what its key was first sent with
             order_id=order_id,
-            customer_ref=sub.customer_id,
+            customer_ref=await billing_customer_ref(repo, sub),  # EC:A60
             idempotency_key=input.attempt_key,
         )
     except Exception as err:  # noqa: BLE001 -- classified below: decline vs unknown outcome
