@@ -315,6 +315,9 @@ const server = createServer(async (req, res) => {
     sub.modified_at = nowIso();
     const order = buildOrderForProduct({ product, customerId: sub.customer_id, subscriptionId: sub.id, checkoutId: null });
     order.billing_reason = 'subscription_cycle';
+    // Polar creates the cycle order when the new period starts; the wall clock made refund windows
+    // (EC:D1) count from the test run instead of the period (round-6 I-4).
+    order.created_at = sub.current_period_start;
     if (body.status === 'pending') { order.status = 'pending'; order.paid = false; }
     return json(res, 200, { order_id: order.id, period_start: sub.current_period_start, period_end: sub.current_period_end });
   }
