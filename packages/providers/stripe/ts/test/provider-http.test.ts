@@ -274,7 +274,7 @@ function subFixture(overrides: Record<string, unknown> = {}) {
 }
 
 describe('[EC:A1] changeSubscription — proration + billing_cycle_anchor reset', () => {
-  it('[EC:A1] immediate_prorate_reset_anchor: retrieve then update with proration_behavior=create_prorations and billing_cycle_anchor=now', async () => {
+  it('[EC:A1] [I-4] immediate_prorate_reset_anchor: retrieve then update with proration_behavior=always_invoice, payment_behavior=error_if_incomplete and billing_cycle_anchor=now', async () => {
     mock.respondJson(200, subFixture());
     mock.respondJson(200, subFixture({ billing_cycle_anchor: 1700050000 }));
     const provider = makeProvider();
@@ -289,7 +289,8 @@ describe('[EC:A1] changeSubscription — proration + billing_cycle_anchor reset'
     expect(updateReq.path).toBe('/v1/subscriptions/sub_1');
     expect(updateReq.body).toContain('items[0][id]=si_1');
     expect(updateReq.body).toContain('items[0][price]=price_new');
-    expect(updateReq.body).toContain('proration_behavior=create_prorations');
+    expect(updateReq.body).toContain('proration_behavior=always_invoice');
+    expect(updateReq.body).toContain('payment_behavior=error_if_incomplete');
     expect(updateReq.body).toContain('billing_cycle_anchor=now');
   });
 

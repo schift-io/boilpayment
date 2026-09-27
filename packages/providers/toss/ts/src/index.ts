@@ -537,7 +537,8 @@ export class TossProvider implements PaymentProvider {
     // ISO-8601 string with an explicit offset, which is what py's isoformat() emits.
     const tossDate = (d: Date) => d.toISOString().replace(/\.\d{3}Z$/, '+00:00');
     const startDate = tossDate(input.since);
-    const endDate = tossDate(new Date());
+    // EC:A67 — endDate is rounded up to the next second: truncating it dropped a payment approved in the same second.
+    const endDate = tossDate(new Date(Math.floor(Date.now() / 1000) * 1000 + 1000));
     const raw = await this.request('GET', `/v1/transactions?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`);
     const list: any[] = Array.isArray(raw) ? raw : (raw.transactions ?? []);
     const matched = list.filter((t) => t.customerKey && t.customerKey === input.customerRef);

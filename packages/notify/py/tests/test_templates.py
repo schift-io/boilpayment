@@ -65,3 +65,19 @@ def test_a_field_a_template_does_not_name_still_reaches_a_person_through_detail(
     out = render("cs.needs_human", "en", {"customer_id": "c1", "kind": "renewal_double_charge", "payment_id": "pay_2"})
     assert "paymentId=pay_2" in out.text
     assert not _PLACEHOLDER.search(out.text)
+
+
+def test_i3_instants_render_as_utc_minutes() -> None:
+    from datetime import UTC, datetime
+
+    from boilpayment_notify.templates import render, show_value
+
+    assert show_value("2026-04-08T10:00:00+09:00") == "2026-04-08 01:00 UTC"
+    assert show_value(datetime(2026, 4, 8, 1, 0, tzinfo=UTC)) == "2026-04-08 01:00 UTC"
+    assert show_value("not a time") == "not a time"
+    import re
+
+    for locale in ("en", "ko"):
+        out = render("grace.ending", locale, {"grace_until": "2026-04-08T01:00:00.000Z"})
+        assert "2026-04-08 01:00 UTC" in out.text
+        assert not re.search(r"\d{4}-\d{2}-\d{2}T\d{2}:", out.text)

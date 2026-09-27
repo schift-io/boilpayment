@@ -626,7 +626,8 @@ class TossProvider:
         # EC:H4 — Toss has no list-by-customer API. Best-effort via /v1/transactions;
         # matches only when the transaction row happens to carry customerKey. See spec.
         start_date = since.isoformat()
-        end_date = datetime.now(UTC).isoformat()
+        # EC:A67 -- endDate is rounded up to the next second (a payment approved in the same second is kept).
+        end_date = (datetime.now(UTC).replace(microsecond=0) + timedelta(seconds=1)).isoformat()
         raw = await self._request(
             "GET", f"/v1/transactions?startDate={start_date}&endDate={end_date}"
         )

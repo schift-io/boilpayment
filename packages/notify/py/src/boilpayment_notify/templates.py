@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from boilpayment_core import Notification, NotifyType
@@ -31,6 +33,24 @@ def _camel(key: str) -> str:
     return head + "".join(p[:1].upper() + p[1:] for p in rest)
 
 
+_ISO_INSTANT = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$")
+
+
+def show_value(v: Any) -> str:
+    """I-3 -- an instant reads as ``2026-04-08 01:00 UTC`` in a message body, never a raw ISO string."""
+    when: datetime | None = None
+    if isinstance(v, datetime):
+        when = v
+    elif isinstance(v, str) and _ISO_INSTANT.match(v):
+        try:
+            when = datetime.fromisoformat(v)
+        except ValueError:
+            when = None
+    if when is not None and when.tzinfo is not None:
+        return when.astimezone(UTC).strftime("%Y-%m-%d %H:%M") + " UTC"
+    return str(v)
+
+
 def _interp(s: str, payload: dict[str, Any]) -> str:
     """Placeholders are the TS payload keys ({graceUntil}); Python payloads use snake_case keys
     (grace_until), so each key also fills its camelCase placeholder (round-6 I-5: a Python grace
@@ -39,10 +59,10 @@ def _interp(s: str, payload: dict[str, Any]) -> str:
     for k, v in payload.items():
         if v is None:
             continue
-        out = out.replace("{" + k + "}", str(v))
+        out = out.replace("{" + k + "}", show_value(v))
         camel = _camel(k)
         if camel != k:
-            out = out.replace("{" + camel + "}", str(v))
+            out = out.replace("{" + camel + "}", show_value(v))
     return out
 
 

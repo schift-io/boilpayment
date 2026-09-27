@@ -6,8 +6,17 @@ export interface Rendered { subject: string; text: string }
 export type TemplateFn = (payload: Record<string, unknown>) => Rendered;
 export type TemplateSet = { en: TemplateFn; ko: TemplateFn };
 
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
+
+/** I-3 — an instant reads as `2026-04-08 01:00 UTC` in a message body, never a raw ISO string. */
+export function showValue(v: unknown): string {
+  const d = v instanceof Date ? v : typeof v === 'string' && ISO_INSTANT.test(v) ? new Date(v) : null;
+  if (d && !Number.isNaN(d.getTime())) return d.toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+  return String(v);
+}
+
 function interp(s: string, payload: Record<string, unknown>): string {
-  return s.replace(/\{(\w+)\}/g, (_, k) => (payload[k] !== undefined && payload[k] !== null ? String(payload[k]) : `{${k}}`));
+  return s.replace(/\{(\w+)\}/g, (_, k) => (payload[k] !== undefined && payload[k] !== null ? showValue(payload[k]) : `{${k}}`));
 }
 
 /** EC:I11 — `{detail}`: every payload field as `key=value`, for templates whose senders carry different fields. */

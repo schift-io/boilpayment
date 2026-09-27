@@ -96,3 +96,17 @@ describe('notify: templates exhaustive coverage', () => {
     expect(out.text).not.toMatch(/\{\w+\}/);
   });
 });
+
+describe('[I-3] instants in message bodies', () => {
+  it('an ISO instant or a Date renders as YYYY-MM-DD HH:mm UTC, never raw ISO', async () => {
+    const { render, showValue } = await import('../src/templates.js');
+    expect(showValue('2026-04-08T10:00:00+09:00')).toBe('2026-04-08 01:00 UTC');
+    expect(showValue(new Date('2026-04-08T01:00:00.000Z'))).toBe('2026-04-08 01:00 UTC');
+    expect(showValue('not a time')).toBe('not a time');
+    for (const locale of ['en', 'ko'] as const) {
+      const out = render('grace.ending', locale, { graceUntil: '2026-04-08T01:00:00.000Z' });
+      expect(out.text).toContain('2026-04-08 01:00 UTC');
+      expect(out.text).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:/);
+    }
+  });
+});

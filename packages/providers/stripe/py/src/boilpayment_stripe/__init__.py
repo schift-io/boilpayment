@@ -858,12 +858,14 @@ class StripeProvider:
             else current.items.data[0]
         )
         item_id = item["id"] if isinstance(item, dict) else item.id
-        params: dict[str, Any] = {
-            "items": [{"id": item_id, "price": new_price_ref}],
-            "proration_behavior": "create_prorations"
-            if proration == "immediate"
-            else "none",
-        }
+        # I-4 -- an immediate change invoices the proration now and fails when that payment fails, so the kit
+        # grants the upgrade's credits only for money Stripe collected.
+        params: dict[str, Any] = {"items": [{"id": item_id, "price": new_price_ref}]}
+        if proration == "immediate":
+            params["proration_behavior"] = "always_invoice"
+            params["payment_behavior"] = "error_if_incomplete"
+        else:
+            params["proration_behavior"] = "none"
         if reset_anchor:
             params["billing_cycle_anchor"] = "now"
         sub = await self._client.v1.subscriptions.update_async(provider_ref, params)

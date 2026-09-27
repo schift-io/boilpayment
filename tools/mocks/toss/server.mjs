@@ -262,6 +262,15 @@ async function handleChargeBillingKey(req, res, billingKey) {
   if (typeof reqBody.amount !== 'number' || !reqBody.orderId) {
     return sendJson(res, 400, errorBody('INVALID_REQUEST', 'amount, orderId 는 필수입니다'));
   }
+  // Toss documents orderId as 6–64 characters of letters, digits, '-' and '_' (EC:A35 A57): anything else
+  // (an earlier release's raw 'charge:<sub>:<time>' key) is refused before any money moves.
+  if (!/^[A-Za-z0-9_-]{6,64}$/.test(String(reqBody.orderId))) {
+    return sendJson(res, 400, errorBody('INVALID_REQUEST', 'orderId 는 영문 대소문자, 숫자, -, _ 로 이루어진 6자 이상 64자 이하여야 합니다'));
+  }
+  // A billing key charges only under the customerKey it was issued for (EC:A60): Toss refuses another.
+  if (reqBody.customerKey && billing.customerKey && reqBody.customerKey !== billing.customerKey) {
+    return sendJson(res, 400, errorBody('NOT_MATCHES_CUSTOMER_KEY', '빌링키 발급에 사용한 customerKey 와 일치하지 않습니다'));
+  }
   const paymentKey = genId('mock_pay_');
   const record = buildPaymentRecord({
     paymentKey,

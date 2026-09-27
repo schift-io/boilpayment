@@ -435,7 +435,8 @@ def test_ec_a1_immediate_prorate_reset_anchor(mock):
     assert update_req.path == "/v1/subscriptions/sub_1"
     assert "items[0][id]=si_1" in update_req.post_data
     assert "items[0][price]=price_new" in update_req.post_data
-    assert "proration_behavior=create_prorations" in update_req.post_data
+    assert "proration_behavior=always_invoice" in update_req.post_data
+    assert "payment_behavior=error_if_incomplete" in update_req.post_data
     assert "billing_cycle_anchor=now" in update_req.post_data
 
 
