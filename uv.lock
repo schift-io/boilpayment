@@ -38,7 +38,7 @@ wheels = [
 
 [[package]]
 name = "boilpayment"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/sdk/py" }
 dependencies = [
     { name = "boilpayment-core" },
@@ -75,7 +75,7 @@ requires-dist = [
 
 [[package]]
 name = "boilpayment-apple"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/providers/apple/py" }
 dependencies = [
     { name = "boilpayment-core" },
@@ -92,12 +92,12 @@ requires-dist = [
 
 [[package]]
 name = "boilpayment-core"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/core/py" }
 
 [[package]]
 name = "boilpayment-credits"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/credits/py" }
 dependencies = [
     { name = "boilpayment-core" },
@@ -108,7 +108,7 @@ requires-dist = [{ name = "boilpayment-core", editable = "packages/core/py" }]
 
 [[package]]
 name = "boilpayment-cs"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/cs/py" }
 dependencies = [
     { name = "boilpayment-core" },
@@ -123,7 +123,7 @@ requires-dist = [
 
 [[package]]
 name = "boilpayment-google-play"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/providers/google-play/py" }
 dependencies = [
     { name = "boilpayment-core" },
@@ -140,7 +140,7 @@ requires-dist = [
 
 [[package]]
 name = "boilpayment-lifecycle"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/lifecycle/py" }
 dependencies = [
     { name = "boilpayment-core" },
@@ -210,7 +210,7 @@ dev = [
 
 [[package]]
 name = "boilpayment-notify"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/notify/py" }
 dependencies = [
     { name = "boilpayment-core" },
@@ -225,7 +225,7 @@ requires-dist = [
 
 [[package]]
 name = "boilpayment-polar"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/providers/polar/py" }
 dependencies = [
     { name = "boilpayment-core" },
@@ -240,7 +240,7 @@ requires-dist = [
 
 [[package]]
 name = "boilpayment-portone"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/providers/portone/py" }
 dependencies = [
     { name = "boilpayment-core" },
@@ -255,7 +255,7 @@ requires-dist = [
 
 [[package]]
 name = "boilpayment-refund"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/refund/py" }
 dependencies = [
     { name = "boilpayment-core" },
@@ -266,7 +266,7 @@ requires-dist = [{ name = "boilpayment-core", editable = "packages/core/py" }]
 
 [[package]]
 name = "boilpayment-schema-postgres"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/schema-postgres/py" }
 dependencies = [
     { name = "boilpayment-core" },
@@ -283,7 +283,7 @@ requires-dist = [
 
 [[package]]
 name = "boilpayment-stripe"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/providers/stripe/py" }
 dependencies = [
     { name = "boilpayment-core" },
@@ -298,7 +298,7 @@ requires-dist = [
 
 [[package]]
 name = "boilpayment-toss"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/providers/toss/py" }
 dependencies = [
     { name = "boilpayment-core" },
@@ -313,7 +313,7 @@ requires-dist = [
 
 [[package]]
 name = "boilpayment-usage"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/usage/py" }
 dependencies = [
     { name = "boilpayment-core" },
@@ -324,7 +324,7 @@ requires-dist = [{ name = "boilpayment-core", editable = "packages/core/py" }]
 
 [[package]]
 name = "boilpayment-webhook"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/webhook/py" }
 dependencies = [
     { name = "boilpayment-core" },

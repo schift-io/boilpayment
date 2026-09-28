@@ -1,6 +1,6 @@
 [project]
 name = "boilpayment-google-play"
-version = "0.2.0"
+version = "0.2.1"
 description = "boilpayment — Google Play (in-app purchases)"
 readme = "README.md"
 license = "MIT"

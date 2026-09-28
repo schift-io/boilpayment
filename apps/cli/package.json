@@ -1,6 +1,6 @@
 {
   "name": "boilpayment",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "boilpayment — CLI wizard: pick a provider, answer policy questions, get modules + Postgres schema + webhook + notifications",
   "license": "MIT",
   "keywords": [
