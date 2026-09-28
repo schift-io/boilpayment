@@ -69,9 +69,10 @@ async def revert_refunded_upgrade(repo: Repo, payment: Payment) -> None:
     sub = await repo.subscriptions.get(payment.subscription_id)
     if sub is None or sub.plan_id != up.get("planId"):
         return
-    # EC:A80 -- a renewal after the upgrade charge paid its period at the upgraded price; restoring the old
-    # period would bill it again. Only the charge's credits come back.
-    if sub.current_period.start > payment.occurred_at:
+    # EC:A80 -- a renewal that started a period at or after the old period's end paid it at the upgraded
+    # price; restoring the old period would bill it again. Only the charge's credits come back. (Compared
+    # with the stored period, not the payment time, which is the provider's clock.)
+    if sub.current_period.start >= datetime.fromisoformat(up["fromPeriodEnd"]):
         return
     anchor = up.get("fromAnchorDay")
     await repo.subscriptions.put(dataclasses.replace(
