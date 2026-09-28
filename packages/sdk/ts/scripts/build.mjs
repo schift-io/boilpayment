@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -25,6 +26,46 @@ const MODULES = [
 const MODULE_BY_PACKAGE = new Map(MODULES.map(([packageName, subpath]) => [packageName, subpath]));
 const INTERNAL_SPECIFIER = /(['"])(boilpayment-(?:core|credits|lifecycle|refund|usage|webhook|notify|cs|schema-postgres|stripe|toss|portone|polar))(\/[^'"]*)?\1/g;
 
+async function modulesInDependencyOrder() {
+  const dependenciesByPackage = new Map();
+  for (const [packageName, , relativePackageRoot] of MODULES) {
+    const packageJsonPath = path.join(REPO_ROOT, relativePackageRoot, 'package.json');
+    const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf8'));
+    if (packageJson.name !== packageName) {
+      throw new Error(`module list names ${packageName}, but ${packageJsonPath} names ${packageJson.name}`);
+    }
+
+    const internalDependencies = Object.keys(packageJson.dependencies ?? {})
+      .filter((dependency) => dependency.startsWith('boilpayment-'));
+    for (const dependency of internalDependencies) {
+      if (!MODULE_BY_PACKAGE.has(dependency)) {
+        throw new Error(`${packageName} depends on unlisted internal module ${dependency}`);
+      }
+    }
+    dependenciesByPackage.set(packageName, internalDependencies);
+  }
+
+  const ordered = [];
+  const built = new Set();
+  const visiting = [];
+  function visit(packageName) {
+    if (built.has(packageName)) return;
+    const cycleStart = visiting.indexOf(packageName);
+    if (cycleStart !== -1) {
+      throw new Error(`internal module dependency cycle: ${[...visiting.slice(cycleStart), packageName].join(' -> ')}`);
+    }
+
+    visiting.push(packageName);
+    for (const dependency of dependenciesByPackage.get(packageName)) visit(dependency);
+    visiting.pop();
+    built.add(packageName);
+    ordered.push(MODULES.find(([candidate]) => candidate === packageName));
+  }
+
+  for (const [packageName] of MODULES) visit(packageName);
+  return { ordered, dependenciesByPackage };
+}
+
 function compile(tsconfig, rootDir, outDir) {
   execFileSync(TSC, [
     '-p', tsconfig,
@@ -45,13 +86,35 @@ async function filesBelow(dir) {
 }
 
 await fs.mkdir(path.join(DIST, 'internal'), { recursive: true });
-for (const [, subpath, relativePackageRoot] of MODULES) {
-  const moduleRoot = path.join(REPO_ROOT, relativePackageRoot);
-  compile(
-    path.join(moduleRoot, 'tsconfig.json'),
-    path.join(moduleRoot, 'src'),
-    path.join(DIST, 'internal', subpath),
-  );
+const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'boilpayment-sdk-build-'));
+try {
+  const { ordered, dependenciesByPackage } = await modulesInDependencyOrder();
+  for (const [packageName, subpath, relativePackageRoot] of ordered) {
+    const moduleRoot = path.join(REPO_ROOT, relativePackageRoot);
+    const paths = {};
+    for (const dependency of dependenciesByPackage.get(packageName)) {
+      const dependencySubpath = MODULE_BY_PACKAGE.get(dependency);
+      const dependencyDist = path.join(DIST, 'internal', dependencySubpath);
+      paths[dependency] = [path.join(dependencyDist, 'index.d.ts')];
+      paths[`${dependency}/*`] = [path.join(dependencyDist, '*')];
+    }
+
+    const tempTsconfig = path.join(tempDir, `${subpath}.json`);
+    await fs.writeFile(tempTsconfig, `${JSON.stringify({
+      extends: path.join(moduleRoot, 'tsconfig.json'),
+      compilerOptions: {
+        paths,
+        typeRoots: [path.join(moduleRoot, 'node_modules/@types')],
+      },
+    }, null, 2)}\n`);
+    compile(
+      tempTsconfig,
+      path.join(moduleRoot, 'src'),
+      path.join(DIST, 'internal', subpath),
+    );
+  }
+} finally {
+  await fs.rm(tempDir, { recursive: true, force: true });
 }
 
 const sqlSource = path.join(REPO_ROOT, 'packages/schema-postgres/sql');
