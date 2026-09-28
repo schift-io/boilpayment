@@ -1,4 +1,5 @@
 {
+  "private": true,
   "name": "boilpayment-apple",
   "version": "0.2.0",
   "description": "boilpayment — Apple App Store (in-app purchases)",

@@ -309,9 +309,6 @@ importers:
 
   packages/sdk/ts:
     dependencies:
-      boilpayment-apple:
-        specifier: workspace:*
-        version: link:../../providers/apple/ts
       boilpayment-core:
         specifier: workspace:*
         version: link:../../core/ts
@@ -321,9 +318,6 @@ importers:
       boilpayment-cs:
         specifier: workspace:*
         version: link:../../cs/ts
-      boilpayment-google-play:
-        specifier: workspace:*
-        version: link:../../providers/google-play/ts
       boilpayment-lifecycle:
         specifier: workspace:*
         version: link:../../lifecycle/ts

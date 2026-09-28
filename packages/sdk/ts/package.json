@@ -71,14 +71,6 @@
       "types": "./dist/polar.d.ts",
       "import": "./dist/polar.js"
     },
-    "./apple": {
-      "types": "./dist/apple.d.ts",
-      "import": "./dist/apple.js"
-    },
-    "./google-play": {
-      "types": "./dist/google-play.d.ts",
-      "import": "./dist/google-play.js"
-    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -108,9 +100,7 @@
     "boilpayment-stripe": "workspace:*",
     "boilpayment-toss": "workspace:*",
     "boilpayment-portone": "workspace:*",
-    "boilpayment-polar": "workspace:*",
-    "boilpayment-apple": "workspace:*",
-    "boilpayment-google-play": "workspace:*"
+    "boilpayment-polar": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

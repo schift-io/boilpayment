@@ -41,11 +41,9 @@ name = "boilpayment"
 version = "0.2.0"
 source = { editable = "packages/sdk/py" }
 dependencies = [
-    { name = "boilpayment-apple" },
     { name = "boilpayment-core" },
     { name = "boilpayment-credits" },
     { name = "boilpayment-cs" },
-    { name = "boilpayment-google-play" },
     { name = "boilpayment-lifecycle" },
     { name = "boilpayment-notify" },
     { name = "boilpayment-polar" },
@@ -60,11 +58,9 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "boilpayment-apple", editable = "packages/providers/apple/py" },
     { name = "boilpayment-core", editable = "packages/core/py" },
     { name = "boilpayment-credits", editable = "packages/credits/py" },
     { name = "boilpayment-cs", editable = "packages/cs/py" },
-    { name = "boilpayment-google-play", editable = "packages/providers/google-play/py" },
     { name = "boilpayment-lifecycle", editable = "packages/lifecycle/py" },
     { name = "boilpayment-notify", editable = "packages/notify/py" },
     { name = "boilpayment-polar", editable = "packages/providers/polar/py" },
