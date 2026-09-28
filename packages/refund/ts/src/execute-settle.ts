@@ -1,5 +1,6 @@
 import type { Payment, Refund } from 'boilpayment-core';
 import type { ExecuteInput } from './execute.js';
+import { revertRefundedUpgrade } from './util.js';
 
 export async function settleRefund(input: ExecuteInput, providerResult: Refund, payment: Payment): Promise<Refund> {
   const { decision, provider, ledger, repo, clock, extra, cs, policy, correlationId } = input;
@@ -52,7 +53,9 @@ export async function settleRefund(input: ExecuteInput, providerResult: Refund, 
     .filter((r) => r.status === 'succeeded' && r.id !== refundId)
     .reduce((sum, r) => sum + r.amount.amountMinor, 0);
   const totalRefunded = priorRefunded + providerResult.amount.amountMinor;
-  await repo.payments.put({ ...payment, status: totalRefunded >= payment.amount.amountMinor ? 'refunded' : 'partially_refunded' });
+  const settledPayment: typeof payment = { ...payment, status: totalRefunded >= payment.amount.amountMinor ? 'refunded' : 'partially_refunded' };
+  await repo.payments.put(settledPayment);
+  await revertRefundedUpgrade(repo, settledPayment); // EC:A76
 
   const refund: Refund = {
     id: refundId, paymentId: payment.id, customerId: decision.customerId, amount: providerResult.amount,

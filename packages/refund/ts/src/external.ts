@@ -1,7 +1,7 @@
 import { roundHalfAwayFromZero } from 'boilpayment-core';
 // spec/refund.pseudo.md — EC:D8 D18
 import { Clock, IdGen, LedgerStore, NormalizedEvent, PaymentKitError, Refund, Repo } from 'boilpayment-core';
-import { weightedAvgUnitPrice } from './util.js';
+import { revertRefundedUpgrade, weightedAvgUnitPrice } from './util.js';
 
 /** Injected instead of importing `boilpayment-cs` directly (EC:D8). */
 export interface ReconcileMismatchCaseOpener {
@@ -166,6 +166,7 @@ export async function onExternalRefund(input: OnExternalRefundInput): Promise<Re
       const totalRefunded = alreadyRefundedMinor + amountMinor;
       payment.status = totalRefunded >= payment.amount.amountMinor ? 'refunded' : 'partially_refunded';
       await repo.payments.put(payment);
+      await revertRefundedUpgrade(repo, payment); // EC:A76
     }
 
     const mismatch = event.amount == null || rawCredits !== creditsToRevoke;

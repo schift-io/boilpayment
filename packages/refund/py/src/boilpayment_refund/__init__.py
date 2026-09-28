@@ -8,7 +8,13 @@ from .external import (
     on_external_refund,
 )
 from .reason import ReasonRuling, RefundReasonInput, rule_for_reason
-from .util import apply_rounding, days_between, proration_ratio, weighted_avg_unit_price
+from .util import (
+    apply_rounding,
+    days_between,
+    proration_ratio,
+    revert_refunded_upgrade,
+    weighted_avg_unit_price,
+)
 
 __all__ = [
     "EvaluateInput",
@@ -24,6 +30,7 @@ __all__ = [
     "execute",
     "on_external_refund",
     "proration_ratio",
+    "revert_refunded_upgrade",
     "rule_for_reason",
     "weighted_avg_unit_price",
 ]

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+from typing import Any
 
 from boilpayment_core import (
     Clock,
@@ -34,7 +35,7 @@ def is_upgrade_payment(row: Payment) -> bool:
 
 async def charge_upgrade_delta(
     *, provider: PaymentProvider, repo: Repo, clock: Clock, sub: Subscription, plan_id: str, charge_key: str,
-    legacy_order_ids: list[str], amount: Money,
+    legacy_order_ids: list[str], amount: Money, revert: dict[str, Any] | None = None,
 ) -> Payment:
     """EC:A57 A62 -- charge the delta once, with a local payment row written before the provider is called.
     orderId and idempotency key are ``ord_`` + 40 hex of the charge key (EC:A35). The provider is asked
@@ -50,7 +51,7 @@ async def charge_upgrade_delta(
         id=row_id, customer_id=sub.customer_id, provider=sub.provider, provider_ref=order_id,
         subscription_id=sub.id, amount=Money(amount_minor=amount.amount_minor, currency=amount.currency),
         status="pending", kind="subscription", period=None, occurred_at=clock.now(), failure=None,
-        cash_receipt=None, raw={"boilpaymentUpgrade": {"chargeKey": charge_key, "planId": plan_id}},
+        cash_receipt=None, raw={"boilpaymentUpgrade": {"chargeKey": charge_key, "planId": plan_id, **(revert or {})}},  # EC:A76
     )
     prior = await _prior_charge(provider, sub, order_id, legacy_order_ids)
     if prior is not None:

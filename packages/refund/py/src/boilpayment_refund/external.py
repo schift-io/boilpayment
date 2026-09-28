@@ -20,7 +20,7 @@ from boilpayment_core import (
 )
 from boilpayment_core.money import round_half_away_from_zero
 
-from .util import weighted_avg_unit_price
+from .util import revert_refunded_upgrade, weighted_avg_unit_price
 
 
 def payment_share_credits(amount_minor: int, currency: str, paid: Any, total_granted: int) -> int | None:
@@ -311,6 +311,7 @@ async def on_external_refund(input: OnExternalRefundInput) -> Refund:
                 else "partially_refunded"
             )
             await repo.payments.put(payment)
+            await revert_refunded_upgrade(repo, payment)  # EC:A76
 
         mismatch = event.amount is None or raw_credits != credits_to_revoke
         if mismatch:

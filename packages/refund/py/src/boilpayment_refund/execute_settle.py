@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING
 
 from boilpayment_core import LedgerReference, NewLedgerEntry, Payment, Refund
 
+from .util import revert_refunded_upgrade
+
 if TYPE_CHECKING:
     from .execute import ExecuteInput
 
@@ -112,9 +114,11 @@ async def settle_refund(input: ExecuteInput, provider_result: Refund, payment: P
         if r.status == "succeeded" and r.id != refund_id
     )
     total_refunded = prior_refunded + provider_result.amount.amount_minor
-    await repo.payments.put(replace(payment, status=(
+    settled_payment = replace(payment, status=(
         "refunded" if total_refunded >= payment.amount.amount_minor else "partially_refunded"
-    )))
+    ))
+    await repo.payments.put(settled_payment)
+    await revert_refunded_upgrade(repo, settled_payment)  # EC:A76
 
     refund = Refund(
         id=refund_id,

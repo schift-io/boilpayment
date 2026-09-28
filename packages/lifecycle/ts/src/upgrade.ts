@@ -153,6 +153,7 @@ async function upgradeHeld(input: UpgradeInput): Promise<UpgradeResult> {
       payment = await chargeUpgradeDelta({
         provider: scopedProvider, repo, clock, sub, planId: newPlan.id, chargeKey, legacyOrderIds: [chargeKey],
         amount: { amountMinor: money, currency: newPrice.currency },
+        revert: { fromPlanId: sub.planId, period: sub.currentPeriod, anchorDay: sub.anchorDay }, // EC:A76
       });
       if (payment.status !== 'succeeded') {
         throw new PaymentKitError('upgrade charge did not succeed', 'upgrade_charge_failed', { payment });

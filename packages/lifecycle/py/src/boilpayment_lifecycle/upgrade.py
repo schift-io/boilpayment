@@ -280,6 +280,8 @@ async def _do_upgrade(input: UpgradeInput, stamp: str) -> UpgradeResult:
                 legacy_order_ids=[charge_key, f"charge:upgrade:{sub.id}:{new_plan.id}:{stamp}",
                                   f"charge:upgrade:{sub.id}:{new_plan.id}:{sub.current_period.start.astimezone(UTC).isoformat()}"],
                 amount=Money(amount_minor=money, currency=new_price.currency),
+                revert={"fromPlanId": sub.plan_id, "fromPeriodStart": iso_z(sub.current_period.start),  # EC:A76
+                        "fromPeriodEnd": iso_z(sub.current_period.end), "fromAnchorDay": sub.anchor_day},
             )
             if payment.status != "succeeded":
                 raise PaymentKitError(

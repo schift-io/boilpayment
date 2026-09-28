@@ -17,6 +17,8 @@ export interface UpgradeChargeInput {
   /** orderIds an earlier release may have sent for this same charge (it sent the raw key). */
   legacyOrderIds: string[];
   amount: Money;
+  /** EC:A76 — what a full refund of this charge puts back: the plan, period and anchor before the upgrade. */
+  revert?: { fromPlanId: string; period: { start: Date; end: Date }; anchorDay: number };
 }
 
 /** EC:A62 — the local payment row of an upgrade charge: found again without a scan, on every retry. */
@@ -47,7 +49,9 @@ export async function chargeUpgradeDelta(input: UpgradeChargeInput): Promise<Pay
   const base: Payment = stored ?? {
     id, customerId: sub.customerId, provider: sub.provider, providerRef: orderId, subscriptionId: sub.id,
     amount: { ...input.amount }, status: 'pending', kind: 'subscription', period: null, occurredAt: clock.now(),
-    failure: null, cashReceipt: null, raw: { boilpaymentUpgrade: { chargeKey: input.chargeKey, planId: input.planId } },
+    failure: null, cashReceipt: null, raw: { boilpaymentUpgrade: { chargeKey: input.chargeKey, planId: input.planId, ...(input.revert ? {
+      fromPlanId: input.revert.fromPlanId, fromPeriodStart: input.revert.period.start.toISOString(),
+      fromPeriodEnd: input.revert.period.end.toISOString(), fromAnchorDay: input.revert.anchorDay } : {}) } },
   };
   const prior = await priorCharge(provider, sub, orderId, input.legacyOrderIds);
   if (prior) return record(repo, base, prior);

@@ -4,6 +4,6 @@ export { execute } from './execute.js';
 export type { ExecuteInput, RefundFailedCaseOpener } from './execute.js';
 export { onExternalRefund } from './external.js';
 export type { OnExternalRefundInput, ReconcileMismatchCaseOpener } from './external.js';
-export { applyRounding, daysBetween, prorationRatio, weightedAvgUnitPrice } from './util.js';
+export { applyRounding, daysBetween, prorationRatio, revertRefundedUpgrade, weightedAvgUnitPrice } from './util.js';
 export { ruleForReason } from './reason.js';
 export type { RefundReasonInput, ReasonRuling } from './reason.js';

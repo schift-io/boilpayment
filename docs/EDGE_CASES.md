@@ -90,6 +90,7 @@
 | A73 | 밴된 고객이 계속 청구됨 — 취소된 구독을 `reactivate` 하면 tick 이 청구하고, 충전 결제는 받아서 쓸 수 없는 크레딧을 줌(round-9 A9-10) | (구현 규칙) | 새 청구(`chargeAttempt`: 갱신·dunning 재시도·가입)는 고객이 `banned` 면 쓰기·전송 전에 `customer_banned` 로 거절한다. `reactivate` 도 `customer_banned` 로 거절하고, `startCheckout` 은 `frozen`·`banned` 고객을 `customer_<status>` 로 거절한다 | lifecycle · cs | P0 |
 | A74 | Toss·PortOne 구독 플랜에도 `startCheckout` 이 결제창 주문을 만들어, 승인하면 돈만 받고 등록은 `use_start_subscription` 으로 거절됨(round-9 A9-18) | (구현 규칙) | 자체 청구 결제사의 구독 플랜은 `startCheckout` 에서 주문을 만들기 전에 `use_start_subscription` 으로 거절한다 | cs | P0 |
 | A75 | 초과 사용량 청구가 빌링키를 발급받은 customerKey 대신 고객의 결제사 참조를 보내 Toss 가 거절하고, 그러면 `closePeriods` 전체가 멈춰 다른 고객의 초과 청구도 빠짐(round-9 A9-11) | (구현 규칙) | 초과 청구는 구독의 `billingCustomerRef` 를 먼저 보낸다(A60 과 같은 규칙). `settleDuePeriods` 는 구독 하나의 오류를 모아 두고 나머지 구독을 모두 처리한 뒤 `usage_settlement_errors`(각 구독의 코드·메시지)로 알린다. 첫 청구가 성공한 적 없는 닫힌 가입은 사용량 주인 후보에서 뺀다 | usage | P0 |
+| A76 | 업그레이드 추가금을 환불하면 크레딧만 회수되고 새 플랜·재설정된 기간이 남아, 다음 갱신이 새 플랜 요금으로 청구됨(round-9 A9-5) | (구현 규칙) | 업그레이드 결제 행이 업그레이드 전 플랜·기간·기준일을 기록한다. 그 결제가 전액 환불되면(킷 환불·결제사 콘솔 환불 모두) 업그레이드한 플랜이 아직 현재 플랜일 때 구독을 이전 플랜·기간·기준일로 되돌린다. 부분 환불은 구독을 바꾸지 않는다 | refund · lifecycle | P0 |
 
 ## B. 크레딧 원장
 

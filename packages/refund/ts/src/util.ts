@@ -1,6 +1,6 @@
 // Local helpers. EC:G2 proration_ratio itself lives in `core` (shared, canonical) — re-exported
 // here so evaluate.ts has one import surface; not duplicated.
-import type { LedgerEntry, RefundRounding } from 'boilpayment-core';
+import type { LedgerEntry, Payment, RefundRounding, Repo } from 'boilpayment-core';
 import { roundHalfAwayFromZero } from 'boilpayment-core';
 
 export { prorationRatio } from 'boilpayment-core';
@@ -28,4 +28,22 @@ export function weightedAvgUnitPrice(grants: LedgerEntry[]): number {
     totalValue += g.amount * (g.unitPriceMinor ?? 0);
   }
   return totalAmount > 0 ? totalValue / totalAmount : 0;
+}
+
+/**
+ * EC:A76 — a fully refunded upgrade charge puts the subscription back where the upgrade found it: the
+ * old plan, period and anchor (the refund took the upgrade's money and credits back, so it keeps no
+ * plan either). Only while the upgraded plan is still the current one; a partial refund changes nothing.
+ */
+export async function revertRefundedUpgrade(repo: Repo, payment: Payment): Promise<void> {
+  if (payment.status !== 'refunded' || !payment.subscriptionId) return;
+  const up = (payment.raw as { boilpaymentUpgrade?: Record<string, unknown> } | undefined)?.boilpaymentUpgrade;
+  if (!up || typeof up.fromPlanId !== 'string' || typeof up.fromPeriodStart !== 'string' || typeof up.fromPeriodEnd !== 'string') return;
+  const sub = await repo.subscriptions.get(payment.subscriptionId);
+  if (!sub || sub.planId !== up.planId) return;
+  await repo.subscriptions.put({
+    ...sub, planId: up.fromPlanId, scheduledPlanId: null,
+    currentPeriod: { start: new Date(up.fromPeriodStart), end: new Date(up.fromPeriodEnd) },
+    anchorDay: typeof up.fromAnchorDay === 'number' ? up.fromAnchorDay : sub.anchorDay,
+  });
 }
