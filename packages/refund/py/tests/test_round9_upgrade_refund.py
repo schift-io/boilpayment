@@ -51,3 +51,17 @@ def test_a76_partial_or_changed_plan_is_untouched() -> None:
         assert (await repo.subscriptions.get("s1")).plan_id == "max"  # type: ignore[union-attr]
 
     asyncio.run(scenario())
+
+
+def test_a80_refund_after_renewal_keeps_renewed_period() -> None:
+    async def scenario() -> None:
+        repo = InMemoryRepo()
+        renewed = dataclasses.replace(UPGRADED, current_period=Period(
+            start=datetime.fromisoformat("2026-05-11T00:00:00+00:00"), end=datetime.fromisoformat("2026-06-11T00:00:00+00:00")))
+        await repo.subscriptions.put(renewed)
+        await revert_refunded_upgrade(repo, row("refunded"))
+        sub = await repo.subscriptions.get("s1")
+        assert sub is not None
+        assert (sub.plan_id, sub.current_period) == ("pro", renewed.current_period)
+
+    asyncio.run(scenario())

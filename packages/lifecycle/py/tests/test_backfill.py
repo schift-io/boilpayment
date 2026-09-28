@@ -293,3 +293,15 @@ def test_ec_a28_backfill_sets_subscription_currency():
         return {s.customer_id: s.currency for s in await deps["repo"].subscriptions.list()}
 
     assert asyncio.run(run()) == {"u1": "KRW", "u2": "USD", "u3": "EUR"}
+
+
+def test_a81_anchor_day_is_civil_day_in_policy_timezone():
+    async def body():
+        d = await setup()
+        r = row(provider="toss", customer_ref="ck_1", billing_key="bk_1", plan_id="pro",
+                period_start=datetime(2026, 9, 30, 15, tzinfo=UTC), period_end=datetime(2026, 10, 31, 15, tzinfo=UTC))
+        await backfill(BackfillInput(rows=[r], timezone="Asia/Seoul", **d))
+        [sub] = await d["repo"].subscriptions.list(customer_id="u1", provider="toss")
+        assert sub.anchor_day == 1  # KST 10/1 00:00, not the UTC 30th
+
+    run(body())

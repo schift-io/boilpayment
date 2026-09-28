@@ -41,6 +41,9 @@ export async function revertRefundedUpgrade(repo: Repo, payment: Payment): Promi
   if (!up || typeof up.fromPlanId !== 'string' || typeof up.fromPeriodStart !== 'string' || typeof up.fromPeriodEnd !== 'string') return;
   const sub = await repo.subscriptions.get(payment.subscriptionId);
   if (!sub || sub.planId !== up.planId) return;
+  // EC:A80 — once a renewal has started a period after the upgrade charge, that period was paid at the
+  // upgraded price: putting the old period back would bill it again. Only the charge's credits come back.
+  if (sub.currentPeriod.start.getTime() > payment.occurredAt.getTime()) return;
   await repo.subscriptions.put({
     ...sub, planId: up.fromPlanId, scheduledPlanId: null,
     currentPeriod: { start: new Date(up.fromPeriodStart), end: new Date(up.fromPeriodEnd) },

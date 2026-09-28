@@ -316,4 +316,16 @@ describe("[EC:A28] backfill sets the subscription currency", () => {
     const byCustomer = Object.fromEntries((await d.repo.subscriptions.list()).map((s) => [s.customerId, s.currency]));
     expect(byCustomer).toEqual({ u1: "KRW", u2: "USD", u3: "EUR" });
   });
+
+  it("[EC:A81] the anchor day is the period start's civil day in the policy timezone", async () => {
+    const d = await setup();
+    await backfill({
+      ...d,
+      timezone: "Asia/Seoul",
+      rows: [row({ provider: "toss", customerRef: "ck_1", billingKey: "bk_1", planId: "pro",
+        periodStart: new Date("2026-09-30T15:00:00Z"), periodEnd: new Date("2026-10-31T15:00:00Z") })],
+    });
+    const [sub] = await d.repo.subscriptions.list({ customerId: "u1", provider: "toss" });
+    expect(sub.anchorDay).toBe(1); // KST 10/1 00:00, not the UTC 30th
+  });
 });

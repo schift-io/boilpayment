@@ -34,3 +34,14 @@ describe('[EC:A76] revertRefundedUpgrade', () => {
     expect((await repo.subscriptions.get('s1'))?.planId).toBe('max');
   });
 });
+
+describe('[EC:A80] revertRefundedUpgrade after a renewal', () => {
+  it('a refund after the next renewal keeps the renewed period (no second bill for it)', async () => {
+    const repo = new InMemoryRepo();
+    const renewed = { ...upgraded, currentPeriod: { start: new Date('2026-05-11T00:00:00Z'), end: new Date('2026-06-11T00:00:00Z') } };
+    await repo.subscriptions.put(renewed);
+    await revertRefundedUpgrade(repo, row('refunded'));
+    const sub = await repo.subscriptions.get('s1');
+    expect([sub?.planId, sub?.currentPeriod]).toEqual(['pro', renewed.currentPeriod]);
+  });
+});

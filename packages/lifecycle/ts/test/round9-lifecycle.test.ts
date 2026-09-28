@@ -154,4 +154,27 @@ describe('[EC:A77] a provider that bills a plan change as a later order (Polar) 
     await onRenewalPaid({ sub: (await e.repo.subscriptions.get('s1'))!, payment: change, policy: e.policy, ledger: e.ledger, repo: e.repo, clock: e.clock });
     expect(await balance()).toBe(3000);
   });
+
+  it('[EC:A82] the change order paid before the change call returns still grants the delta once', async () => {
+    const e = await base('2026-04-11T00:00:00.000Z', resolvePolicy({ upgrade: { mode: 'immediate_prorate_keep_anchor' } }));
+    const sub: Subscription = {
+      id: 's1', customerId: 'c1', planId: 'basic', provider: 'stripe', providerRef: 'ps_1', status: 'active',
+      currentPeriod: { start: new Date('2026-04-01T00:00:00.000Z'), end: new Date('2026-05-01T00:00:00.000Z') },
+      anchorDay: 1, cancelAtPeriodEnd: false, graceUntil: null, billingKey: null, scheduledPlanId: null, currency: 'KRW',
+      version: 0, createdAt: new Date('2026-04-01T00:00:00.000Z'),
+    };
+    await e.repo.subscriptions.put(sub);
+    await onRenewalPaid({ sub: (await e.repo.subscriptions.get('s1'))!, payment: pay('pay_cycle', 9900), policy: e.policy, ledger: e.ledger, repo: e.repo, clock: e.clock });
+    class EarlyWebhookProvider extends OnPaymentProvider {
+      override async changeSubscription(ref: string, opts: Parameters<FakeNativeProvider['changeSubscription']>[1]) {
+        // The change order's paid webhook lands while the change call is still in flight.
+        await onRenewalPaid({ sub: (await e.repo.subscriptions.get('s1'))!, payment: pay('pay_change', 6666), policy: e.policy, ledger: e.ledger, repo: e.repo, clock: e.clock });
+        return super.changeSubscription(ref, opts);
+      }
+    }
+    const provider = new EarlyWebhookProvider();
+    provider.setDummySub(sub);
+    await upgrade({ sub: (await e.repo.subscriptions.get('s1'))!, newPlan: pro, policy: e.policy, provider, ledger: e.ledger, repo: e.repo, clock: e.clock, ids: new SequentialIdGen('id_') });
+    expect((await e.ledger.balance('c1', 'paid', e.clock.now())).available).toBe(3000);
+  });
 });

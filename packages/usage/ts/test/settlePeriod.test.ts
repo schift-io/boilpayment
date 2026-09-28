@@ -179,3 +179,16 @@ it('[EC:A75] one subscription failing does not stop the others; the failure is r
   expect(err?.details.errors).toMatchObject([{ subscriptionId: 'sub_other', code: 'invalid_usage_period' }]);
   expect(input.provider.calls).toHaveLength(1);
 });
+
+it('[EC:A83] an unsettled overage charge is reported on every run, not only the first', async () => {
+  const input = await given();
+  await input.repo.subscriptions.put(input.sub);
+  input.provider.status = 'pending';
+  const batch = { ...input, providers: { stripe: input.provider } };
+  for (let run = 0; run < 2; run++) {
+    const err = await settleDuePeriods(batch).then(() => null, (e) => e);
+    expect(err?.details.errors).toMatchObject([{ subscriptionId: input.sub.id, code: 'overage_charge_pending' }]);
+    input.clock.advance(300_000);
+  }
+  expect(input.provider.calls).toHaveLength(1);
+});

@@ -63,9 +63,9 @@ npx boilpayment check                       # read-only: config + schema version
 ```
 
 Before a version is on the registry, install the packed files together:
-`npm i ./boilpayment-*-<version>.tgz` (the SDK and its internal packages) or
-`pip install ./boilpayment-<version>-py3-none-any.whl`. Keep the CLI at the same version as the
-SDK (`npx boilpayment@<version> …`).
+`npm i ./boilpayment*.tgz` (the CLI, the SDK and its internal packages; `npx boilpayment` then runs
+the installed CLI) or `pip install ./boilpayment-<version>-py3-none-any.whl`. Once the version is on
+the registry, keep the CLI at the SDK's version (`npx boilpayment@<version> …`).
 
 **0.2.0 is a fresh install.** There is no upgrade path from 0.1.0: stop and remove every 0.1.0
 worker first and install 0.2.0 against a new database. Running two releases at once, or continuing

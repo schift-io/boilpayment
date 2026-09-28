@@ -14,6 +14,7 @@ import type {
   Repo,
   Subscription,
 } from "boilpayment-core";
+import { civilDayOf } from "boilpayment-core";
 
 const PROVIDERS: readonly ProviderName[] = [
   "stripe",
@@ -50,6 +51,8 @@ export interface BackfillInput {
   providers: Partial<Record<ProviderName, PaymentProvider>>;
   clock: Clock;
   ids: IdGen;
+  /** EC:A81 — policy timezone (`policy.period.timezone`); the anchor day is the period start's civil day there. Default UTC. */
+  timezone?: string;
 }
 
 export type BackfillOutcome = "created" | "updated" | "skipped" | "none";
@@ -168,7 +171,7 @@ async function planRow(input: BackfillInput, row: BackfillRow): Promise<RowPlan>
       providerRef: null,
       status: "active",
       currentPeriod: { start: row.periodStart, end: row.periodEnd },
-      anchorDay: row.periodStart.getUTCDate(),
+      anchorDay: civilDayOf(row.periodStart, input.timezone ?? 'UTC'), // EC:A81
       cancelAtPeriodEnd: false,
       graceUntil: null,
       billingKey: row.billingKey,

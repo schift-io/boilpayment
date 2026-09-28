@@ -76,8 +76,16 @@ export async function upgrade(input: UpgradeInput): Promise<UpgradeResult> {
 }
 
 /** EC:A77 — the operation holding an upgrade delta that waits for its provider order to be paid. */
-export function pendingUpgradeGrantKey(subId: string, planId: string, periodStart: Date): string {
-  return `upgrade-grant:${subId}:${planId}:${periodStart.toISOString()}`;
+export function pendingUpgradeGrantKey(subId: string, periodStart: Date): string {
+  // EC:A82 — no plan in the key: a change order paid before the subscription row names the new plan still finds it.
+  return `upgrade-grant:${subId}:${periodStart.toISOString()}`;
+}
+
+async function putPendingGrant(repo: Repo, key: string, amount: number, periodEnd: Date, reason: string, policy: Policy, now: Date): Promise<void> {
+  await repo.operations.put({
+    id: key, key, kind: 'lifecycle.upgrade_grant', payloadHash: '', status: 'in_progress', error: null, createdAt: now, completedAt: null, attempts: 0,
+    result: { amount, expiresAt: policy.credits.rollover === 'full' ? null : periodEnd.toISOString(), reason },
+  });
 }
 
 /** EC:A61 C11 — the states an upgrade applies to; anything else is refused before any charge. */
@@ -133,12 +141,36 @@ async function upgradeHeld(input: UpgradeInput): Promise<UpgradeResult> {
   // We update Repo.subscriptions ourselves instead, and charge the prorated *money* delta directly
   // via the billing key (changeSubscription would otherwise have triggered the provider's own
   // proration invoice).
+  // EC:A2 — credit delta, computed against the *original* (pre-upgrade) period's remaining ratio.
+  // EC:A59 — a self-scheduled reset_anchor upgrade bought a whole new period less the old period's unused
+  // share, so it grants the new plan's credits less the old plan's unused share (either creditDelta).
+  const fullDelta = newPlan.creditsPerPeriod - oldPlan.creditsPerPeriod;
+  // EC:A77 — a native reset_anchor change is billed by the provider as a new period, whose paid invoice
+  // grants that period's credits: the kit grants no delta on top. A provider that bills the change as a
+  // later order (Polar) gets its delta granted when that order's paid webhook arrives.
+  const grantOnPayment = native && provider.capabilities().upgradeGrant === 'on_payment';
+  const delta = native && resetAnchor && !grantOnPayment ? 0 : resetAnchor && !native
+    ? newPlan.creditsPerPeriod - scaleMinor(oldPlan.creditsPerPeriod, frac.num, frac.den, 'floor')
+    : policy.upgrade.creditDelta === 'full_delta'
+      ? fullDelta
+      : Math.floor(fullDelta * prorationRatio(sub.currentPeriod, now, policy.proration.denominator));
+
   const scopedProvider = scopeProvider(provider, input.correlationId);
   let changed: Subscription | null = null;
   if (native) {
     if (sub.providerRef === null) throw new PaymentKitError('native subscription mutation requires its provider reference', 'subscription_provider_ref_required');
     const priceRef = resolvePriceRef(newPlan, sub.provider, sub.currency);
-    changed = await scopedProvider.changeSubscription(sub.providerRef, { newPriceRef: priceRef, proration: 'immediate', resetAnchor });
+    // EC:A82 — the delta waiting for the change order is stored before the provider is asked: the order's
+    // paid webhook can arrive before this call returns, and must find it.
+    const pendingKey = pendingUpgradeGrantKey(sub.id, sub.currentPeriod.start);
+    if (delta > 0 && grantOnPayment) await putPendingGrant(repo, pendingKey, delta, sub.currentPeriod.end, `upgrade:${oldPlan.id}->${newPlan.id}`, policy, now);
+    try {
+      changed = await scopedProvider.changeSubscription(sub.providerRef, { newPriceRef: priceRef, proration: 'immediate', resetAnchor });
+    } catch (err) {
+      const op = delta > 0 && grantOnPayment ? await repo.operations.get(pendingKey) : null;
+      if (op?.status === 'in_progress') await repo.operations.put({ ...op, status: 'failed', error: 'change_failed', completedAt: clock.now() });
+      throw err;
+    }
   } else {
     if (!sub.billingKey) throw new PaymentKitError('upgrade requires a billing key for self-scheduling providers', 'billing_key_required');
     // EC:A28 — both prices in the subscription's currency (spec note #4 used the first price).
@@ -181,27 +213,12 @@ async function upgradeHeld(input: UpgradeInput): Promise<UpgradeResult> {
     currentPeriod = nextPeriod({ start: now, end: now }, interval, anchorDay, policy.period.timezone, policy.period.monthEndAnchor);
   }
 
-  // EC:A2 — credit delta, computed against the *original* (pre-upgrade) period's remaining ratio.
-  // EC:A59 — a self-scheduled reset_anchor upgrade bought a whole new period less the old period's unused
-  // share, so it grants the new plan's credits less the old plan's unused share (either creditDelta).
-  const fullDelta = newPlan.creditsPerPeriod - oldPlan.creditsPerPeriod;
-  // EC:A77 — a native reset_anchor change is billed by the provider as a new period, whose paid invoice
-  // grants that period's credits: the kit grants no delta on top. A provider that bills the change as a
-  // later order (Polar) gets its delta granted when that order's paid webhook arrives.
-  const grantOnPayment = native && provider.capabilities().upgradeGrant === 'on_payment';
-  const delta = native && resetAnchor && !grantOnPayment ? 0 : resetAnchor && !native
-    ? newPlan.creditsPerPeriod - scaleMinor(oldPlan.creditsPerPeriod, frac.num, frac.den, 'floor')
-    : policy.upgrade.creditDelta === 'full_delta'
-      ? fullDelta
-      : Math.floor(fullDelta * prorationRatio(sub.currentPeriod, now, policy.proration.denominator));
-
   let grant: LedgerEntry | null = null;
   if (delta > 0 && grantOnPayment) {
-    await repo.operations.put({
-      id: pendingUpgradeGrantKey(sub.id, newPlan.id, currentPeriod.start), key: pendingUpgradeGrantKey(sub.id, newPlan.id, currentPeriod.start),
-      kind: 'lifecycle.upgrade_grant', payloadHash: '', status: 'in_progress', error: null, createdAt: now, completedAt: null, attempts: 0,
-      result: { amount: delta, expiresAt: policy.credits.rollover === 'full' ? null : currentPeriod.end.toISOString(), reason: `upgrade:${oldPlan.id}->${newPlan.id}` },
-    });
+    // EC:A82 — written before the change; a different period from the provider moves it (unless already paid).
+    const key = pendingUpgradeGrantKey(sub.id, currentPeriod.start);
+    const op = await repo.operations.get(key);
+    if (!op || op.status === 'in_progress') await putPendingGrant(repo, key, delta, currentPeriod.end, `upgrade:${oldPlan.id}->${newPlan.id}`, policy, now);
   } else if (delta > 0) {
     // EC:J5 — deterministic ledger idempotency key (sub + target plan + *original* period start,
     // not clock.now()); see docs/EDGE_CASES.md §J J5.

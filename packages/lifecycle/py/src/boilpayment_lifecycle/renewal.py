@@ -181,7 +181,7 @@ async def _grant_pending_upgrade(sub, payment, period, existing_payment_id, ledg
 
     if payment.status != "succeeded" or payment.id == existing_payment_id:
         return
-    key = pending_upgrade_grant_key(sub.id, sub.plan_id, period.start)
+    key = pending_upgrade_grant_key(sub.id, period.start)
     op = await repo.operations.get(key)
     if op is None or op.status != "in_progress":
         return

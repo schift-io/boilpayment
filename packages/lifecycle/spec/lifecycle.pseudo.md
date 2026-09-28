@@ -879,5 +879,14 @@ reactivate: banned -> customer_banned
 변경 뒤 기간·기준일 = changeSubscription 응답
 Stripe reset_anchor: 킷 차액 0 (새 기간 인보이스가 지급)
 upgradeGrant == on_payment (Polar, proration_behavior 'invoice'):
-  차액을 operations[upgrade-grant:<sub>:<plan>:<periodStart>] 에 대기
+  차액을 operations[upgrade-grant:<sub>:<periodStart>] 에 대기
   onRenewalPaid(이미 지급된 기간, 그 기간을 산 결제가 아닌 결제) -> 대기 차액 지급(grant:upgrade 키), 작업 done
+
+## [EC:A81] 백필 기준일
+anchorDay = civilDayOf(row.periodStart, input.timezone ?? 'UTC')   # 생성 코드는 policy.period.timezone 을 넘김
+
+## [EC:A82] 변경 주문이 변경 호출보다 먼저 결제됨
+upgradeGrant == on_payment: 대기 차액을 changeSubscription 호출 **전에** 기록(키에 플랜 없음)
+changeSubscription 실패 -> 대기 작업 failed(change_failed)
+호출 뒤 기간이 달라지면 새 키로 다시 기록(이미 done 이면 그대로)
+

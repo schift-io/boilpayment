@@ -62,6 +62,13 @@ export async function settleDuePeriods(input: SettleDuePeriodsInput): Promise<Du
       errors.push({ subscriptionId: sub.id, code: err instanceof PaymentKitError ? err.code : 'usage_settlement_error', message: err instanceof Error ? err.message : String(err) });
     }
   }
+  // EC:A83 — a charge the provider has not settled (or refused without a final answer) stays in the error
+  // list on every run, so a cron alert keeps firing until someone resolves it.
+  for (const r of results) {
+    if (r.result.status === 'pending' || r.result.status === 'failed') {
+      errors.push({ subscriptionId: r.subscriptionId, code: `overage_charge_${r.result.status}`, message: `overage charge for ${r.period.start.toISOString()} is ${r.result.status}` });
+    }
+  }
   if (errors.length) throw new PaymentKitError('some usage periods could not be settled', 'usage_settlement_errors', { errors, results });
   return results;
 }

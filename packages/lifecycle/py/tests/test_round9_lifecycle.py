@@ -221,3 +221,34 @@ def test_a77_on_payment_upgrade_grants_when_change_order_paid() -> None:
         assert await balance() == 3000
 
     asyncio.run(scenario())
+
+
+def test_a82_change_order_paid_before_change_returns_still_grants_once() -> None:
+    async def scenario() -> None:
+        repo, ledger, _provider, clock, _ = await base("2026-04-11T00:00:00Z")
+        policy = resolve_policy({"upgrade": {"mode": "immediate_prorate_keep_anchor"}})
+        sub = Subscription(
+            id="s1", customer_id="c1", plan_id="basic", provider="stripe", provider_ref="ps_1", status="active",
+            current_period=Period(start=d("2026-04-01T00:00:00Z"), end=d("2026-05-01T00:00:00Z")), anchor_day=1,
+            cancel_at_period_end=False, grace_until=None, billing_key=None, scheduled_plan_id=None, currency="KRW",
+            version=0, created_at=d("2026-04-01T00:00:00Z"))
+        await repo.subscriptions.put(sub)
+
+        async def paid(p: Payment) -> None:
+            await on_renewal_paid(OnRenewalPaidInput(sub=await repo.subscriptions.get("s1"), payment=p, policy=policy,  # type: ignore[arg-type]
+                                                     ledger=ledger, repo=repo, clock=clock))
+
+        await paid(_pay("pay_cycle", 9900))
+
+        class EarlyWebhookProvider(OnPaymentProvider):
+            async def change_subscription(self, ref, **kw):  # type: ignore[no-untyped-def,override]
+                await paid(_pay("pay_change", 6666))  # the change order's webhook lands mid-call
+                return await super().change_subscription(ref, **kw)
+
+        provider = EarlyWebhookProvider()
+        provider.set_dummy_sub(sub)
+        await upgrade(UpgradeInput(sub=await repo.subscriptions.get("s1"), new_plan=PRO, policy=policy, provider=provider,  # type: ignore[arg-type]
+                                   ledger=ledger, repo=repo, clock=clock, ids=SequentialIdGen("id_")))
+        assert (await ledger.balance("c1", "paid", clock.now())).available == 3000
+
+    asyncio.run(scenario())

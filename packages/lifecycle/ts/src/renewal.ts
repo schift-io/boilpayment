@@ -124,7 +124,7 @@ export async function onRenewalPaid(input: OnRenewalPaidInput): Promise<OnRenewa
 async function grantPendingUpgrade(input: { sub: Subscription; payment: Payment; period: { start: Date; end: Date }; existingPaymentId: string | null; ledger: LedgerStore; repo: Repo; clock: Clock }): Promise<void> {
   const { sub, payment, period, ledger, repo, clock } = input;
   if (payment.status !== 'succeeded' || payment.id === input.existingPaymentId) return;
-  const key = pendingUpgradeGrantKey(sub.id, sub.planId, period.start);
+  const key = pendingUpgradeGrantKey(sub.id, period.start);
   const op = await repo.operations.get(key);
   if (!op || op.status !== 'in_progress') return;
   const pending = op.result as { amount: number; expiresAt: string | null; reason: string };

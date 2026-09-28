@@ -28,6 +28,7 @@ from boilpayment_core import (
     ProviderRef,
     Repo,
     Subscription,
+    civil_day_of,
 )
 
 PROVIDERS = ("stripe", "toss", "portone", "polar")
@@ -79,6 +80,8 @@ class BackfillInput:
     providers: dict[str, PaymentProvider]
     clock: Clock
     ids: IdGen
+    # EC:A81 -- policy timezone (policy.period.timezone); the anchor day is the period start's civil day there.
+    timezone: str = "UTC"
 
 
 @dataclass(kw_only=True, slots=True)
@@ -207,7 +210,7 @@ async def _plan_row(input: BackfillInput, row: BackfillRow) -> _RowPlan:
             "provider_ref": None,
             "status": "active",
             "current_period": Period(start=row.period_start, end=row.period_end),
-            "anchor_day": row.period_start.astimezone(UTC).day,
+            "anchor_day": civil_day_of(row.period_start, input.timezone),  # EC:A81
             "cancel_at_period_end": False,
             "grace_until": None,
             "billing_key": row.billing_key,

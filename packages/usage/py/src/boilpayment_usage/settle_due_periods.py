@@ -44,6 +44,12 @@ async def settle_due_periods(
         except Exception as err:  # noqa: BLE001 -- collected and raised after the loop
             errors.append({"subscription_id": sub.id, "code": err.code if isinstance(err, PaymentKitError) else "usage_settlement_error",
                            "message": str(err)})
+    # EC:A83 -- a charge the provider has not settled (or refused) stays in the error list on every run, so a
+    # cron alert keeps firing until someone resolves it.
+    for r in results:
+        if r.result.status in ("pending", "failed"):
+            errors.append({"subscription_id": r.subscription_id, "code": f"overage_charge_{r.result.status}",
+                           "message": f"overage charge for {r.period.start.isoformat()} is {r.result.status}"})
     if errors:
         raise PaymentKitError("some usage periods could not be settled", "usage_settlement_errors", {"errors": errors, "results": results})
     return results

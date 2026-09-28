@@ -339,3 +339,6 @@ reserve(..., sub?): if sub and hasNoEntitlement(sub.status): return { ok: false,
 customerRef = sub.billingCustomerRef || customer.providerRefs[provider]
 settleDuePeriods: 구독마다 try; 오류는 모아 두고 전부 돈 뒤 usage_settlement_errors({errors, results})
 첫 청구가 성공한 적 없는 닫힌 가입(incomplete/expired)은 사용량 주인 후보가 아님
+
+## [EC:A83] 미확정·거절된 초과 청구는 매 실행 오류
+settleDuePeriods: result.status in (pending, failed) -> errors 에 overage_charge_<status> (실행마다)

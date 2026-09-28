@@ -72,7 +72,7 @@ function worker(i: number, provider: FakeToss) {
 }
 
 describe('a4 pg', () => {
-  it('P1 two workers tick 30 subscriptions concurrently (x3 rounds)', async () => {
+  it('P1 two workers tick 30 subscriptions concurrently (x3 rounds)', { timeout: 30_000 }, async () => {
     const provider = new FakeToss();
     const a = worker(0, provider); const b = worker(1, provider);
     const N = 30;

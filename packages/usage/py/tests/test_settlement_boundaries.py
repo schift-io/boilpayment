@@ -120,3 +120,20 @@ def test_a75_one_failure_does_not_stop_the_others():
         assert len(input["provider"].calls) == 1
 
     anyio.run(run)
+
+
+def test_a83_unsettled_overage_charge_is_reported_every_run():
+    async def run():
+        input = await given()
+        await input["repo"].subscriptions.put(input["sub"])
+        input["provider"].status = "pending"
+        for _ in range(2):
+            with pytest.raises(PaymentKitError) as error:
+                await settle_due_periods(policy=input["policy"], repo=input["repo"], ledger=input["ledger"],
+                                         providers={"stripe": input["provider"]}, clock=input["clock"])
+            assert [(e["subscription_id"], e["code"]) for e in error.value.details["errors"]] == [
+                (input["sub"].id, "overage_charge_pending")]
+            input["clock"].advance(300_000)
+        assert len(input["provider"].calls) == 1
+
+    anyio.run(run)

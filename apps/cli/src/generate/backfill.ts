@@ -50,8 +50,8 @@ import { backfill, parseBackfillFile, type BackfillReport } from 'boilpayment-sd
 export async function runBackfill(content: string, deps: PaymentKitDeps, opts: { verifySchema?: boolean } = {}): Promise<BackfillReport> {
   const kit = createPaymentKit(config, deps);
   await kit.initialize(opts); // stores the configured plans, so plan_id values resolve
-  const { repo, ledger, providers, clock, ids } = kit.deps;
-  return backfill({ rows: parseBackfillFile(content), repo, ledger, providers, clock, ids });
+  const { repo, ledger, providers, clock, ids, policy } = kit.deps;
+  return backfill({ rows: parseBackfillFile(content), repo, ledger, providers, clock, ids, timezone: policy.period.timezone });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -122,7 +122,8 @@ async def run_backfill(
     await kit["initialize"](verify_schema_first=verify_schema_first)  # stores plans so plan_id resolves
     rows = parse_backfill_file(content)
     return await backfill(
-        BackfillInput(rows=rows, repo=deps.repo, ledger=deps.ledger, providers=kit["providers"], clock=deps.clock, ids=deps.ids)
+        BackfillInput(rows=rows, repo=deps.repo, ledger=deps.ledger, providers=kit["providers"], clock=deps.clock, ids=deps.ids,
+                      timezone=kit["policy"].period.timezone)
     )
 
 

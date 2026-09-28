@@ -456,3 +456,7 @@ grant 단가는 내림된 값(1999 minor / 1000 크레딧 → 1)이라 전액 �
 
 ## [EC:A76] 업그레이드 추가금 전액 환불 -> 구독 되돌림
 execute(킷 환불)·onExternalRefund(콘솔 환불) 모두 결제 행이 refunded 가 되면 revertRefundedUpgrade(repo, payment)
+
+## [EC:A80] 갱신 뒤의 업그레이드 추가금 환불
+sub.currentPeriod.start > payment.occurredAt (업그레이드 뒤 새 기간이 시작됨) -> 되돌리지 않음. 크레딧만 지분대로 회수(D20)
+
