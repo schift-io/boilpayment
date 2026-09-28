@@ -18,6 +18,7 @@ from boilpayment_core import (
     PaymentKitError,
     Plan,
     PlanPrice,
+    ProviderCapabilities,
     ProviderRef,
     Refund,
     SequentialIdGen,
@@ -61,6 +62,11 @@ class Provider:
         self.refund_calls = 0
         self.checkout_calls = 0
         self.refund_status = "succeeded"
+
+    def capabilities(self):
+        # The real Stripe adapter's capabilities (the fake follows the real interface).
+        return ProviderCapabilities(native_subscriptions=True, partial_refund=True, meters=True, scheduling="provider",
+                                    webhook_signature=True)
 
     async def create_checkout(self, input):
         self.checkout_calls += 1

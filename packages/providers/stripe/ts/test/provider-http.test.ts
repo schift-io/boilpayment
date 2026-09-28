@@ -489,6 +489,7 @@ describe('capabilities()', () => {
       scheduling: 'provider',
       webhookSignature: true,
       checkout: 'hosted', // EC:N1 — hosted checkout (in-app purchase stores report 'on_device')
+      upgradeGrant: 'sync', // EC:A77 — error_if_incomplete: the change is paid before changeSubscription returns
     });
   });
 });

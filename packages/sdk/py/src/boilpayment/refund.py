@@ -24,6 +24,7 @@ from boilpayment_refund import (
     execute,
     on_external_refund,
     proration_ratio,
+    revert_refunded_upgrade,
     rule_for_reason,
     weighted_avg_unit_price,
 )
@@ -42,6 +43,7 @@ __all__ = [
     "execute",
     "on_external_refund",
     "proration_ratio",
+    "revert_refunded_upgrade",
     "rule_for_reason",
     "weighted_avg_unit_price",
 ]
