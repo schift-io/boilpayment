@@ -132,7 +132,7 @@ async function grantPendingUpgrade(input: { sub: Subscription; payment: Payment;
     customerId: sub.customerId, pool: 'paid', kind: 'grant', amount: pending.amount, unitPriceMinor: null, currency: null,
     expiresAt: pending.expiresAt ? new Date(pending.expiresAt) : null, source: 'subscription',
     reference: { subscriptionId: sub.id, periodStart: period.start, paymentId: payment.id },
-    idempotencyKey: `grant:upgrade:${sub.id}:${sub.planId}:${period.start.toISOString()}`, actor: 'system', reason: pending.reason,
+    idempotencyKey: `grant:${key}:${pending.reason}`, actor: 'system', reason: pending.reason, // EC:A84 — per waiting upgrade, not the row's plan at webhook time
   });
   await repo.operations.put({ ...op, status: 'done', completedAt: clock.now() });
 }

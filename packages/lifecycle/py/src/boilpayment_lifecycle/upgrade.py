@@ -102,6 +102,14 @@ def pending_upgrade_grant_key(sub_id: str, period_start: datetime) -> str:
 
 
 async def _put_pending_grant(repo: Repo, key: str, amount: int, period_end: datetime, reason: str, policy: Policy, now: datetime) -> None:
+    """EC:A84 -- writes the waiting delta without reopening one already paid: a retry of the same upgrade leaves
+    an in-progress or done operation alone; a different upgrade while another's order is unpaid is refused."""
+    op = await repo.operations.get(key)
+    same_upgrade = isinstance(op.result, dict) and op.result.get("reason") == reason if op is not None else False
+    if op is not None and same_upgrade and op.status != "failed":
+        return
+    if op is not None and op.status == "in_progress" and not same_upgrade:
+        raise PaymentKitError("another plan change is waiting for its order to be paid", "upgrade_payment_pending")
     await repo.operations.put(Operation(
         id=key, key=key, kind="lifecycle.upgrade_grant", payload_hash="", status="in_progress", error=None,
         created_at=now, completed_at=None, attempts=0,
@@ -362,8 +370,7 @@ async def _do_upgrade(input: UpgradeInput, stamp: str) -> UpgradeResult:
     if delta > 0 and grant_on_payment:
         # EC:A82 -- written before the change; a different period from the provider moves it (unless paid).
         key = pending_upgrade_grant_key(sub.id, current_period.start)
-        op = await repo.operations.get(key)
-        if op is None or op.status == "in_progress":
+        if key != pending_upgrade_grant_key(sub.id, sub.current_period.start):
             await _put_pending_grant(repo, key, delta, current_period.end, f"upgrade:{old_plan.id}->{new_plan.id}", policy, now)
     elif delta > 0:
         # EC:J5 — deterministic ledger idempotency key (sub + target plan + *original* period

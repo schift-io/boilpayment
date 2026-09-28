@@ -890,3 +890,8 @@ upgradeGrant == on_payment: 대기 차액을 changeSubscription 호출 **전에*
 changeSubscription 실패 -> 대기 작업 failed(change_failed)
 호출 뒤 기간이 달라지면 새 키로 다시 기록(이미 done 이면 그대로)
 
+## [EC:A84] 대기 차액은 한 번만
+putPendingGrant: 같은 업그레이드(reason from->to)의 작업이 in_progress·done 이면 그대로(failed 만 다시 씀)
+다른 업그레이드의 작업이 in_progress -> upgrade_payment_pending
+지급 멱등 키 = grant:<upgrade-grant 키>:<reason>
+

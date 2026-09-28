@@ -252,3 +252,43 @@ def test_a82_change_order_paid_before_change_returns_still_grants_once() -> None
         assert (await ledger.balance("c1", "paid", clock.now())).available == 3000
 
     asyncio.run(scenario())
+
+
+def test_a84_retry_never_reopens_paid_delta_and_second_change_waits() -> None:
+    async def scenario() -> None:
+        repo, ledger, _provider, clock, _ = await base("2026-04-11T00:00:00Z")
+        policy = resolve_policy({"upgrade": {"mode": "immediate_prorate_keep_anchor"}})
+        max_plan = dataclasses.replace(PRO, id="max", credits_per_period=6000)
+        await repo.plans.put(max_plan)
+        sub = Subscription(
+            id="s1", customer_id="c1", plan_id="basic", provider="stripe", provider_ref="ps_1", status="active",
+            current_period=Period(start=d("2026-04-01T00:00:00Z"), end=d("2026-05-01T00:00:00Z")), anchor_day=1,
+            cancel_at_period_end=False, grace_until=None, billing_key=None, scheduled_plan_id=None, currency="KRW",
+            version=0, created_at=d("2026-04-01T00:00:00Z"))
+        await repo.subscriptions.put(sub)
+
+        async def paid(p: Payment) -> None:
+            await on_renewal_paid(OnRenewalPaidInput(sub=await repo.subscriptions.get("s1"), payment=p, policy=policy,  # type: ignore[arg-type]
+                                                     ledger=ledger, repo=repo, clock=clock))
+
+        provider = OnPaymentProvider()
+        provider.set_dummy_sub(sub)
+
+        async def up(plan: Plan, frm: Subscription) -> Any:
+            return await upgrade(UpgradeInput(sub=frm, new_plan=plan, policy=policy, provider=provider, ledger=ledger,
+                                              repo=repo, clock=clock, ids=SequentialIdGen("id_")))
+
+        await paid(_pay("pay_cycle", 9900))
+        after_pro = (await up(PRO, await repo.subscriptions.get("s1"))).sub  # type: ignore[arg-type]
+        with pytest.raises(PaymentKitError) as err:
+            await up(max_plan, after_pro)
+        assert err.value.code == "upgrade_payment_pending"
+        await paid(_pay("pay_change", 6666))
+        try:
+            await up(PRO, sub)
+        except PaymentKitError:
+            pass
+        await paid(_pay("pay_change_again", 6666))
+        assert (await ledger.balance("c1", "paid", clock.now())).available == 3000
+
+    asyncio.run(scenario())

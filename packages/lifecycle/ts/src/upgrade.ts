@@ -81,7 +81,18 @@ export function pendingUpgradeGrantKey(subId: string, periodStart: Date): string
   return `upgrade-grant:${subId}:${periodStart.toISOString()}`;
 }
 
+/**
+ * EC:A84 — writes the waiting delta for this upgrade (reason = from->to) without reopening one already paid:
+ * a retry of the same upgrade leaves an in-progress or done operation alone, and a different upgrade while
+ * another one's order is still unpaid in this period is refused (the key has no plan, EC:A82).
+ */
 async function putPendingGrant(repo: Repo, key: string, amount: number, periodEnd: Date, reason: string, policy: Policy, now: Date): Promise<void> {
+  const op = await repo.operations.get(key);
+  const sameUpgrade = (op?.result as { reason?: string } | null | undefined)?.reason === reason;
+  if (op && sameUpgrade && op.status !== 'failed') return;
+  if (op?.status === 'in_progress' && !sameUpgrade) {
+    throw new PaymentKitError('another plan change is waiting for its order to be paid', 'upgrade_payment_pending');
+  }
   await repo.operations.put({
     id: key, key, kind: 'lifecycle.upgrade_grant', payloadHash: '', status: 'in_progress', error: null, createdAt: now, completedAt: null, attempts: 0,
     result: { amount, expiresAt: policy.credits.rollover === 'full' ? null : periodEnd.toISOString(), reason },
@@ -217,8 +228,7 @@ async function upgradeHeld(input: UpgradeInput): Promise<UpgradeResult> {
   if (delta > 0 && grantOnPayment) {
     // EC:A82 — written before the change; a different period from the provider moves it (unless already paid).
     const key = pendingUpgradeGrantKey(sub.id, currentPeriod.start);
-    const op = await repo.operations.get(key);
-    if (!op || op.status === 'in_progress') await putPendingGrant(repo, key, delta, currentPeriod.end, `upgrade:${oldPlan.id}->${newPlan.id}`, policy, now);
+    if (key !== pendingUpgradeGrantKey(sub.id, sub.currentPeriod.start)) await putPendingGrant(repo, key, delta, currentPeriod.end, `upgrade:${oldPlan.id}->${newPlan.id}`, policy, now);
   } else if (delta > 0) {
     // EC:J5 — deterministic ledger idempotency key (sub + target plan + *original* period start,
     // not clock.now()); see docs/EDGE_CASES.md §J J5.

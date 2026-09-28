@@ -177,4 +177,30 @@ describe('[EC:A77] a provider that bills a plan change as a later order (Polar) 
     await upgrade({ sub: (await e.repo.subscriptions.get('s1'))!, newPlan: pro, policy: e.policy, provider, ledger: e.ledger, repo: e.repo, clock: e.clock, ids: new SequentialIdGen('id_') });
     expect((await e.ledger.balance('c1', 'paid', e.clock.now())).available).toBe(3000);
   });
+
+  it('[EC:A84] a retried upgrade never reopens a paid delta; a second change while one is unpaid is refused', async () => {
+    const e = await base('2026-04-11T00:00:00.000Z', resolvePolicy({ upgrade: { mode: 'immediate_prorate_keep_anchor' } }));
+    const max: Plan = { ...pro, id: 'max', creditsPerPeriod: 6000, prices: [{ currency: 'KRW', amountMinor: 29900 }] };
+    await e.repo.plans.put(max);
+    const sub: Subscription = {
+      id: 's1', customerId: 'c1', planId: 'basic', provider: 'stripe', providerRef: 'ps_1', status: 'active',
+      currentPeriod: { start: new Date('2026-04-01T00:00:00.000Z'), end: new Date('2026-05-01T00:00:00.000Z') },
+      anchorDay: 1, cancelAtPeriodEnd: false, graceUntil: null, billingKey: null, scheduledPlanId: null, currency: 'KRW',
+      version: 0, createdAt: new Date('2026-04-01T00:00:00.000Z'),
+    };
+    await e.repo.subscriptions.put(sub);
+    const paid = async (p: Payment) => onRenewalPaid({ sub: (await e.repo.subscriptions.get('s1'))!, payment: p, policy: e.policy, ledger: e.ledger, repo: e.repo, clock: e.clock });
+    await paid(pay('pay_cycle', 9900));
+    const provider = new OnPaymentProvider();
+    provider.setDummySub(sub);
+    const up = async (plan: Plan, from: Subscription) => upgrade({ sub: from, newPlan: plan, policy: e.policy, provider, ledger: e.ledger, repo: e.repo, clock: e.clock, ids: new SequentialIdGen('id_') });
+    // basic->pro waits for its order; pro->max in the same period is refused until it is paid.
+    const afterPro = (await up(pro, (await e.repo.subscriptions.get('s1'))!)).sub;
+    await expect(up(max, afterPro)).rejects.toMatchObject({ code: 'upgrade_payment_pending' });
+    await paid(pay('pay_change', 6666));
+    // The same upgrade retried (a lost response), then the order redelivered under a new id: granted once.
+    await up(pro, sub).catch(() => null);
+    await paid(pay('pay_change_again', 6666));
+    expect((await e.ledger.balance('c1', 'paid', e.clock.now())).available).toBe(3000);
+  });
 });

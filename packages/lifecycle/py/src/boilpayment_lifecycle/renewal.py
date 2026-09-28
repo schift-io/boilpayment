@@ -16,7 +16,6 @@ from boilpayment_core import (
     Policy,
     Repo,
     Subscription,
-    iso_z,
     key_matches_instant,
 )
 from boilpayment_credits import (
@@ -191,6 +190,6 @@ async def _grant_pending_upgrade(sub, payment, period, existing_payment_id, ledg
         customer_id=sub.customer_id, pool="paid", kind="grant", amount=int(pending["amount"]), unit_price_minor=None, currency=None,
         expires_at=datetime.fromisoformat(expires) if expires else None, source="subscription",
         reference=LedgerReference(subscription_id=sub.id, period_start=period.start, payment_id=payment.id),
-        idempotency_key=f"grant:upgrade:{sub.id}:{sub.plan_id}:{iso_z(period.start)}", actor="system", reason=str(pending.get("reason", "upgrade")),
+        idempotency_key=f"grant:{key}:{pending.get('reason', 'upgrade')}", actor="system", reason=str(pending.get("reason", "upgrade")),  # EC:A84
     ))
     await repo.operations.put(dataclasses.replace(op, status="done", completed_at=clock.now()))
