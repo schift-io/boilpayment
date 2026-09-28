@@ -497,7 +497,13 @@ export class StripeProvider implements PaymentProvider {
   // EC:E6 — idempotencyKey passed through to Stripe request options
   async createCheckout(input: CreateCheckoutInput): Promise<Checkout> {
     const priceRef = input.price.providerPriceRefs?.stripe;
-    if (!priceRef) throw new PaymentKitError('missing stripe price ref for plan price', 'missing_provider_price_ref', { planId: input.plan.id });
+    if (!priceRef) {
+      throw new PaymentKitError(
+        `set plan_prices.provider_price_refs for plan ${input.plan.id} / ${input.price.currency} (see docs/GUIDE.md)`,
+        'missing_provider_price_ref',
+        { planId: input.plan.id },
+      );
+    }
     const mode: Stripe.Checkout.SessionCreateParams.Mode = input.mode === 'subscription' ? 'subscription' : 'payment';
     const metadata = { ...(input.metadata ?? {}), planId: input.plan.id };
     const session = await this.client.checkout.sessions.create(

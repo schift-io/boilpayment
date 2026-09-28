@@ -205,6 +205,10 @@ def test_ec_f_stripe_missing_provider_price_ref_raises_before_any_http_call(mock
         asyncio.run(provider.create_checkout(_checkout_input(price=_price(None))))
 
     assert excinfo.value.code == "missing_provider_price_ref"
+    assert str(excinfo.value) == (
+        "set plan_prices.provider_price_refs for plan plan_pro / KRW "
+        "(see docs/GUIDE.md)"
+    )
     assert len(mock.requests) == 0
 
 

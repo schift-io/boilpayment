@@ -11,6 +11,8 @@ import { generateEnvExample } from '../src/generate/env.js';
 import { generateMigrations } from '../src/generate/migrations.js';
 import { generatePolicyMd } from '../src/generate/policy-md.js';
 import { generateAll } from '../src/generate/index.js';
+import { generateIndexPy } from '../src/generate/py-entry.js';
+import { generateIndexTs } from '../src/generate/ts-entry.js';
 import { buildConfig, kitchenSinkConfig, samplePlan } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -45,6 +47,34 @@ describe('generateEnvExample', () => {
     const config = buildConfig({ cs_enabled: false });
     const env = generateEnvExample(config, { csApiKey: 'pk_live_abc123' });
     expect(env).not.toContain('PAYKIT_API_KEY');
+  });
+});
+
+describe('generateIndexPy', () => {
+  it('forwards remote_address from a polar-only webhook entry point', () => {
+    // Given a Python kit with Polar as its only provider.
+    const config = buildConfig({ providers: ['polar'], languages: ['py'] });
+
+    // When its entry point is generated.
+    const generated = generateIndexPy(config);
+
+    // Then callers can always supply the peer address and receive_webhook receives it.
+    expect(generated).toContain('async def handle_webhook(raw_body: str, headers: dict[str, str], provider: str | None = None, remote_address: str | None = None):');
+    expect(generated).toContain('repo=repo, clock=clock, remote_address=remote_address)');
+  });
+});
+
+describe('generateIndexTs', () => {
+  it('forwards remoteAddress from a polar-only webhook entry point', () => {
+    // Given a TypeScript kit with Polar as its only provider.
+    const config = buildConfig({ providers: ['polar'], languages: ['ts'] });
+
+    // When its entry point is generated.
+    const generated = generateIndexTs(config);
+
+    // Then callers can always supply the peer address and receiveWebhook receives it.
+    expect(generated).toContain('remoteAddress?: string');
+    expect(generated).toContain('remoteAddress: opts?.remoteAddress');
   });
 });
 

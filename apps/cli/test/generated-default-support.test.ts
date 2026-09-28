@@ -21,6 +21,10 @@ it('default --yes enables durable support and explicit plan initialization in bo
   wizard.plans = await collectPlans(wizard, { yes: true });
   const config = toPaykitConfig(wizard);
   expect(config.cs.enabled).toBe(false);
+  const configuredPlan = config.plans[0];
+  const configuredPrice = configuredPlan?.prices[0];
+  if (!configuredPrice) throw new Error('default wizard did not produce a plan price');
+  configuredPrice.providerPriceRefs = { stripe: 'config-stripe' };
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'paykit-default-support-'));
   dirs.push(dir);
   await fs.writeFile(path.join(dir, 'package.json'), JSON.stringify({ type: 'module' }));
@@ -39,6 +43,18 @@ const ids = new SequentialIdGen('default');
 const kit = createPaymentKit(config, { repo, clock, ids, ledger: new InMemoryLedger(ids, clock), providers: {}, logger: new NoopLogger(), env: { DATABASE_URL: '' } });
 await kit.initialize({ verifySchema: false });
 assert.equal((await repo.plans.list()).length, config.plans.length);
+const configuredPlan = config.plans[0];
+const storedPlan = configuredPlan ? await repo.plans.get(configuredPlan.id) : null;
+assert.ok(storedPlan);
+const firstPrice = storedPlan.prices[0];
+assert.ok(firstPrice);
+await repo.plans.put({
+  ...storedPlan,
+  prices: [{ ...firstPrice, providerPriceRefs: { stripe: 'db-stripe', polar: 'db-polar' } }, ...storedPlan.prices.slice(1)],
+});
+await kit.initialize({ verifySchema: false });
+const mergedPlan = await repo.plans.get(storedPlan.id);
+assert.deepEqual(mergedPlan?.prices[0]?.providerPriceRefs, { stripe: 'config-stripe', polar: 'db-polar' });
 const result = await kit.support.requestRefund({ customerId: 'unknown', paymentId: 'unknown', requestId: 'reject-missing' });
 assert.equal(result.status, 'rejected');
 assert.equal((await repo.csCases.get(result.id)).status, 'rejected');
@@ -60,6 +76,13 @@ async def main():
     kit = create_payment_kit(config, deps, {'DATABASE_URL': ''}, providers_override={})
     await kit['initialize'](verify_schema_first=False)
     assert len(await repo.plans.list()) == len(config['plans'])
+    stored_plan = await repo.plans.get(config['plans'][0]['id'])
+    assert stored_plan is not None
+    stored_plan.prices[0].provider_price_refs = {'stripe': 'db-stripe', 'polar': 'db-polar'}
+    await repo.plans.put(stored_plan)
+    await kit['initialize'](verify_schema_first=False)
+    merged_plan = await repo.plans.get(stored_plan.id)
+    assert merged_plan.prices[0].provider_price_refs == {'stripe': 'config-stripe', 'polar': 'db-polar'}
     result = await kit['support']['request_refund'](customer_id='unknown', payment_id='unknown', request_id='reject-missing')
     assert result.status == 'rejected'
     assert (await repo.cs_cases.get(result.id)).status == 'rejected'

@@ -308,8 +308,7 @@ export function generateIndexPy(config: PaykitConfig): string {
   l.push('');
   l.push(`        return decision, execute`);
   l.push('');
-  const tossOrigin = config.providers.includes('toss'); // EC:E18 — Toss allowlists by peer address
-  l.push(`    async def handle_webhook(raw_body: str, headers: dict[str, str], provider: str | None = None${tossOrigin ? ', remote_address: str | None = None' : ''}):`);
+  l.push(`    async def handle_webhook(raw_body: str, headers: dict[str, str], provider: str | None = None, remote_address: str | None = None):`);
   l.push(`        """EC:E3 E4 E5 E13 — webhook receipt is provider-scoped. See INTEGRATION.md §3."""`);
   l.push(`        configured = list(providers.keys())`);
   l.push(`        provider_name = provider or (configured[0] if len(configured) == 1 else None)`);
@@ -318,7 +317,7 @@ export function generateIndexPy(config: PaykitConfig): string {
   l.push(`        prov = providers.get(provider_name)`);
   l.push(`        if prov is None:`);
   l.push(`            raise ValueError(f"provider not configured: {provider_name}")`);
-  l.push(`        received = await receive_webhook(provider=prov, headers=headers, raw_body=raw_body, repo=repo, clock=clock${tossOrigin ? ', remote_address=remote_address' : ''})`);
+  l.push(`        received = await receive_webhook(provider=prov, headers=headers, raw_body=raw_body, repo=repo, clock=clock, remote_address=remote_address)`);
   l.push(`        if received.status == 200 and received.event_id:`);
   l.push(`            await process_webhook(event_id=received.event_id, providers=providers, handlers=handlers, repo=repo, clock=clock)`);
   l.push(`        return received`);
@@ -424,7 +423,14 @@ export function generateIndexPy(config: PaykitConfig): string {
   l.push(`        if verify_schema_first:`);
   l.push(`            await verify_db_schema()`);
   l.push(`        for plan in config["plans"]:`);
-  l.push(`            await repo.plans.put(Plan(id=plan["id"], name=plan["name"], interval=plan["interval"], credits_per_period=plan["creditsPerPeriod"], usage_included=plan["usageIncluded"], trial_days=plan["trialDays"], prices=[PlanPrice(currency=price["currency"], amount_minor=price["amountMinor"], provider_price_refs=price.get("providerPriceRefs")) for price in plan["prices"]]))`);
+  l.push(`            existing = await repo.plans.get(plan["id"])`);
+  l.push(`            existing_prices = {price.currency: price for price in existing.prices} if existing is not None else {}`);
+  l.push(`            prices = []`);
+  l.push(`            for price in plan["prices"]:`);
+  l.push(`                stored = existing_prices.get(price["currency"])`);
+  l.push(`                stored_refs = stored.provider_price_refs if stored is not None else None`);
+  l.push(`                prices.append(PlanPrice(currency=price["currency"], amount_minor=price["amountMinor"], provider_price_refs={**(stored_refs or {}), **(price.get("providerPriceRefs") or {})}))`);
+  l.push(`            await repo.plans.put(Plan(id=plan["id"], name=plan["name"], interval=plan["interval"], credits_per_period=plan["creditsPerPeriod"], usage_included=plan["usageIncluded"], trial_days=plan["trialDays"], prices=prices))`);
   l.push(`    return {`);
   l.push(`        "verify_schema": verify_db_schema,`);
   l.push(`        "handle_webhook": handle_webhook,`);

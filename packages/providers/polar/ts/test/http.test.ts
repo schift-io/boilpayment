@@ -82,7 +82,10 @@ describe('[EC:F(Polar)] PolarProvider HTTP methods (fetch stubbed — no network
         cancelUrl: 'https://app.example.com/cancel',
         idempotencyKey: 'k1',
       }),
-    ).rejects.toMatchObject({ code: 'missing_provider_price_ref' });
+    ).rejects.toMatchObject({
+      code: 'missing_provider_price_ref',
+      message: 'set plan_prices.provider_price_refs for plan plan_pro / usd (see docs/GUIDE.md)',
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

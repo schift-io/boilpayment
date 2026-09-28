@@ -113,6 +113,7 @@ describe('[EC:E6] createCheckout', () => {
 
     await expect(provider.createCheckout(checkoutInput({ price: price(undefined) }))).rejects.toMatchObject({
       code: 'missing_provider_price_ref',
+      message: 'set plan_prices.provider_price_refs for plan plan_pro / KRW (see docs/GUIDE.md)',
     });
     expect(mock.requests).toHaveLength(0);
   });

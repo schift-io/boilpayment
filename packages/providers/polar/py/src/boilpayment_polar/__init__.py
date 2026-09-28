@@ -450,7 +450,8 @@ class PolarProvider:
         product_ref = (input.price.provider_price_refs or {}).get("polar")
         if not product_ref:
             raise PaymentKitError(
-                "missing polar product ref for plan price",
+                f"set plan_prices.provider_price_refs for plan {input.plan.id} / "
+                f"{input.price.currency} (see docs/GUIDE.md)",
                 "missing_provider_price_ref",
                 {"plan_id": input.plan.id},
             )

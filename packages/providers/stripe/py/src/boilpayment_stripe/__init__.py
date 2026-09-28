@@ -343,9 +343,7 @@ def normalize_payment_intent(pi: Any, invoice: Any | None = None) -> Payment:
                 **_as_dict(_get(pi, "metadata")),
                 **_invoice_subscription_metadata(invoice),
             },
-        }
-        if invoice is not None
-        else pi,
+        },
         provider_ref_aliases=_ref_aliases(  # EC:E24
             [_get(invoice, "id") if invoice is not None else None, _get(pi, "invoice"), _get(pi, "latest_charge")]
         ),
@@ -771,7 +769,8 @@ class StripeProvider:
         price_ref = (input.price.provider_price_refs or {}).get("stripe")
         if not price_ref:
             raise PaymentKitError(
-                "missing stripe price ref for plan price",
+                f"set plan_prices.provider_price_refs for plan {input.plan.id} / "
+                f"{input.price.currency} (see docs/GUIDE.md)",
                 "missing_provider_price_ref",
                 {"plan_id": input.plan.id},
             )

@@ -347,7 +347,13 @@ export class PolarProvider implements PaymentProvider {
   // EC:E6 — idempotencyKey is best-effort (Polar API doesn't document idempotency header support)
   async createCheckout(input: CreateCheckoutInput): Promise<Checkout> {
     const productRef = input.price.providerPriceRefs?.polar;
-    if (!productRef) throw new PaymentKitError('missing polar product ref for plan price', 'missing_provider_price_ref', { planId: input.plan.id });
+    if (!productRef) {
+      throw new PaymentKitError(
+        `set plan_prices.provider_price_refs for plan ${input.plan.id} / ${input.price.currency} (see docs/GUIDE.md)`,
+        'missing_provider_price_ref',
+        { planId: input.plan.id },
+      );
+    }
     const checkout = await this.request<{ id: string; url: string }>(
       'POST',
       '/v1/checkouts/',
