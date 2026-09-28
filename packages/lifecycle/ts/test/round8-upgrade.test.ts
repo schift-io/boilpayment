@@ -126,13 +126,13 @@ describe('[EC:A65] startSubscription starts a self-scheduled subscription from a
     expect(first.sub.currentPeriod).toEqual({ start: clock.now(), end: new Date('2026-05-11T03:00:00.000Z') });
   });
 
-  it('a declined first charge leaves the subscription incomplete and throws subscription_start_declined', async () => {
+  it('a declined first charge closes the subscription (expired, EC:A72) and throws subscription_start_declined', async () => {
     const { clock, ledger, repo, provider, policy } = await base();
     provider.nextChargeHttpError = 402;
     const input = { customerId: 'u1', planId: 'basic', currency: 'KRW', billingKey: 'bk1', requestId: 'signup-2', provider, policy, ledger, repo, clock };
     await expect(startSubscription(input)).rejects.toMatchObject({ code: 'subscription_start_declined' });
     const [sub] = await repo.subscriptions.list();
-    expect(sub?.status).toBe('incomplete');
+    expect(sub?.status).toBe('expired');
     expect((await ledger.balance('u1', 'paid', clock.now())).available).toBe(0);
   });
 

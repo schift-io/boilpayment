@@ -3,8 +3,8 @@
 // period is charged through the same attempt path as renewals, then the subscription goes active and
 // the period's credits are granted. Hosted-checkout providers (Stripe/Polar) start through checkout.
 import { createHash } from 'node:crypto';
-import { Clock, LedgerStore, Notifier, Payment, PaymentKitError, PaymentProvider, Plan, Policy, Repo, Subscription } from 'boilpayment-core';
-import { chargeAttempt, renewalAttemptKey } from './charge-attempt.js';
+import { Clock, LedgerStore, Notifier, Payment, PaymentKitError, PaymentProvider, Plan, Policy, Repo, Subscription, civilDayOf } from 'boilpayment-core';
+import { chargeAttempt, renewalAttemptKey, withAttemptLease } from './charge-attempt.js';
 import { requirePriceForSubscription } from './internal.js';
 import { nextPeriod } from './period.js';
 import { onRenewalPaid } from './renewal.js';
@@ -59,18 +59,16 @@ export async function startSubscription(input: StartSubscriptionInput): Promise<
   if (sub && (sub.planId !== input.planId || sub.billingKey !== input.billingKey)) {
     throw new PaymentKitError('this requestId started a different subscription', 'idempotency_key_reused', { subscriptionId: id });
   }
+  // EC:A72 — a sign-up whose first charge was declined is closed; a new attempt needs a new requestId.
+  if (sub && sub.status === 'expired') {
+    throw new PaymentKitError('the first charge was declined', 'subscription_start_declined', { subscriptionId: id });
+  }
   if (!sub) {
-    const now = clock.now();
-    const anchorDay = now.getUTCDate();
-    const period = nextPeriod({ start: now, end: now }, plan.interval as 'month' | 'year', anchorDay, policy.period.timezone, policy.period.monthEndAnchor);
-    const draft: Subscription = {
-      id, customerId: input.customerId, planId: plan.id, provider: provider.name, providerRef: null, status: 'incomplete',
-      currentPeriod: period, anchorDay, cancelAtPeriodEnd: false, graceUntil: null, billingKey: input.billingKey,
-      billingCustomerRef: customerRef, scheduledPlanId: null, currency: input.currency, version: 0, createdAt: now,
-    };
-    requirePriceForSubscription(plan, draft); // a plan without a price in this currency is refused before any write
-    await repo.subscriptions.put(draft);
-    sub = (await repo.subscriptions.get(id)) as Subscription;
+    // EC:A72 — under multiplePerCustomer=deny the check and the draft write run under one per-customer
+    // lease, so two sign-ups at once (different requestIds) cannot both create a live subscription.
+    const leased = await withAttemptLease(repo, clock, `start:${input.customerId}`, () => createDraft(input, plan, id, customerRef));
+    if (!leased.held) throw new PaymentKitError('another sign-up of this customer is in progress', 'subscription_start_in_flight', { customerId: input.customerId });
+    sub = leased.value;
   }
   const price = requirePriceForSubscription(plan, sub);
   const outcome = await chargeAttempt({
@@ -86,13 +84,44 @@ export async function startSubscription(input: StartSubscriptionInput): Promise<
       if (started !== paid.sub) await repo.subscriptions.put(started);
       return { sub: started, payment: outcome.payment };
     }
-    case 'declined':
+    case 'declined': {
+      // EC:A72 — close the declined sign-up so it never becomes the customer's current subscription.
+      const current = (await repo.subscriptions.get(id)) ?? sub;
+      if (current.status === 'incomplete') await repo.subscriptions.put({ ...current, status: 'expired' });
       throw new PaymentKitError('the first charge was declined', 'subscription_start_declined', { subscriptionId: id, payment: outcome.payment });
+    }
     case 'unresolved':
       throw new PaymentKitError('the first charge has no answer yet; call again with the same requestId', 'subscription_start_unresolved', { subscriptionId: id, reason: outcome.reason });
     case 'in_flight':
       throw new PaymentKitError('this sign-up is being charged right now', 'subscription_start_in_flight', { subscriptionId: id });
   }
+}
+
+/** Statuses that count as a live subscription for multiplePerCustomer=deny (EC:A72). */
+const LIVE: ReadonlySet<Subscription['status']> = new Set(['active', 'trialing', 'past_due', 'incomplete']);
+
+async function createDraft(input: StartSubscriptionInput, plan: Plan, id: string, customerRef: string): Promise<Subscription> {
+  const { repo, clock, policy, provider } = input;
+  const raced = await repo.subscriptions.get(id);
+  if (raced) return raced;
+  if (policy.subscription.multiplePerCustomer === 'deny') {
+    const live = (await repo.subscriptions.list({ customerId: input.customerId } as Partial<Subscription>)).filter((s) => LIVE.has(s.status));
+    if (live.length > 0) {
+      throw new PaymentKitError('the customer already has a subscription', 'subscription_exists', { customerId: input.customerId, subscriptionId: live[0].id });
+    }
+  }
+  const now = clock.now();
+  // EC:A71 — the anchor is the start's civil day in the policy timezone, so the first period is one interval.
+  const anchorDay = civilDayOf(now, policy.period.timezone);
+  const period = nextPeriod({ start: now, end: now }, plan.interval as 'month' | 'year', anchorDay, policy.period.timezone, policy.period.monthEndAnchor);
+  const draft: Subscription = {
+    id, customerId: input.customerId, planId: plan.id, provider: provider.name, providerRef: null, status: 'incomplete',
+    currentPeriod: period, anchorDay, cancelAtPeriodEnd: false, graceUntil: null, billingKey: input.billingKey,
+    billingCustomerRef: customerRef, scheduledPlanId: null, currency: input.currency, version: 0, createdAt: now,
+  };
+  requirePriceForSubscription(plan, draft); // a plan without a price in this currency is refused before any write
+  await repo.subscriptions.put(draft);
+  return (await repo.subscriptions.get(id)) as Subscription;
 }
 
 async function ensureCustomer(repo: Repo, clock: Clock, customerId: string, provider: Subscription['provider'], ref: string): Promise<void> {

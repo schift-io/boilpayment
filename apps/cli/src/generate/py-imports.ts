@@ -25,7 +25,7 @@ export function importsPy(config: PaykitConfig): string[] {
   l.push('');
   l.push(`from typing import Any`);
   l.push('');
-  l.push(`from boilpayment.core import Clock, ConsoleLogger, Deps, LedgerStore, Logger, Money, NoopLogger, Notification, Notifier, Payment, ${hasSubscription && hasCredits ? 'PaymentKitError, ' : ''}PaymentProvider, Period, Plan, PlanPrice, Policy, Repo, Subscription, resolve_policy`);
+  l.push(`from boilpayment.core import Clock, ConsoleLogger, Deps, LedgerStore, Logger, Money, NoopLogger, Notification, Notifier, Payment, ${hasCredits || hasSelfScheduler ? 'PaymentKitError, ' : ''}PaymentProvider, Period, Plan, PlanPrice, Policy, Repo, Subscription, resolve_policy`);
   l.push(`from boilpayment.postgres import verify_schema`);
   if (config.infra.logging === 'postgres') {
     l.push(`from boilpayment.postgres import PostgresLogger`);

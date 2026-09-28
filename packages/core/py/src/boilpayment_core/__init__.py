@@ -54,6 +54,7 @@ from .money import (  # noqa: F401
 from .payment_refs import find_local_payment as find_local_payment
 from .payment_refs import record_payment_ref_aliases as record_payment_ref_aliases
 from .period import (  # noqa: F401
+    civil_day_of,
     days_in_month,
     days_in_period,
     elapsed_ratio,

@@ -21,6 +21,7 @@ from boilpayment_core import (
     Policy,
     Repo,
     Subscription,
+    civil_day_of,
     deserialize_ledger_entry,
     deserialize_subscription,
     hash_payload,
@@ -291,10 +292,9 @@ async def _do_upgrade(input: UpgradeInput, stamp: str) -> UpgradeResult:
     anchor_day = sub.anchor_day
 
     if reset_anchor:
-        # EC:G3 — instants stored in UTC; civil-day extraction for non-UTC policy.period.timezone is
-        # approximated via UTC date here (core does not expose a public tz-aware civil-day helper).
-        # See spec "계약 변경 제안" #1.
-        anchor_day = now.day
+        # EC:A71 — the new anchor is today's civil day in the policy timezone (a UTC day gives a KST
+        # 1st-of-month upgrade the previous month's last day, and a two-month first period).
+        anchor_day = civil_day_of(now, policy.period.timezone)
         interval = new_plan.interval or "month"
         current_period = next_period(
             Period(start=now, end=now),

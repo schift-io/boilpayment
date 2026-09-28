@@ -1,0 +1,87 @@
+// spec: packages/lifecycle/spec/lifecycle.pseudo.md — EC:A71 A72 (round-9 A9-4 A9-8 A9-9)
+import { describe, expect, it } from 'vitest';
+import { FixedClock, InMemoryLedger, InMemoryRepo, Plan, SequentialIdGen, Subscription, resolvePolicy } from 'boilpayment-core';
+import { startSubscription, upgrade } from '../src/index.js';
+import { FakeSelfSchedulingProvider } from './helpers.js';
+
+const basic: Plan = { id: 'basic', name: 'Basic', interval: 'month', creditsPerPeriod: 1000, usageIncluded: 0, trialDays: 0, prices: [{ currency: 'KRW', amountMinor: 9900 }] };
+const pro: Plan = { id: 'pro', name: 'Pro', interval: 'month', creditsPerPeriod: 3000, usageIncluded: 0, trialDays: 0, prices: [{ currency: 'KRW', amountMinor: 19900 }] };
+const seoul = resolvePolicy({ period: { timezone: 'Asia/Seoul' } });
+
+async function base(at: string, policy = seoul) {
+  const clock = new FixedClock(new Date(at));
+  const ledger = new InMemoryLedger(new SequentialIdGen('led_'));
+  const repo = new InMemoryRepo();
+  for (const p of [basic, pro]) await repo.plans.put(p);
+  return { clock, ledger, repo, provider: new FakeSelfSchedulingProvider(), policy };
+}
+const input = (e: Awaited<ReturnType<typeof base>>, requestId: string, customerId = 'u1') => ({
+  customerId, planId: 'basic', currency: 'KRW', billingKey: 'bk1', requestId, provider: e.provider, policy: e.policy, ledger: e.ledger, repo: e.repo, clock: e.clock,
+});
+
+describe('[EC:A71] the first period is one interval in the policy timezone', () => {
+  it.each([
+    ['2026-04-30T20:00:00.000Z', '2026-05-31T20:00:00.000Z', 1], // KST 5/1 05:00 -> KST 6/1 05:00
+    ['2026-12-31T16:00:00.000Z', '2027-01-31T16:00:00.000Z', 1], // KST 1/1 01:00 -> KST 2/1 01:00
+    ['2026-01-30T16:00:00.000Z', '2026-02-27T16:00:00.000Z', 31], // KST 1/31 -> KST 2/28 (clamped)
+  ])('Asia/Seoul start at %s ends at %s (anchor %i)', async (at, end, anchor) => {
+    const e = await base(at);
+    const { sub } = await startSubscription(input(e, 'r1'));
+    expect(sub.currentPeriod).toEqual({ start: new Date(at), end: new Date(end) });
+    expect(sub.anchorDay).toBe(anchor);
+  });
+
+  it('UTC policy keeps the UTC day', async () => {
+    const e = await base('2026-04-30T20:00:00.000Z', resolvePolicy());
+    const { sub } = await startSubscription(input(e, 'r1'));
+    expect(sub.currentPeriod.end).toEqual(new Date('2026-05-30T20:00:00.000Z'));
+  });
+
+  it('a reset_anchor upgrade at KST 5/1 05:00 starts a one-month period', async () => {
+    const e = await base('2026-04-30T20:00:00.000Z');
+    const sub: Subscription = {
+      id: 's1', customerId: 'c1', planId: 'basic', provider: 'toss', providerRef: null, status: 'active',
+      currentPeriod: { start: new Date('2026-04-14T15:00:00.000Z'), end: new Date('2026-05-14T15:00:00.000Z') },
+      anchorDay: 15, cancelAtPeriodEnd: false, graceUntil: null, billingKey: 'bk1', scheduledPlanId: null, currency: 'KRW',
+      version: 0, createdAt: new Date('2026-04-14T15:00:00.000Z'),
+    };
+    await e.repo.subscriptions.put(sub);
+    const stored = (await e.repo.subscriptions.get('s1')) as Subscription;
+    const res = await upgrade({ sub: stored, newPlan: pro, policy: seoul, provider: e.provider, ledger: e.ledger, repo: e.repo, clock: e.clock, ids: new SequentialIdGen('id_') });
+    expect(res.sub.currentPeriod).toEqual({ start: new Date('2026-04-30T20:00:00.000Z'), end: new Date('2026-05-31T20:00:00.000Z') });
+  });
+});
+
+describe('[EC:A72] startSubscription honors multiplePerCustomer and never hides a paid subscription', () => {
+  it('deny: a second sign-up with another requestId is refused before any charge', async () => {
+    const e = await base('2026-04-11T03:00:00.000Z');
+    await startSubscription(input(e, 'a'));
+    await expect(startSubscription(input(e, 'b'))).rejects.toMatchObject({ code: 'subscription_exists' });
+    expect((await e.repo.subscriptions.list()).length).toBe(1);
+  });
+
+  it('deny: two sign-ups at once leave at most one subscription', async () => {
+    const e = await base('2026-04-11T03:00:00.000Z');
+    const results = await Promise.allSettled([startSubscription(input(e, 'x')), startSubscription(input(e, 'y'))]);
+    expect(results.filter((r) => r.status === 'fulfilled').length).toBe(1);
+    expect((await e.repo.subscriptions.list()).length).toBe(1);
+  });
+
+  it('allow_separate_pools: a second sign-up is allowed', async () => {
+    const e = await base('2026-04-11T03:00:00.000Z', resolvePolicy({ subscription: { multiplePerCustomer: 'allow_separate_pools' } }));
+    await startSubscription(input(e, 'a'));
+    await startSubscription(input(e, 'b'));
+    expect((await e.repo.subscriptions.list()).filter((s) => s.status === 'active').length).toBe(2);
+  });
+
+  it('a declined sign-up is closed (expired); its requestId stays declined; the next sign-up is allowed', async () => {
+    const e = await base('2026-04-11T03:00:00.000Z');
+    e.provider.nextChargeHttpError = 402;
+    await expect(startSubscription(input(e, 'd1'))).rejects.toMatchObject({ code: 'subscription_start_declined' });
+    await expect(startSubscription(input(e, 'd1'))).rejects.toMatchObject({ code: 'subscription_start_declined' });
+    e.provider.nextChargeHttpError = null;
+    const ok = await startSubscription(input(e, 'd2'));
+    expect(ok.sub.status).toBe('active');
+    expect((await e.repo.subscriptions.list()).map((s) => s.status).sort()).toEqual(['active', 'expired']);
+  });
+});

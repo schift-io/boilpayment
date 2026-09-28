@@ -199,13 +199,13 @@ def test_a65_start_charges_once_activates_and_grants() -> None:
     asyncio.run(scenario())
 
 
-def test_a65_declined_start_stays_incomplete() -> None:
+def test_a65_a72_declined_start_is_closed() -> None:
     async def scenario() -> None:
         repo, ledger, provider = await start_base()
         provider.next_charge_http_error = 402
         assert await code(start(repo, ledger, provider, "signup-2")) == "subscription_start_declined"
         (sub,) = await repo.subscriptions.list()
-        assert sub.status == "incomplete"
+        assert sub.status == "expired"
         assert (await ledger.balance("u1", "paid", d("2026-04-11T03:00:00Z"))).available == 0
 
     asyncio.run(scenario())

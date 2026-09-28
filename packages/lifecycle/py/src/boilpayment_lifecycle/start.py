@@ -10,7 +10,6 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 from dataclasses import dataclass
-from datetime import UTC
 
 from boilpayment_core import (
     Clock,
@@ -25,9 +24,15 @@ from boilpayment_core import (
     ProviderRef,
     Repo,
     Subscription,
+    civil_day_of,
 )
 
-from .charge_attempt import ChargeAttemptInput, charge_attempt, renewal_attempt_key
+from .charge_attempt import (
+    ChargeAttemptInput,
+    charge_attempt,
+    renewal_attempt_key,
+    with_attempt_lease,
+)
 from .internal import require_price_for_subscription
 from .period import next_period
 from .renewal import OnRenewalPaidInput, on_renewal_paid
@@ -82,20 +87,19 @@ async def start_subscription(input: StartSubscriptionInput) -> StartSubscription
     sub = await repo.subscriptions.get(sub_id)
     if sub is not None and (sub.plan_id != input.plan_id or sub.billing_key != input.billing_key):
         raise PaymentKitError("this request_id started a different subscription", "idempotency_key_reused", {"subscription_id": sub_id})
+    # EC:A72 -- a sign-up whose first charge was declined is closed; a new attempt needs a new request_id.
+    if sub is not None and sub.status == "expired":
+        raise PaymentKitError("the first charge was declined", "subscription_start_declined", {"subscription_id": sub_id})
     if sub is None:
-        now = clock.now()
-        anchor_day = now.astimezone(UTC).day
-        period = next_period(Period(start=now, end=now), plan.interval, anchor_day, policy.period.timezone, policy.period.month_end_anchor)
-        draft = Subscription(
-            id=sub_id, customer_id=input.customer_id, plan_id=plan.id, provider=provider.name, provider_ref=None,  # type: ignore[arg-type]
-            status="incomplete", current_period=period, anchor_day=anchor_day, cancel_at_period_end=False, grace_until=None,
-            billing_key=input.billing_key, billing_customer_ref=customer_ref, scheduled_plan_id=None, currency=input.currency,
-            version=0, created_at=now,
-        )
-        require_price_for_subscription(plan, draft)  # a plan without a price in this currency is refused before any write
-        await repo.subscriptions.put(draft)
-        sub = await repo.subscriptions.get(sub_id)
-        assert sub is not None
+        # EC:A72 -- under multiple_per_customer=deny the check and the draft write run under one per-customer
+        # lease, so two sign-ups at once (different request_ids) cannot both create a live subscription.
+        held, value = await with_attempt_lease(repo, clock, f"start:{input.customer_id}",
+                                               lambda: _create_draft(input, plan, sub_id, customer_ref))
+        if not held:
+            raise PaymentKitError("another sign-up of this customer is in progress", "subscription_start_in_flight",
+                                  {"customer_id": input.customer_id})
+        sub = value
+    assert sub is not None
     price = require_price_for_subscription(plan, sub)
     outcome = await charge_attempt(ChargeAttemptInput(
         provider=provider, repo=repo, clock=clock, sub=sub, price=price, period=sub.current_period,
@@ -116,11 +120,46 @@ async def start_subscription(input: StartSubscriptionInput) -> StartSubscription
             await repo.subscriptions.put(started)
         return StartSubscriptionResult(sub=started, payment=outcome.payment)
     if outcome.kind == "declined":
+        # EC:A72 -- close the declined sign-up so it never becomes the customer's current subscription.
+        current = await repo.subscriptions.get(sub_id) or sub
+        if current.status == "incomplete":
+            await repo.subscriptions.put(dataclasses.replace(current, status="expired"))
         raise PaymentKitError("the first charge was declined", "subscription_start_declined", {"subscription_id": sub_id, "payment": outcome.payment})
     if outcome.kind == "unresolved":
         raise PaymentKitError("the first charge has no answer yet; call again with the same request_id",
                               "subscription_start_unresolved", {"subscription_id": sub_id, "reason": outcome.reason})
     raise PaymentKitError("this sign-up is being charged right now", "subscription_start_in_flight", {"subscription_id": sub_id})
+
+
+# Statuses that count as a live subscription for multiple_per_customer=deny (EC:A72).
+_LIVE = frozenset({"active", "trialing", "past_due", "incomplete"})
+
+
+async def _create_draft(input: StartSubscriptionInput, plan, sub_id: str, customer_ref: str) -> Subscription:  # type: ignore[no-untyped-def]
+    repo, clock, policy, provider = input.repo, input.clock, input.policy, input.provider
+    raced = await repo.subscriptions.get(sub_id)
+    if raced is not None:
+        return raced
+    if policy.subscription.multiple_per_customer == "deny":
+        live = [s for s in await repo.subscriptions.list(customer_id=input.customer_id) if s.status in _LIVE]
+        if live:
+            raise PaymentKitError("the customer already has a subscription", "subscription_exists",
+                                  {"customer_id": input.customer_id, "subscription_id": live[0].id})
+    now = clock.now()
+    # EC:A71 -- the anchor is the start's civil day in the policy timezone, so the first period is one interval.
+    anchor_day = civil_day_of(now, policy.period.timezone)
+    period = next_period(Period(start=now, end=now), plan.interval, anchor_day, policy.period.timezone, policy.period.month_end_anchor)
+    draft = Subscription(
+        id=sub_id, customer_id=input.customer_id, plan_id=plan.id, provider=provider.name, provider_ref=None,  # type: ignore[arg-type]
+        status="incomplete", current_period=period, anchor_day=anchor_day, cancel_at_period_end=False, grace_until=None,
+        billing_key=input.billing_key, billing_customer_ref=customer_ref, scheduled_plan_id=None, currency=input.currency,
+        version=0, created_at=now,
+    )
+    require_price_for_subscription(plan, draft)  # a plan without a price in this currency is refused before any write
+    await repo.subscriptions.put(draft)
+    stored = await repo.subscriptions.get(sub_id)
+    assert stored is not None
+    return stored
 
 
 async def _ensure_customer(repo: Repo, clock: Clock, customer_id: str, provider: str, ref: str) -> None:

@@ -260,7 +260,8 @@ export function generateIndexPy(config: PaykitConfig): string {
       l.push(`    async def current_subscription(customer_id: str) -> Subscription | None:`);
       l.push(`        """EC:C11 — the customer's current (latest) subscription, for entitlement checks the kit owns."""`);
       l.push(`        subs = await repo.subscriptions.list(customer_id=customer_id)`);
-      l.push(`        return max(subs, key=lambda s: s.created_at) if subs else None`);
+      l.push(`        # EC:A72 — a live subscription first, then the latest: a declined second sign-up never hides the paid one.`);
+      l.push(`        return max(subs, key=lambda s: (s.status in ("active", "trialing", "past_due"), s.created_at)) if subs else None`);
       l.push('');
     }
     l.push(`    async def assert_customer_can_spend(customer_id: str) -> None:`);

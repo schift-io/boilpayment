@@ -18,7 +18,7 @@ import {
   serializeLedgerEntry,
   serializeSubscription,
 } from 'boilpayment-core';
-import { prorationFraction, scaleMinor } from 'boilpayment-core';
+import { civilDayOf, prorationFraction, scaleMinor } from 'boilpayment-core';
 import { nextPeriod, prorationRatio } from './period.js';
 import { requirePriceForSubscription, resolvePriceRef, scopeProvider } from './internal.js';
 import { chargeUpgradeDelta } from './upgrade-charge.js';
@@ -164,10 +164,9 @@ async function upgradeHeld(input: UpgradeInput): Promise<UpgradeResult> {
   let anchorDay = sub.anchorDay;
 
   if (resetAnchor) {
-    // EC:G3 — instants stored in UTC; civil-day extraction for non-UTC policy.period.timezone is
-    // approximated via UTC date here (core does not expose a public tz-aware civil-day helper).
-    // See spec "계약 변경 제안" #1.
-    anchorDay = now.getUTCDate();
+    // EC:A71 — the new anchor is today's civil day in the policy timezone (a UTC day gives a KST
+    // 1st-of-month upgrade the previous month's last day, and a two-month first period).
+    anchorDay = civilDayOf(now, policy.period.timezone);
     const interval = (newPlan.interval ?? 'month') as 'month' | 'year';
     currentPeriod = nextPeriod({ start: now, end: now }, interval, anchorDay, policy.period.timezone, policy.period.monthEndAnchor);
   }

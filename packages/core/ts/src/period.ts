@@ -60,6 +60,13 @@ function civilToUtc(parts: CivilParts, tz: string): Date {
   return new Date(wall - before);
 }
 
+/** EC:A71 — the day of month `instant` falls on in `tz` (the civil anchor day for a period that starts
+ * at `instant`). A UTC day would give a KST 1st-of-month start the previous month's last day as its
+ * anchor, and the first period would run two months. */
+export function civilDayOf(instant: Date, tz: string): number {
+  return civilPartsInTz(instant, tz).day;
+}
+
 /** Number of days in `month` (1..12) of `year`, accounting for leap years (EC:G5). */
 export function daysInMonth(year: number, month: number): number {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();

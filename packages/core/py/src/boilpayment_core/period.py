@@ -59,6 +59,13 @@ def _civil_to_utc(parts: _CivilParts, tz: str) -> datetime:
     return local.astimezone(UTC)
 
 
+def civil_day_of(instant: datetime, tz: str) -> int:
+    """EC:A71 -- the day of month ``instant`` falls on in ``tz`` (the civil anchor day for a period
+    that starts at ``instant``). A UTC day would give a KST 1st-of-month start the previous
+    month's last day as its anchor, and the first period would run two months."""
+    return _civil_parts_in_tz(instant, tz).day
+
+
 def days_in_month(year: int, month: int) -> int:
     """Number of days in `month` (1..12) of `year`, accounting for leap years (EC:G5)."""
     return calendar.monthrange(year, month)[1]
