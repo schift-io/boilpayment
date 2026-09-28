@@ -1,1 +1,22 @@
-{ "extends": "../../../tsconfig.base.json", "compilerOptions": { "outDir": "dist", "rootDir": "src" }, "include": ["src"] }
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "boilpayment-core": ["../../core/ts/src/index.ts"],
+      "boilpayment-credits": ["../../credits/ts/src/index.ts"],
+      "boilpayment-lifecycle": ["../../lifecycle/ts/src/index.ts"],
+      "boilpayment-refund": ["../../refund/ts/src/index.ts"],
+      "boilpayment-usage": ["../../usage/ts/src/index.ts"],
+      "boilpayment-webhook": ["../../webhook/ts/src/index.ts"],
+      "boilpayment-notify": ["../../notify/ts/src/index.ts"],
+      "boilpayment-cs": ["../../cs/ts/src/index.ts"],
+      "boilpayment-schema-postgres": ["../../schema-postgres/ts/src/index.ts"],
+      "boilpayment-stripe": ["../../providers/stripe/ts/src/index.ts"],
+      "boilpayment-toss": ["../../providers/toss/ts/src/index.ts"],
+      "boilpayment-portone": ["../../providers/portone/ts/src/index.ts"],
+      "boilpayment-polar": ["../../providers/polar/ts/src/index.ts"]
+    }
+  },
+  "include": ["src"]
+}

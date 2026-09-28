@@ -3,10 +3,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { FixedClock } from 'boilpayment-core';
-import type { Operation } from 'boilpayment-core';
-import { createPool, createPostgresRepo, migrate } from 'boilpayment-schema-postgres';
-import { ATTEMPT_LEASE_MS, withAttemptLease } from '../../../lifecycle/ts/dist/charge-attempt.js';
+import { FixedClock } from 'boilpayment-sdk/core';
+import type { Operation } from 'boilpayment-sdk/core';
+import { createPool, createPostgresRepo, migrate } from 'boilpayment-sdk/postgres';
+import { ATTEMPT_LEASE_MS, withAttemptLease } from '../dist/internal/lifecycle/charge-attempt.js';
 
 let dbName = '';
 let pools: any[] = [];

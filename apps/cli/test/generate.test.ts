@@ -113,26 +113,9 @@ describe('generatePolicyMd', () => {
 const PKG_DIST: Record<string, string> = {
   // The generated paykit/index.ts imports exclusively from the single-install facade
   // (boilpayment-sdk/<subpath> — see ts-entry.ts) rather than the ten individual
-  // packages, so this must actually resolve through the built facade, not bypass it. The facade
+  // packages, so this must actually resolve through the self-contained built facade. The facade
   // itself must be built before this test runs — see apps/cli/package.json's `pretest`.
   'boilpayment-sdk': 'packages/sdk/ts/dist',
-  // The facade's own dist/*.d.ts re-export these by name (`export * from 'boilpayment-core'`
-  // etc.), so tsc still needs to resolve them transitively — kept here for that reason.
-  'boilpayment-core': 'packages/core/ts/dist',
-  'boilpayment-credits': 'packages/credits/ts/dist',
-  'boilpayment-lifecycle': 'packages/lifecycle/ts/dist',
-  'boilpayment-refund': 'packages/refund/ts/dist',
-  'boilpayment-usage': 'packages/usage/ts/dist',
-  'boilpayment-webhook': 'packages/webhook/ts/dist',
-  'boilpayment-notify': 'packages/notify/ts/dist',
-  // EC:L1-L5 — infra.logging='postgres' (the kitchen-sink default) makes generated index.ts import
-  // both of these directly (see ts-entry.ts buildLogger()).
-  'boilpayment-schema-postgres': 'packages/schema-postgres/ts/dist',
-  'boilpayment-cs': 'packages/cs/ts/dist',
-  'boilpayment-stripe': 'packages/providers/stripe/ts/dist',
-  'boilpayment-polar': 'packages/providers/polar/ts/dist',
-  'boilpayment-toss': 'packages/providers/toss/ts/dist',
-  'boilpayment-portone': 'packages/providers/portone/ts/dist',
 };
 
 describe('generated paykit/index.ts typechecks (temp-tsconfig against workspace dist)', () => {
@@ -152,7 +135,7 @@ describe('generated paykit/index.ts typechecks (temp-tsconfig against workspace 
           moduleResolution: 'NodeNext',
           strict: true,
           esModuleInterop: true,
-          skipLibCheck: true,
+          skipLibCheck: false,
           resolveJsonModule: true,
           noEmit: true,
           baseUrl: ROOT,
@@ -161,10 +144,6 @@ describe('generated paykit/index.ts typechecks (temp-tsconfig against workspace 
             // Facade subpaths (boilpayment-sdk/core, /credits, /stripe, ...) — each compiles
             // to a same-named .d.ts under the facade's dist/ (see packages/sdk/ts/package.json exports).
             'boilpayment-sdk/*': ['packages/sdk/ts/dist/*.d.ts'],
-            // 'pg' types aren't hoisted to the repo-root node_modules under pnpm (only nested under
-            // packages/schema-postgres/ts/node_modules) — point at them explicitly, same reason
-            // PKG_DIST exists at all.
-            pg: ['packages/schema-postgres/ts/node_modules/@types/pg/index.d.ts'],
           },
         },
         include: [path.join(dir, '**/*')],

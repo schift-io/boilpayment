@@ -1,6 +1,7 @@
 {
   "name": "boilpayment-polar",
   "version": "0.2.1",
+  "private": true,
   "description": "boilpayment — polar",
   "license": "MIT",
   "keywords": [

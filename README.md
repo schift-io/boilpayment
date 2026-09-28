@@ -63,9 +63,9 @@ npx boilpayment check                       # read-only: config + schema version
 ```
 
 Before a version is on the registry, install the packed files together:
-`npm i ./boilpayment*.tgz` (the CLI, the SDK and its internal packages; `npx boilpayment` then runs
-the installed CLI) or `pip install ./boilpayment-<version>-py3-none-any.whl`. Once the version is on
-the registry, keep the CLI at the SDK's version (`npx boilpayment@<version> …`).
+`npm i ./boilpayment-sdk-<version>.tgz ./boilpayment-<version>.tgz` (the SDK and CLI) or
+`pip install ./boilpayment-<version>-py3-none-any.whl`. Once the version is on the registry, keep
+the CLI at the SDK's version (`npx boilpayment@<version> …`).
 
 **0.2.0 is a fresh install.** There is no upgrade path from 0.1.0: stop and remove every 0.1.0
 worker first and install 0.2.0 against a new database. Running two releases at once, or continuing
@@ -134,24 +134,27 @@ Schedule the crons listed in your generated `INTEGRATION.md` (`dunningSweep`, `e
 
 ## Packages
 
-| npm / PyPI | |
+| npm | |
 |---|---|
-| `boilpayment` / — | Wizard CLI (`boilpayment init`, `migrate`, `check`, `live`) |
-| `boilpayment-sdk` / `boilpayment` | Single-install facade that re-exports every module below |
-| `-core` | Types, `Policy`, interfaces, in-memory ledger and repo |
-| `-credits` | Grant, consume, rollover, clawback, expire |
-| `-lifecycle` | Upgrade, downgrade, cancel, trial, dunning, self-scheduler |
-| `-refund` | Refund evaluation, execution, credit recovery |
-| `-usage` | Record, check, period close, overage settlement |
-| `-webhook` | Receive, store, process, dispatch |
-| `-notify` | SMTP, Resend, Slack |
-| `-cs` | Cases, reconcile, regrant, refund assist, disputes, timeline, evidence export |
-| `-schema-postgres` | Postgres ledger and repo, migrations, retention |
-| `-stripe` / `-toss` / `-portone` / `-polar` | Provider adapters |
+| `boilpayment` | Wizard CLI (`boilpayment init`, `migrate`, `check`, `live`) |
+| `boilpayment-sdk` | The SDK. Modules are subpaths, listed below |
 
-The module packages (`-core` … `-polar`) are published separately on npm as `boilpayment-<module>`.
-On PyPI everything ships in the one `boilpayment` distribution (same import names:
-`boilpayment.core`, `boilpayment_core`, …), built by `scripts/build-pypi-bundle.sh`.
+| `boilpayment-sdk/…` | PyPI import | |
+|---|---|---|
+| `core` | `boilpayment.core` | Types, `Policy`, interfaces, in-memory ledger and repo |
+| `credits` | `boilpayment.credits` | Grant, consume, rollover, clawback, expire |
+| `lifecycle` | `boilpayment.lifecycle` | Upgrade, downgrade, cancel, trial, dunning, self-scheduler |
+| `refund` | `boilpayment.refund` | Refund evaluation, execution, credit recovery |
+| `usage` | `boilpayment.usage` | Record, check, period close, overage settlement |
+| `webhook` | `boilpayment.webhook` | Receive, store, process, dispatch |
+| `notify` | `boilpayment.notify` | SMTP, Resend, Slack |
+| `cs` | `boilpayment.cs` | Cases, reconcile, regrant, refund assist, disputes, timeline, evidence export |
+| `postgres` | `boilpayment.postgres` | Postgres ledger and repo, migrations, retention |
+| `stripe` / `toss` / `portone` / `polar` | same | Provider adapters |
+
+The 13 module packages remain private workspace packages for development and tests. Their built
+JavaScript, declarations and runtime assets ship inside `boilpayment-sdk`. On PyPI everything ships
+in the one `boilpayment` distribution, built by `scripts/build-pypi-bundle.sh`.
 
 Each package has `spec/*.pseudo.md` (the contract), `ts/` and `py/`.
 Architecture: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).

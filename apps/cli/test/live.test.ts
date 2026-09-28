@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProviderName } from 'boilpayment-core';
+import type { ProviderName } from 'boilpayment-sdk/core';
 import { runLive, stripeCliArgs } from '../src/commands/live.js';
 import { writeConfig } from '../src/config.js';
 import * as envFile from '../src/util/env-file.js';

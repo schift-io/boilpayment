@@ -1,6 +1,7 @@
 {
   "name": "boilpayment-usage",
   "version": "0.2.1",
+  "private": true,
   "description": "boilpayment — usage",
   "license": "MIT",
   "keywords": [

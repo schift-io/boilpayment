@@ -1,6 +1,7 @@
 {
   "name": "boilpayment-portone",
   "version": "0.2.1",
+  "private": true,
   "description": "boilpayment — portone",
   "license": "MIT",
   "keywords": [

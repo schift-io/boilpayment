@@ -1,6 +1,7 @@
 {
   "name": "boilpayment-cs",
   "version": "0.2.1",
+  "private": true,
   "description": "boilpayment — cs",
   "license": "MIT",
   "keywords": [

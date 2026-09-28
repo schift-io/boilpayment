@@ -42,13 +42,7 @@
     "dev": "tsx src/bin.ts"
   },
   "dependencies": {
-    "boilpayment-core": "workspace:*",
-    "boilpayment-stripe": "workspace:*",
-    "boilpayment-toss": "workspace:*",
-    "boilpayment-portone": "workspace:*",
-    "boilpayment-schema-postgres": "workspace:*",
-    "boilpayment-polar": "workspace:*",
-    "boilpayment-webhook": "workspace:*",
+    "boilpayment-sdk": "workspace:*",
     "@clack/prompts": "^0.8.0",
     "picocolors": "^1.1.0"
   },

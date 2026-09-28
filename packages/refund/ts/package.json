@@ -1,6 +1,7 @@
 {
   "name": "boilpayment-refund",
   "version": "0.2.1",
+  "private": true,
   "description": "boilpayment — refund",
   "license": "MIT",
   "keywords": [

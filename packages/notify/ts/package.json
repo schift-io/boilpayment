@@ -1,6 +1,7 @@
 {
   "name": "boilpayment-notify",
   "version": "0.2.1",
+  "private": true,
   "description": "boilpayment — notify",
   "license": "MIT",
   "keywords": [

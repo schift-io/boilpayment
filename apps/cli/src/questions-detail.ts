@@ -2,7 +2,7 @@
 // EC:C10 reservations, EC:D16 refund reasons, EC:B19 per-source expiry, EC:I10 reports,
 // EC:A47 missed periods of self-scheduled renewals (round-5 audit).
 // Spread into QUESTIONS at their place in docs/EDGE_CASES.md "위저드 질문 순서" by questions.ts.
-import { DEFAULT_POLICY } from 'boilpayment-core';
+import { DEFAULT_POLICY } from 'boilpayment-sdk/core';
 import { getPath } from './util/path.js';
 import type { Question } from './questions.js';
 import type { WizardConfig } from './wizard-state.js';

@@ -1,11 +1,11 @@
 // Round-4 audit regressions (bp-audit4.md A4-10, EC:A46 A38): reconcile over self-scheduled attempt rows.
 // Fake/env ported from the auditor's PoC; a getPaymentByOrderId lookup is added to the fake.
 import { describe, expect, it } from 'vitest';
-import { CollectingNotifier, FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen, resolvePolicy } from 'boilpayment-core';
-import type { Money, Payment, PaymentProvider, PaymentStatus, Plan, Refund, Subscription } from 'boilpayment-core';
-import { dunning, scheduler } from 'boilpayment-lifecycle';
-import { topup, grantForPeriod } from 'boilpayment-credits';
-import { recoverMissingGrants } from 'boilpayment-cs';
+import { CollectingNotifier, FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen, resolvePolicy } from 'boilpayment-sdk/core';
+import type { Money, Payment, PaymentProvider, PaymentStatus, Plan, Refund, Subscription } from 'boilpayment-sdk/core';
+import { dunning, scheduler } from 'boilpayment-sdk/lifecycle';
+import { topup, grantForPeriod } from 'boilpayment-sdk/credits';
+import { recoverMissingGrants } from 'boilpayment-sdk/cs';
 
 class Fake {
   constructor(readonly name: 'toss' | 'portone') {}

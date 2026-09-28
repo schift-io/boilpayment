@@ -1,6 +1,7 @@
 {
   "name": "boilpayment-webhook",
   "version": "0.2.1",
+  "private": true,
   "description": "boilpayment — webhook",
   "license": "MIT",
   "keywords": [

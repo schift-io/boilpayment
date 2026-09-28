@@ -1,9 +1,7 @@
 # boilpayment-sdk
 
-Single-install facade for boilpayment. Depends on all 13 `boilpayment-*` packages
-at the exact version published alongside it (no `^` range — a mismatched internal version can
-never happen) and re-exports every one of them under a subpath, so a project only installs and
-imports **one** package instead of thirteen.
+Single-install facade for boilpayment. It bundles all 13 TypeScript modules and exposes each one
+under a subpath, so a project installs and imports one package instead of thirteen.
 
 ## Install
 
@@ -33,7 +31,7 @@ import { PolarProvider } from 'boilpayment-sdk/polar';
 
 Every subpath above (`/core`, `/credits`, `/lifecycle`, `/refund`, `/usage`, `/webhook`,
 `/notify`, `/cs`, `/postgres`, `/stripe`, `/toss`, `/portone`, `/polar`) is a **full, unfiltered**
-re-export of the corresponding `boilpayment-*` package — nothing is renamed or dropped.
+re-export of the corresponding bundled module — nothing is renamed or dropped.
 
 The package root (`import ... from 'boilpayment-sdk'`, no subpath) is narrower — see
 below.
@@ -41,7 +39,7 @@ below.
 ## Root export & name collisions
 
 `boilpayment-sdk` (the bare root import) re-exports the **full** surface of
-`boilpayment-core` (types, `Policy`, `Clock`/`IdGen`, period/money helpers, idempotency
+the core module (types, `Policy`, `Clock`/`IdGen`, period/money helpers, idempotency
 helpers, in-memory reference implementations, logging) plus a curated set of the most-used entry
 points from the five core operation modules:
 
@@ -58,15 +56,15 @@ points from the five core operation modules:
 - **The four provider adapters** (`/stripe`, `/toss`, `/portone`, `/polar`) — they export several
   same-named symbols with genuinely different shapes:
   - `normalizeFailure`, `normalizeSubscription`, `normalizeRefund`, `mapEventType`,
-    `toNormalizedEvent` — defined by **both** `boilpayment-stripe` and
-    `boilpayment-polar`, with different signatures.
+    `toNormalizedEvent` — defined by **both** the Stripe and Polar modules, with different
+    signatures.
   - `CashReceiptType`, `CashReceiptStatus`, `CashReceipt` — defined by **both**
-    `boilpayment-toss` and `boilpayment-portone`, with different shapes.
+    the Toss and PortOne modules, with different shapes.
 
   Re-exporting any two providers at the same root would silently shadow one implementation with
   the other depending on export order. Import providers from their own subpath.
 - **`/refund`'s own `prorationRatio`** (and `daysBetween`/`applyRounding`/`weightedAvgUnitPrice`) —
-  `prorationRatio` is a **real** collision with `boilpayment-core`'s own `prorationRatio`
+  `prorationRatio` is a **real** collision with the core module's own `prorationRatio`
   (already re-exported at the root via the core surface). The root always resolves to core's
   version; refund's copy is only reachable via `boilpayment-sdk/refund`.
 - **`/notify`, `/cs`, `/postgres`** — add-on/infra modules most projects don't touch.

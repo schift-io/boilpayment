@@ -3,11 +3,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { createPool } from 'boilpayment-schema-postgres';
-import { CollectingNotifier, FixedClock, SequentialIdGen, resolvePolicy, ProviderError } from 'boilpayment-core';
-import type { Money, Payment, PaymentProvider, PaymentStatus, Plan, Subscription } from 'boilpayment-core';
-import { dunning, scheduler } from 'boilpayment-lifecycle';
-import { createPostgresRepo, migrate, PostgresLedgerStore } from 'boilpayment-schema-postgres';
+import { createPool, createPostgresRepo, migrate, PostgresLedgerStore } from 'boilpayment-sdk/postgres';
+import { CollectingNotifier, FixedClock, SequentialIdGen, resolvePolicy, ProviderError } from 'boilpayment-sdk/core';
+import type { Money, Payment, PaymentProvider, PaymentStatus, Plan, Subscription } from 'boilpayment-sdk/core';
+import { dunning, scheduler } from 'boilpayment-sdk/lifecycle';
 
 class FakeToss {
   readonly name = 'toss' as const;

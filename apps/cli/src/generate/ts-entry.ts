@@ -190,7 +190,7 @@ export function generateIndexTs(config: PaykitConfig): string {
   }
   l.push('');
   l.push(`  // Adapts cs.openCase to the small case-opener shapes refund.onExternalRefund/execute expect,`);
-  l.push(`  // so refund/execute stay decoupled from importing boilpayment-cs directly (EC:D8/D12).`);
+  l.push(`  // so refund/execute stay decoupled from importing boilpayment-sdk/cs directly (EC:D8/D12).`);
   l.push(`  const caseOpener = {`);
   l.push(`    async openReconcileMismatchCase(input: { customerId: string | null; referenceId: string; reason: string }) {`);
   l.push(`      // EC:E24 — no local customer: tell a person (a case needs a customer row).`);

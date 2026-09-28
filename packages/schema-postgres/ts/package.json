@@ -1,6 +1,7 @@
 {
   "name": "boilpayment-schema-postgres",
   "version": "0.2.1",
+  "private": true,
   "description": "boilpayment — schema-postgres",
   "license": "MIT",
   "keywords": [

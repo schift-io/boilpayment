@@ -1,7 +1,7 @@
 {
   "name": "boilpayment-sdk",
   "version": "0.2.1",
-  "description": "boilpayment — single-install facade re-exporting every boilpayment-* package via subpaths",
+  "description": "boilpayment — self-contained TypeScript SDK exposing every module via subpaths",
   "license": "MIT",
   "keywords": [
     "schift",
@@ -83,24 +83,16 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node scripts/build.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pretest": "pnpm run build",
     "test": "vitest run"
   },
   "dependencies": {
-    "boilpayment-core": "workspace:*",
-    "boilpayment-credits": "workspace:*",
-    "boilpayment-lifecycle": "workspace:*",
-    "boilpayment-refund": "workspace:*",
-    "boilpayment-usage": "workspace:*",
-    "boilpayment-webhook": "workspace:*",
-    "boilpayment-notify": "workspace:*",
-    "boilpayment-cs": "workspace:*",
-    "boilpayment-schema-postgres": "workspace:*",
-    "boilpayment-stripe": "workspace:*",
-    "boilpayment-toss": "workspace:*",
-    "boilpayment-portone": "workspace:*",
-    "boilpayment-polar": "workspace:*"
+    "@types/pg": "^8.11.0",
+    "nodemailer": "^10.0.11",
+    "pg": "^8.13.0",
+    "stripe": "^17.0.0"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

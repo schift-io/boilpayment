@@ -56,7 +56,7 @@ export function generateIntegrationMd(config: PaykitConfig): string {
   // ── 1. 설치 ────────────────────────────────────────────────────────────────
   l.push('## 1. 설치');
   l.push('');
-  l.push('설치는 하나입니다. 내부 모듈은 이 패키지가 정확한 버전으로 물고 옵니다.');
+  l.push('TypeScript 내부 모듈은 SDK 패키지에 포함됩니다.');
   l.push('');
   l.push('```bash');
   if (ts(config)) l.push('npm i boilpayment-sdk');
@@ -64,7 +64,7 @@ export function generateIntegrationMd(config: PaykitConfig): string {
   l.push('```');
   l.push('');
   l.push('레지스트리에 아직 없는 버전을 쓸 때는 받은 패키지 파일을 그대로 설치합니다');
-  l.push(`(${[ts(config) ? '`npm i ./boilpayment-*-<버전>.tgz` — SDK 와 내부 패키지 파일을 한 번에 모두' : '', py(config) ? '`pip install ./boilpayment-<버전>-py3-none-any.whl`' : ''].filter(Boolean).join(', ')}). EC:A78`);
+  l.push(`(${[ts(config) ? '`npm i ./boilpayment-sdk-<버전>.tgz ./boilpayment-<버전>.tgz`' : '', py(config) ? '`pip install ./boilpayment-<버전>-py3-none-any.whl`' : ''].filter(Boolean).join(', ')}). EC:A78`);
   l.push('마이그레이션 CLI 는 Node 로 돕니다(`npx boilpayment`). 설치한 SDK 와 같은 버전을 쓰세요: `npx boilpayment@<버전> migrate`.');
   l.push('');
   if (ts(config)) {

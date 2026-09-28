@@ -8,7 +8,7 @@ import { collectPlans } from '../plans.js';
 import { checkoutConfigurationErrors } from './check.js';
 import { toPaykitConfig } from '../wizard-state.js';
 import { generateAll } from '../generate/index.js';
-import type { ProviderName } from 'boilpayment-core';
+import type { ProviderName } from 'boilpayment-sdk/core';
 import type { PaykitConfig } from '../config.js';
 import { csv, type ParsedArgv } from '../util/argv.js';
 import { detectModuleSystem, ESM_REQUIRED_MESSAGE, ESM_MISSING_PACKAGE_JSON_MESSAGE } from '../util/module-system.js';

@@ -40,28 +40,23 @@ export type SchemaPostgres = {
  */
 export async function loadSchemaPostgres(dir: string): Promise<SchemaPostgres | null> {
   const requireFromProject = createRequire(path.join(path.resolve(dir), 'package.json'));
-  // These packages are ESM-only, so their `exports` has no `require` condition and CJS-style
-  // subpath resolution fails outright. Locate the package by its package.json (which every one of
-  // them exports for exactly this reason) and load the built file directly.
-  const candidates: Array<[string, string]> = [
-    ['boilpayment-sdk/package.json', 'dist/postgres.js'],
-    ['boilpayment-schema-postgres/package.json', 'dist/index.js'],
-  ];
-  for (const [manifest, rel] of candidates) {
-    try {
-      const file = path.join(path.dirname(requireFromProject.resolve(manifest)), rel);
-      return (await import(pathToFileURL(file).href)) as unknown as SchemaPostgres;
-    } catch {
-      /* not installed in the project — try the next one */
-    }
+  // The SDK is ESM-only, so its `exports` has no `require` condition and CJS-style subpath
+  // resolution fails. Locate it by package.json, then load the exported file directly.
+  let projectModule: SchemaPostgres | null = null;
+  try {
+    const manifest = requireFromProject.resolve('boilpayment-sdk/package.json');
+    const file = path.join(path.dirname(manifest), 'dist/postgres.js');
+    projectModule = await import(pathToFileURL(file).href);
+  } catch {
+    projectModule = null;
   }
+  if (projectModule) return projectModule;
+
   // Monorepo / global-install fallback: resolve against the CLI's own dependencies.
-  for (const id of ['boilpayment-sdk/postgres', 'boilpayment-schema-postgres']) {
-    try {
-      return (await import(id)) as unknown as SchemaPostgres;
-    } catch {
-      /* not resolvable from the CLI either */
-    }
+  try {
+    const cliModule: SchemaPostgres = await import('boilpayment-sdk/postgres');
+    return cliModule;
+  } catch {
+    return null;
   }
-  return null;
 }

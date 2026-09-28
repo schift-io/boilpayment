@@ -1,9 +1,9 @@
 // paykit.config.json shape + read/write.
-// Policy sub-object is the core Policy type (camelCase), resolved via boilpayment-core resolvePolicy.
+// Policy sub-object is the core Policy type (camelCase), resolved via the SDK facade.
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { DEFAULT_POLICY, resolvePolicy } from 'boilpayment-core';
-import type { Policy, ProviderName } from 'boilpayment-core';
+import { DEFAULT_POLICY, resolvePolicy } from 'boilpayment-sdk/core';
+import type { Policy, ProviderName } from 'boilpayment-sdk/core';
 
 export type PaymentModel = 'subscription' | 'topup' | 'usage';
 export type Good = 'credits' | 'usage_quota';

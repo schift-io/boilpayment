@@ -1,11 +1,9 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
 import type { PaykitConfig } from '../config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const require = createRequire(import.meta.url);
 
 // docs/ARCHITECTURE.md §5 — one file per module, wizard copies only the selected modules'.
 const MODULE_FILES: { file: string; when: (c: PaykitConfig) => boolean }[] = [
@@ -37,19 +35,11 @@ async function dirHasSqlFiles(dir: string): Promise<boolean> {
 }
 
 async function resolveSqlSourceDir(): Promise<{ dir: string | null; reason: string }> {
-  // 1. workspace package (built or source tree) — packages/schema-postgres/sql
-  try {
-    const pkgJsonPath = require.resolve('boilpayment-schema-postgres/package.json');
-    const candidate = path.join(path.dirname(pkgJsonPath), '../sql');
-    if (await dirHasSqlFiles(candidate)) return { dir: candidate, reason: 'workspace package' };
-  } catch {
-    // not resolvable yet — package.json may not export itself for `require.resolve` in ESM;
-    // fall through to a direct relative guess from this file's location in the monorepo.
-  }
+  // 1. workspace source tree — packages/schema-postgres/sql
   const monorepoGuess = path.resolve(__dirname, '../../../../packages/schema-postgres/sql');
   if (await dirHasSqlFiles(monorepoGuess)) return { dir: monorepoGuess, reason: 'monorepo relative path' };
 
-  // 2. bundled template copy (synced at publish time via scripts/sync-templates.mjs)
+  // 2. bundled template copy (synced at build time via scripts/sync-templates.mjs)
   const bundled = path.resolve(__dirname, '../../templates/sql');
   if (await dirHasSqlFiles(bundled)) return { dir: bundled, reason: 'bundled templates' };
 

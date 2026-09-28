@@ -2,12 +2,12 @@
 // left, in both locales. The payloads come from the real senders (scheduler decline, dunning retries,
 // grace expiry, an unanswered charge, credits expiry, a CS escalation), not from hand-written fixtures.
 import { describe, expect, it } from 'vitest';
-import { CollectingNotifier, FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen, resolvePolicy } from 'boilpayment-core';
-import type { Money, Payment, PaymentProvider, PaymentStatus, Plan, Subscription } from 'boilpayment-core';
-import { dunning, scheduler } from 'boilpayment-lifecycle';
-import { notifyExpiring } from 'boilpayment-credits';
-import { escalate, openCase } from 'boilpayment-cs';
-import { renderNotification } from 'boilpayment-notify';
+import { CollectingNotifier, FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen, resolvePolicy } from 'boilpayment-sdk/core';
+import type { Money, Payment, PaymentProvider, PaymentStatus, Plan, Subscription } from 'boilpayment-sdk/core';
+import { dunning, scheduler } from 'boilpayment-sdk/lifecycle';
+import { notifyExpiring } from 'boilpayment-sdk/credits';
+import { escalate, openCase } from 'boilpayment-sdk/cs';
+import { renderNotification } from 'boilpayment-sdk/notify';
 
 class Fake {
   readonly name = 'toss' as const;

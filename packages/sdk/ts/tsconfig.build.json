@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "paths": {
+      "boilpayment-core": ["dist/internal/core/index.d.ts"],
+      "boilpayment-credits": ["dist/internal/credits/index.d.ts"],
+      "boilpayment-lifecycle": ["dist/internal/lifecycle/index.d.ts"],
+      "boilpayment-refund": ["dist/internal/refund/index.d.ts"],
+      "boilpayment-usage": ["dist/internal/usage/index.d.ts"],
+      "boilpayment-webhook": ["dist/internal/webhook/index.d.ts"],
+      "boilpayment-notify": ["dist/internal/notify/index.d.ts"],
+      "boilpayment-cs": ["dist/internal/cs/index.d.ts"],
+      "boilpayment-schema-postgres": ["dist/internal/postgres/index.d.ts"],
+      "boilpayment-stripe": ["dist/internal/stripe/index.d.ts"],
+      "boilpayment-toss": ["dist/internal/toss/index.d.ts"],
+      "boilpayment-portone": ["dist/internal/portone/index.d.ts"],
+      "boilpayment-polar": ["dist/internal/polar/index.d.ts"]
+    }
+  }
+}
