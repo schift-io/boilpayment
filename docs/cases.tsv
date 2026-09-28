@@ -1,44 +1,44 @@
 id	flow	provider	given	when	then	status	evidence
 OT-01	단회결제	stripe,polar	로그인 고객, 플랜과 통화가 정해짐, 결제사 가격 ID가 DB에 연결됨	checkout 호출	판매 시점 가격과 지급량을 저장하고 { id, url, providerRef } 를 돌려준다	실측됨	guide-run §2.1
-OT-02	단회결제	stripe,polar	OT-01 과 같은 고객·requestId	checkout 을 한 번 더 호출	같은 checkout 을 돌려주고 결제사 세션은 하나만 만든다	실측됨	cases-run 2026-09-28
-OT-03	단회결제	stripe,polar	plan_prices.provider_price_refs 에 결제사 ID가 없음	checkout 호출	missing_provider_price_ref, 메시지에 설정 위치(plan_prices)가 나온다	결함	FAIL: polar,stripe; cases-run 2026-09-28
+OT-02	단회결제	stripe,polar	OT-01 과 같은 고객·requestId	checkout 을 한 번 더 호출	같은 checkout 을 돌려주고 결제사 세션은 하나만 만든다	실측됨	PASS: polar,stripe × ts,py; cases-run 2026-09-28 @8f6c1ae
+OT-03	단회결제	stripe,polar	plan_prices.provider_price_refs 에 결제사 ID가 없음	checkout 호출	missing_provider_price_ref, 메시지에 설정 위치(plan_prices)가 나온다	실측됨	PASS: polar,stripe × ts,py; cases-run 2026-09-28 @8f6c1ae
 OT-04	단회결제	stripe,polar	고객이 결제를 마침	registerCompletedCheckout(customerId, checkoutId, paymentRef)	결제를 기록하고 Payment 를 돌려준다. 크레딧은 지급하지 않는다(잔액 0)	실측됨	guide-run §2.2
-OT-05	단회결제	stripe,polar	다른 고객의 checkoutId	registerCompletedCheckout	checkout_evidence_mismatch, 기록 없음	실측됨	cases-run 2026-09-28
-OT-06	단회결제	stripe,polar	checkout 과 금액·통화가 다른 결제의 paymentRef	registerCompletedCheckout	checkout_evidence_mismatch, 기록 없음	실측됨	cases-run 2026-09-28
+OT-05	단회결제	stripe,polar	다른 고객의 checkoutId	registerCompletedCheckout	checkout_evidence_mismatch, 기록 없음	실측됨	PASS: polar,stripe × ts,py; cases-run 2026-09-28 @8f6c1ae
+OT-06	단회결제	stripe,polar	checkout 과 금액·통화가 다른 결제의 paymentRef	registerCompletedCheckout	checkout_evidence_mismatch, 기록 없음	실측됨	PASS: polar,stripe × ts,py; cases-run 2026-09-28 @8f6c1ae
 OT-07	단회결제	stripe,polar	OT-04 완료	결제 성공 웹훅 도착	판매 시점 지급량(1,000)을 한 번 지급한다	실측됨	guide-run §2.3
 OT-08	단회결제	stripe,polar	OT-07 완료	같은 결제의 웹훅이 다시 옴(재전송·다른 이벤트 ID)	추가 지급 0. 같은 이벤트 ID면 duplicated=true	실측됨	guide-run §2.3
 OT-09	단회결제	stripe,polar	결제 완료, 아직 registerCompletedCheckout 전	결제 성공 웹훅이 먼저 도착	지급을 보류(hold)하고, 등록되는 순간 판매 시점 조건으로 한 번 지급한다. 등록이 끝내 없으면 reconcile 이 담당자 확인 케이스를 연다	없음	보류 로직 없음. 2026-09-28 오너 결정: hold
-OT-10	단회결제	stripe,polar	OT-04 완료, 웹훅이 끝내 안 옴	cron.reconcile(since)	판매 시점 조건으로 한 번 지급한다	실측됨	cases-run 2026-09-28
-OT-11	단회결제	stripe,polar	판매 뒤 플랜의 지급량을 1,000 → 900 으로 바꿈	웹훅 도착	판매 당시 조건(1,000)으로 지급한다	실측됨	cases-run 2026-09-28
+OT-10	단회결제	stripe,polar	OT-04 완료, 웹훅이 끝내 안 옴	cron.reconcile(since)	판매 시점 조건으로 한 번 지급한다	실측됨	PASS: polar,stripe × ts,py; cases-run 2026-09-28 @8f6c1ae
+OT-11	단회결제	stripe,polar	판매 뒤 플랜의 지급량을 1,000 → 900 으로 바꿈	웹훅 도착	판매 당시 조건(1,000)으로 지급한다	실측됨	PASS: polar,stripe × ts,py; cases-run 2026-09-28 @8f6c1ae
 OT-12	단회결제	stripe,polar	잔액 1,000	consume(10, key=use-1)	ok, 잔액 990	실측됨	guide-run §3
 OT-13	단회결제	stripe,polar	OT-12 완료	consume(10, key=use-1) 다시	duplicated, 잔액 990 그대로	실측됨	guide-run §3
 OT-14	단회결제	stripe,polar	잔액 990	잔액보다 많이 consume	insufficient_balance 예외, 잔액 990 그대로	실측됨	guide-run §3
 OT-15	단회결제	stripe,polar	결제 후 7일 이내, 1,000 중 10 사용	support.requestRefund	환불액 = 결제액 − 사용분 가치(1,999→1,979 / 999→989), 남은 990 회수, 잔액 0	실측됨	guide-run §3
 OT-16	단회결제	stripe,polar	OT-15 완료	같은 requestId 로 다시 요청	같은 케이스, 추가 환불 0	실측됨	guide-run §3
-OT-17	단회결제	stripe,polar	결제 후 7일 지남, 일부 사용	support.requestRefund	환불액 = 미사용 크레딧 × 지급 당시 단가	결함	FAIL: polar,stripe; cases-run 2026-09-28
-OT-18	단회결제	stripe,polar	지급 완료	결제사 대시보드에서 환불, 환불 웹훅 도착	환불액만큼 크레딧 회수, 같은 웹훅 재전송 시 추가 회수 0	실측됨	cases-run 2026-09-28
-OT-19	단회결제	stripe,polar	지급 완료	분쟁(차지백) 열림 웹훅	고객 frozen, consume·checkout 거절	실측됨	N/A: polar; cases-run 2026-09-28; Polar 분쟁 이벤트 미처리 — Polar 가 분쟁 웹훅을 보내는지 확인 후 결정
-OT-20	단회결제	stripe,polar	checkout 뒤 고객이 banned 됨	결제 성공 웹훅	지급 0, 환불 검토 케이스 1개, cs.needs_human 1번	실측됨	cases-run 2026-09-28; Toss 만 실측(A85)
-OT-21	단회결제	stripe,polar	고객이 frozen 또는 banned	checkout 호출	customer_frozen / customer_banned, 결제사 세션 없음	실측됨	cases-run 2026-09-28
-SB-01	구독 시작	stripe,polar	로그인 고객, 월 구독 플랜, 가격 ID 연결됨	checkout(구독 플랜) → 결제 → registerCompletedCheckout(subscriptionRef)	구독 active, 첫 주기 크레딧 지급(웹훅 1회), 주기 = 결제일부터 한 달	실측됨	cases-run 2026-09-28
-SB-02	구독 시작	stripe,polar	SB-01 완료	첫 결제 웹훅이 두 번 옴	추가 지급 0	실측됨	cases-run 2026-09-28
-SB-03	구독 시작	stripe,polar	체험 기간(trialDays>0) 플랜	구독 시작	trialing, 체험 종료 시 첫 결제 성공 웹훅에 지급	결함	FAIL: stripe; N/A: polar; cases-run 2026-09-28
-SB-04	갱신	stripe,polar	active, 다음 주기 도래	결제사가 갱신 결제, 결제 성공 웹훅(invoice.paid / order.paid)	새 주기 크레딧 한 번 지급, 지난 주기 미사용분 소멸(rollover=소멸)	실측됨	cases-run 2026-09-28
-SB-05	갱신	stripe,polar	SB-04 완료	같은 갱신 웹훅 재전송	추가 지급 0	실측됨	cases-run 2026-09-28
-SB-06	갱신	stripe,polar	갱신 웹훅 유실	cron.reconcile(since)	그 주기 크레딧 한 번 지급	결함	FAIL: polar,stripe; cases-run 2026-09-28
-SB-07	결제 실패	stripe,polar	active, 갱신 카드 거절	결제 실패 웹훅	past_due, 유예 7일, payment.failed·grace.started 알림, 새 주기 지급 보류. 지난 주기 크레딧은 유예가 끝날 때까지 쓸 수 있다(만료를 유예 종료로 연장)	결함	FAIL: polar,stripe (지난 주기 크레딧이 주기 끝에 소멸해 유예 중 사용 불가); 2026-09-28 오너 결정: 유예 종료까지 연장
-SB-08	결제 실패	stripe,polar	SB-07, 유예 중 결제사 재시도 성공	결제 성공 웹훅	active 복귀, 보류했던 현재 주기분만 지급	실측됨	cases-run 2026-09-28
-SB-09	결제 실패	stripe,polar	SB-07, 유예 7일 경과까지 미결제	cron.dunningSweep	결제 안 된 주기분 크레딧만 회수, 구독 종료 상태	실측됨	cases-run 2026-09-28
-SB-10	결제 실패	stripe,polar	SB-09 이후 결제사가 뒤늦게 결제 성공	결제 성공 웹훅	지급하지 않고 담당자 확인 케이스를 연다(종료된 구독은 자동으로 되살리지 않는다)	결함	FAIL: polar,stripe; cases-run 2026-09-28; 2026-09-28 오너 결정
-SB-11	업그레이드	stripe,polar	active, 주기 중간	upgrade(sub, 상위 플랜)	즉시 차액 청구, 신·구 플랜 지급량 전체 차이만큼 즉시 지급, 다음 결제일 = 업그레이드한 날. 예외: Polar 는 결제일 재설정을 지원하지 않아 기존 결제일을 유지한다	결함	FAIL: stripe (즉시 지급 0, 다음 청구 때 차이 대신 신플랜 전체 지급); polar 는 예외 반영 후 통과; cases-run 2026-09-28
-SB-12	업그레이드	stripe,polar	SB-11 차액 결제가 아직 안 됨	upgrade 다시(같은 플랜)	같은 결과, 이중 청구·지급 0. 다른 플랜이면 upgrade_payment_pending	실측됨	N/A: stripe; cases-run 2026-09-28; A84
-SB-13	업그레이드	stripe,polar	SB-11 차액 결제 실패	결제 실패 웹훅	지급한 차이분 회수, 플랜 원복	결함	FAIL: polar; N/A: stripe; cases-run 2026-09-28
-SB-14	다운그레이드	stripe,polar	active, 주기 중간	downgrade(sub, 하위 플랜)	다음 주기부터 하위 플랜, 이미 지급된 크레딧 유지, 다음 갱신에 하위 지급량	결함	FAIL: polar,stripe; cases-run 2026-09-28
-SB-15	해지	stripe,polar	active	cancel(sub)	주기 끝까지 이용·크레딧 사용 가능, 주기 끝에 종료, 갱신 없음	실측됨	cases-run 2026-09-28
-SB-16	해지	stripe,polar	SB-15, 주기 끝나기 전	reactivate(sub)	해지 취소, 다음 주기 정상 갱신	실측됨	cases-run 2026-09-28
-SB-17	해지	stripe,polar	결제사 대시보드에서 구독 삭제	구독 삭제 웹훅	로컬 구독 종료, 정책대로 크레딧 처리	실측됨	cases-run 2026-09-28
-SB-18	환불	stripe,polar	구독 결제 후 7일 이내, 일부 사용	support.requestRefund	환불액 = 결제액 − 사용분 가치, 남은 그 주기 크레딧 회수	실측됨	cases-run 2026-09-28
-SB-19	환불	stripe,polar	고객이 올해 이미 2회 환불	세 번째 requestRefund	자동 거절, 담당자 확인 케이스	실측됨	cases-run 2026-09-28
+OT-17	단회결제	stripe,polar	결제 후 7일 지남, 일부 사용	support.requestRefund	환불액 = 미사용 크레딧 × 지급 당시 단가	실측됨	PASS: polar,stripe × ts,py; cases-run 2026-09-28 @8f6c1ae
+OT-18	단회결제	stripe,polar	지급 완료	결제사 대시보드에서 환불, 환불 웹훅 도착	환불액만큼 크레딧 회수, 같은 웹훅 재전송 시 추가 회수 0	실측됨	PASS: polar,stripe × ts,py; cases-run 2026-09-28 @8f6c1ae
+OT-19	단회결제	stripe,polar	지급 완료	분쟁(차지백) 열림 웹훅	고객 frozen, consume·checkout 거절	실측됨	PASS: stripe × ts,py; N/A: polar; cases-run 2026-09-28 @8f6c1ae
+OT-20	단회결제	stripe,polar	checkout 뒤 고객이 banned 됨	결제 성공 웹훅	지급 0, 환불 검토 케이스 1개, cs.needs_human 1번	실측됨	PASS: polar,stripe × ts,py; cases-run 2026-09-28 @8f6c1ae
+OT-21	단회결제	stripe,polar	고객이 frozen 또는 banned	checkout 호출	customer_frozen / customer_banned, 결제사 세션 없음	실측됨	PASS: polar,stripe × ts,py; cases-run 2026-09-28 @8f6c1ae
+SB-01	구독 시작	stripe,polar	로그인 고객, 월 구독 플랜, 가격 ID 연결됨	checkout(구독 플랜) → 결제 → registerCompletedCheckout(subscriptionRef)	구독 active, 첫 주기 크레딧 지급(웹훅 1회), 주기 = 결제일부터 한 달	실측됨	PASS: polar,stripe × ts,py; cases-run 2026-09-28 @8f6c1ae
+SB-02	구독 시작	stripe,polar	SB-01 완료	첫 결제 웹훅이 두 번 옴	추가 지급 0	실측됨	PASS: polar,stripe × ts,py; cases-run 2026-09-28 @8f6c1ae
+SB-03	구독 시작	stripe,polar	체험 기간(trialDays>0) 플랜	구독 시작	trialing, 체험 종료 시 첫 결제 성공 웹훅에 지급	실측됨	PASS: stripe × ts,py; N/A: polar; cases-run 2026-09-28 @8f6c1ae
+SB-04	갱신	stripe,polar	active, 다음 주기 도래	결제사가 갱신 결제, 결제 성공 웹훅(invoice.paid / order.paid)	새 주기 크레딧 한 번 지급, 지난 주기 미사용분 소멸(rollover=소멸)	실측됨	PASS: polar,stripe × ts,py; cases-run 2026-09-28 @8f6c1ae
+SB-05	갱신	stripe,polar	SB-04 완료	같은 갱신 웹훅 재전송	추가 지급 0	실측됨	PASS: polar,stripe × ts,py; cases-run 2026-09-28 @8f6c1ae
+SB-06	갱신	stripe,polar	갱신 웹훅 유실	cron.reconcile(since)	그 주기 크레딧 한 번 지급	실측됨	PASS: polar,stripe × ts,py; cases-run 2026-09-28 @8f6c1ae
+SB-07	결제 실패	stripe,polar	active, 갱신 카드 거절	결제 실패 웹훅	past_due, 유예 7일, payment.failed·grace.started 알림, 새 주기 지급 보류. 지난 주기 크레딧은 유예가 끝날 때까지 쓸 수 있다(만료를 유예 종료로 연장)	실측됨	PASS: polar,stripe × ts,py; cases-run 2026-09-28 @8f6c1ae; 2026-09-28 오너 결정: 유예 종료까지 연장
+SB-08	결제 실패	stripe,polar	SB-07, 유예 중 결제사 재시도 성공	결제 성공 웹훅	active 복귀, 보류했던 현재 주기분만 지급. 지난 주기 크레딧은 결제가 회복된 시점에 만료된다(유예 종료)	실측됨	PASS: polar,stripe × ts,py; cases-run 2026-09-28 @8f6c1ae
+SB-09	결제 실패	stripe,polar	SB-07, 유예 7일 경과까지 미결제	cron.dunningSweep	결제 안 된 주기분 크레딧만 회수, 구독 종료 상태	실측됨	PASS: polar,stripe × ts,py; cases-run 2026-09-28 @8f6c1ae
+SB-10	결제 실패	stripe,polar	SB-09 이후 결제사가 뒤늦게 결제 성공	결제 성공 웹훅	지급하지 않고 담당자 확인 케이스를 연다(종료된 구독은 자동으로 되살리지 않는다)	실측됨	PASS: polar,stripe × ts,py; cases-run 2026-09-28 @8f6c1ae; 2026-09-28 오너 결정
+SB-11	업그레이드	stripe,polar	active, 주기 중간	upgrade(sub, 상위 플랜)	즉시 차액 청구, 신·구 플랜 지급량 전체 차이만큼 즉시 지급, 다음 결제일 = 업그레이드한 날. 예외: Polar 는 결제일 재설정을 지원하지 않아 기존 결제일을 유지한다	실측됨	PASS: polar,stripe × ts,py; cases-run 2026-09-28 @8f6c1ae
+SB-12	업그레이드	stripe,polar	SB-11 차액 결제가 아직 안 됨	upgrade 다시(같은 플랜)	같은 결과, 이중 청구·지급 0. 다른 플랜이면 upgrade_payment_pending	실측됨	PASS: polar × ts,py; N/A: stripe; cases-run 2026-09-28 @8f6c1ae
+SB-13	업그레이드	stripe,polar	SB-11 차액 결제 실패	결제 실패 웹훅	지급한 차이분 회수, 플랜 원복	실측됨	PASS: polar × ts,py; N/A: stripe; cases-run 2026-09-28 @8f6c1ae
+SB-14	다운그레이드	stripe,polar	active, 주기 중간	downgrade(sub, 하위 플랜)	다음 주기부터 하위 플랜, 이미 지급된 크레딧 유지, 다음 갱신에 하위 지급량	실측됨	PASS: polar,stripe × ts,py; cases-run 2026-09-28 @8f6c1ae
+SB-15	해지	stripe,polar	active	cancel(sub)	주기 끝까지 이용·크레딧 사용 가능, 주기 끝에 종료, 갱신 없음	실측됨	PASS: polar,stripe × ts,py; cases-run 2026-09-28 @8f6c1ae
+SB-16	해지	stripe,polar	SB-15, 주기 끝나기 전	reactivate(sub)	해지 취소, 다음 주기 정상 갱신	실측됨	PASS: polar,stripe × ts,py; cases-run 2026-09-28 @8f6c1ae
+SB-17	해지	stripe,polar	결제사 대시보드에서 구독 삭제	구독 삭제 웹훅	로컬 구독 종료, 정책대로 크레딧 처리	실측됨	PASS: polar,stripe × ts,py; cases-run 2026-09-28 @8f6c1ae
+SB-18	환불	stripe,polar	구독 결제 후 7일 이내, 일부 사용	support.requestRefund	환불액 = 결제액 − 사용분 가치, 남은 그 주기 크레딧 회수	실측됨	PASS: polar,stripe × ts,py; cases-run 2026-09-28 @8f6c1ae
+SB-19	환불	stripe,polar	고객이 올해 이미 2회 환불	세 번째 requestRefund	자동 거절, 담당자 확인 케이스	실측됨	PASS: polar,stripe × ts,py; cases-run 2026-09-28 @8f6c1ae
 DC-01	쿠폰	stripe,polar	결제사에 쿠폰(프로모션 코드) 생성	고객이 checkout 에서 코드 입력	결제사가 할인 적용. 키트는 실제 결제액을 기록하고 지급량은 플랜 그대로	없음	
 DC-02	쿠폰	stripe,polar	DC-01	registerCompletedCheckout	할인된 금액을 판매 조건과 대조해 통과(할인 반영), 할인 없는 가짜 결제는 거절	없음	현재는 금액 불일치로 거절될 것
 DC-03	% 할인	stripe,polar	20% 할인 적용 결제 후 7일 이내, 일부 사용	support.requestRefund	환불 기준 = 실제 결제액. 사용분 가치도 할인 단가로 계산	없음	
