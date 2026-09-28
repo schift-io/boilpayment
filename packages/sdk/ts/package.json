@@ -1,7 +1,7 @@
 {
   "name": "boilpayment-sdk",
-  "version": "0.1.0",
-  "description": "boilpayment \u2014 single-install facade re-exporting every boilpayment-* package via subpaths",
+  "version": "0.2.0",
+  "description": "boilpayment — single-install facade re-exporting every boilpayment-* package via subpaths",
   "license": "MIT",
   "keywords": [
     "schift",

@@ -17,7 +17,7 @@ with the right async method shape works, real or fake.
 # see receive() step 1 — WebhookSignatureError -> 400, nothing stored, no side effects.
 ```
 
-## [EC:A68] generated framework snippets answer with ReceiveResult.status
+## [EC:A68] a web handler answers with ReceiveResult.status (no generated framework snippets)
 
 ```
 Python: ReceiveResult 는 dataclass — result.status (result["status"] 는 TypeError, 모든 웹훅이 500)

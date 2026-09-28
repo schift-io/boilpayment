@@ -17,7 +17,7 @@ export interface ReceiveInput {
   remoteAddress?: string;
 }
 
-/** EC:A68 — a web handler answers with `result.status` (the generated snippets are run by a test). */
+/** EC:A68 — a web handler answers with `result.status` (INTEGRATION.md §3; the kit ships no framework snippets). */
 export interface ReceiveResult {
   status: 200 | 400;
   eventId: string | null;

@@ -855,3 +855,29 @@ steps:
      in_flight -> throw 'subscription_start_in_flight'
 output: { sub, payment }
 ```
+
+
+## [EC:A71] 기준일은 정책 시간대의 날짜
+startSubscription·reset_anchor 업그레이드: anchorDay = civilDayOf(now, policy.period.timezone)
+첫 기간 = nextPeriod({now, now}, interval, anchorDay, tz, monthEndAnchor)  -- 한 interval
+(UTC 날짜를 쓰면 KST 1일 시작이 전달 말일 기준이 되어 첫 기간이 두 달)
+
+## [EC:A72] startSubscription 과 multiplePerCustomer
+deny: 고객 리스(start:<customerId>) 안에서 active|trialing|past_due|incomplete 구독이 있으면 subscription_exists (청구 전)
+첫 청구 거절 -> 행을 expired 로 닫음, 같은 requestId 는 계속 subscription_start_declined
+생성 코드 currentSubscription: 살아 있는 구독(active|trialing|past_due) 먼저, 그다음 최신
+
+## [EC:A73] 밴된 고객
+chargeAttempt 새 청구 전: customer.status == banned -> customer_banned (행도 쓰지 않음)
+reactivate: banned -> customer_banned
+
+## [EC:A76] 업그레이드 추가금 환불
+업그레이드 결제 행 raw.boilpaymentUpgrade 에 fromPlanId·fromPeriodStart·fromPeriodEnd·fromAnchorDay
+전액 환불(킷·콘솔) + 현재 플랜 == 업그레이드한 플랜 -> 이전 플랜·기간·기준일로 되돌림. 부분 환불은 그대로
+
+## [EC:A77] 네이티브 업그레이드의 지급
+변경 뒤 기간·기준일 = changeSubscription 응답
+Stripe reset_anchor: 킷 차액 0 (새 기간 인보이스가 지급)
+upgradeGrant == on_payment (Polar, proration_behavior 'invoice'):
+  차액을 operations[upgrade-grant:<sub>:<plan>:<periodStart>] 에 대기
+  onRenewalPaid(이미 지급된 기간, 그 기간을 산 결제가 아닌 결제) -> 대기 차액 지급(grant:upgrade 키), 작업 done

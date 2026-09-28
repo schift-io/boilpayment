@@ -224,7 +224,8 @@ export async function missedPeriodsPrecheck(sp: SchemaPostgres, url: string): Pr
     if (stale.rows.length > 0) {
       lines.push(pc.red(`마지막 마이그레이션 뒤에 옛 형식 키로 지급된 갱신 ${stale.rows.length}건 — 옛 버전 워커가 아직 돌고 있습니다 (EC:A69):`));
       lines.push(...stale.rows.map((r) => `  ${String(r.customer_id)}  ${String(r.idempotency_key)}  ${iso(r.created_at)}`));
-      lines.push('  옛 워커를 모두 내리세요. 두 버전이 함께 돌면 같은 갱신을 두 번 청구할 수 있습니다.');
+      lines.push('  옛 워커를 모두 내리세요. 두 버전이 함께 돌면 같은 갱신을 두 번 청구할 수 있습니다 (지원하지 않는 운영입니다).');
+      process.exitCode = 1; // EC:A69 (round-9 A9-17) — a deploy gate stops here
     }
     return lines;
   } catch (err) {

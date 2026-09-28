@@ -453,3 +453,6 @@ rawCredits = pending ? heldCredits
 grant 단가는 내림된 값(1999 minor / 1000 크레딧 → 1)이라 전액 환불을 1999 크레딧으로 셌고, clamp 가 1000 으로
 줄이면서 매 환불마다 정산 불일치 케이스가 열렸다.
 
+
+## [EC:A76] 업그레이드 추가금 전액 환불 -> 구독 되돌림
+execute(킷 환불)·onExternalRefund(콘솔 환불) 모두 결제 행이 refunded 가 되면 revertRefundedUpgrade(repo, payment)

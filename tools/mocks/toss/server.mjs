@@ -262,14 +262,17 @@ async function handleChargeBillingKey(req, res, billingKey) {
   if (typeof reqBody.amount !== 'number' || !reqBody.orderId) {
     return sendJson(res, 400, errorBody('INVALID_REQUEST', 'amount, orderId 는 필수입니다'));
   }
-  // Toss documents orderId as 6–64 characters of letters, digits, '-' and '_' (EC:A35 A57): anything else
-  // (an earlier release's raw 'charge:<sub>:<time>' key) is refused before any money moves.
-  if (!/^[A-Za-z0-9_-]{6,64}$/.test(String(reqBody.orderId))) {
-    return sendJson(res, 400, errorBody('INVALID_REQUEST', 'orderId 는 영문 대소문자, 숫자, -, _ 로 이루어진 6자 이상 64자 이하여야 합니다'));
-  }
-  // A billing key charges only under the customerKey it was issued for (EC:A60): Toss refuses another.
-  if (reqBody.customerKey && billing.customerKey && reqBody.customerKey !== billing.customerKey) {
+  // Measured against the Toss sandbox on 2026-09-27 (round-9 audit R1, EC:A79):
+  // - orderId is accepted as sent, whatever its characters or length (':' '+' '.', 4 characters: DONE);
+  // - a billing key charges only under the customerKey it was issued for, and an empty one is refused too;
+  // - an orderId already used, sent again without replaying its Idempotency-Key, is DUPLICATED_ORDER_ID.
+  if (!reqBody.customerKey || (billing.customerKey && reqBody.customerKey !== billing.customerKey)) {
     return sendJson(res, 400, errorBody('NOT_MATCHES_CUSTOMER_KEY', '빌링키 발급에 사용한 customerKey 와 일치하지 않습니다'));
+  }
+  if ([...payments.values()].some((p) => p.orderId === reqBody.orderId)) {
+    const body = errorBody('DUPLICATED_ORDER_ID', '이미 승인 및 취소가 진행된 중복된 주문번호 입니다');
+    idempotentStore('POST', path, idempotencyKey, 400, body);
+    return sendJson(res, 400, body);
   }
   const paymentKey = genId('mock_pay_');
   const record = buildPaymentRecord({

@@ -334,3 +334,8 @@ reserve(..., sub?): if sub and hasNoEntitlement(sub.status): return { ok: false,
 ```
 
 `record` 와 `credits.consume` 은 막지 않는다: 이미 일어난 사용량 기록과, 구독과 무관한 충전 크레딧 사용.
+
+## [EC:A75] 초과 청구의 customerKey 와 구독별 격리
+customerRef = sub.billingCustomerRef || customer.providerRefs[provider]
+settleDuePeriods: 구독마다 try; 오류는 모아 두고 전부 돈 뒤 usage_settlement_errors({errors, results})
+첫 청구가 성공한 적 없는 닫힌 가입(incomplete/expired)은 사용량 주인 후보가 아님

@@ -64,7 +64,7 @@ export function generateIntegrationMd(config: PaykitConfig): string {
   l.push('```');
   l.push('');
   l.push('레지스트리에 아직 없는 버전을 쓸 때는 받은 패키지 파일을 그대로 설치합니다');
-  l.push(`(${[ts(config) ? '`npm i ./boilpayment-sdk-<버전>.tgz`' : '', py(config) ? '`pip install ./boilpayment-<버전>-py3-none-any.whl`' : ''].filter(Boolean).join(', ')}).`);
+  l.push(`(${[ts(config) ? '`npm i ./boilpayment-*-<버전>.tgz` — SDK 와 내부 패키지 파일을 한 번에 모두' : '', py(config) ? '`pip install ./boilpayment-<버전>-py3-none-any.whl`' : ''].filter(Boolean).join(', ')}). EC:A78`);
   l.push('마이그레이션 CLI 는 Node 로 돕니다(`npx boilpayment`). 설치한 SDK 와 같은 버전을 쓰세요: `npx boilpayment@<버전> migrate`.');
   l.push('');
   if (ts(config)) {
@@ -73,6 +73,33 @@ export function generateIntegrationMd(config: PaykitConfig): string {
     l.push('`ERR_PACKAGE_PATH_NOT_EXPORTED` 가 납니다. 패키지가 깨진 게 아니라 `require` 조건이 없어서입니다.');
     l.push('프로젝트를 통째로 옮길 수 없다면 호출부에서 동적 import 를 쓰세요:');
     l.push('`const kit = await import(\'./paykit/index.js\');`');
+    l.push('');
+  }
+  l.push('킷 객체는 저장소·시계·ID 생성기를 넘겨 만듭니다 (EC:A78):');
+  l.push('');
+  if (ts(config)) {
+    l.push('```ts');
+    l.push("import { createPaymentKit } from './paykit/index.js';");
+    l.push("import { SystemClock, UuidIdGen } from 'boilpayment-sdk/core';");
+    l.push("import { createPool, PostgresRepo, PostgresLedgerStore } from 'boilpayment-sdk/postgres';");
+    l.push('const pool = createPool(process.env.DATABASE_URL!);');
+    l.push('const kit = createPaymentKit(config, { env: process.env as Record<string, string>, clock: new SystemClock(), ids: new UuidIdGen(),');
+    l.push('  repo: new PostgresRepo(pool), ledger: new PostgresLedgerStore(pool) });');
+    l.push('await kit.initialize();');
+    l.push('```');
+    l.push('');
+  }
+  if (py(config)) {
+    l.push('```python');
+    l.push('from boilpayment.core import Deps, SystemClock, UuidIdGen');
+    l.push('from boilpayment.postgres import PostgresLedgerStore, PostgresRepo');
+    l.push('from paykit.index import create_payment_kit  # paykit/ 가 import 경로에 있어야 합니다');
+    l.push('db = os.environ["DATABASE_URL"]');
+    l.push('deps = Deps(clock=SystemClock(), ids=UuidIdGen(), repo=PostgresRepo(db), ledger=PostgresLedgerStore(db),');
+    l.push('            notifier=None, providers={}, policy=None)  # providers·policy 는 create_payment_kit 이 채웁니다');
+    l.push('kit = create_payment_kit(config, deps, env=dict(os.environ))');
+    l.push('await kit["initialize"]()');
+    l.push('```');
     l.push('');
   }
   l.push('그다음 순서대로:');
@@ -92,13 +119,19 @@ export function generateIntegrationMd(config: PaykitConfig): string {
   l.push('');
   l.push('### 버전을 올릴 때');
   l.push('');
-  l.push('패키지를 올리면 새 마이그레이션이 따라올 수 있습니다. 순서는 항상 같습니다.');
+  l.push('패키지를 올리면 새 마이그레이션과 새 생성 코드가 따라올 수 있습니다. CLI 와 SDK 는 **같은 버전**으로 맞추고, 순서는 항상 같습니다 (EC:A78).');
   l.push('');
   l.push('```bash');
-  l.push('npm i boilpayment-sdk@latest');
-  l.push('npx boilpayment migrate --dry-run   # 무엇이 적용될지 확인');
-  l.push('npx boilpayment migrate');
+  l.push('V=<새 버전>');
+  if (ts(config)) l.push('npm i boilpayment-sdk@$V');
+  if (py(config)) l.push('pip install -U "boilpayment==$V"');
+  l.push('npx boilpayment@$V init --config paykit.config.json --yes   # 이 버전의 paykit/ 코드·마이그레이션으로 다시 생성');
+  l.push('npx boilpayment@$V migrate --dry-run   # 무엇이 적용될지 확인');
+  l.push('npx boilpayment@$V migrate');
+  l.push('npx boilpayment@$V check              # 배포 게이트: 0 이 아니면 멈춥니다');
   l.push('```');
+  l.push('');
+  l.push('0.1.0 에서 0.2.0 으로 올리는 경로는 없습니다. 0.2.0 은 새로 설치합니다: 0.1.0 워커를 먼저 모두 멈추고 지운 뒤, 새 데이터베이스에 설치하세요. 두 버전을 동시에 돌리거나 0.1.0 이 쓴 데이터를 이어 쓰는 것은 지원하지 않습니다.');
   l.push('');
   l.push('**앱 부팅 시 `verifySchema()` 를 부르세요.** DB 가 코드보다 뒤처져 있으면 그 자리에서');
   l.push('멈춥니다. 안 부르면 새 컬럼을 처음 건드리는 쿼리가 운영 중에 죽습니다.');
@@ -120,9 +153,8 @@ export function generateIntegrationMd(config: PaykitConfig): string {
   if (config.models.includes('subscription') && config.providers.some((p) => p === 'toss' || p === 'portone')) {
     // Round-6 I-2: an older worker does not follow the attempt-lease rules of the new one (EC:A48).
     // Round-8 A8-1: 0.1.0 Python sent another idempotency key (its own time form), so two releases at once charge twice.
-    l.push('**cron·워커는 옛 버전을 모두 내린 뒤 새 버전을 띄우세요.** 두 버전이 동시에 돌면 같은 갱신을');
-    l.push('서로 다른 주문번호로 두 번 청구할 수 있습니다(0.1.0 Python 이 그렇습니다). 새 버전은 옛 버전의 청구를');
-    l.push('조회로 찾지만, 둘이 같은 순간에 청구하면 서로를 볼 수 없습니다.');
+    l.push('**cron·워커는 옛 버전을 모두 내린 뒤 새 버전을 띄우세요.** 두 버전을 동시에 돌리는 운영은 지원하지 않습니다:');
+    l.push('같은 갱신을 서로 다른 주문번호로 두 번 청구할 수 있습니다. `check` 는 옛 형식의 지급 키를 보면 0 이 아닌 값으로 끝납니다.');
     l.push('올린 뒤 첫 `schedulerTick` 전에 `npx boilpayment check` 로 밀린 구독과 결과를 모르는 청구를 확인하세요.');
     l.push('');
     l.push('### 담당자 알림(`cs.needs_human`)이 오면');

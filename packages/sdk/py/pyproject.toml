@@ -1,6 +1,6 @@
 [project]
 name = "boilpayment"
-version = "0.1.0"
+version = "0.2.0"
 description = "boilpayment — single-install facade re-exporting every boilpayment-* distribution via submodules"
 readme = "README.md"
 license = "MIT"
@@ -8,21 +8,21 @@ license-files = ["LICENSE"]
 authors = [{ name = "boilpayment contributors" }]
 requires-python = ">=3.11"
 dependencies = [
-  "boilpayment-core==0.1.0",
-  "boilpayment-credits==0.1.0",
-  "boilpayment-lifecycle==0.1.0",
-  "boilpayment-refund==0.1.0",
-  "boilpayment-usage==0.1.0",
-  "boilpayment-webhook==0.1.0",
-  "boilpayment-notify==0.1.0",
-  "boilpayment-cs==0.1.0",
-  "boilpayment-schema-postgres==0.1.0",
-  "boilpayment-stripe==0.1.0",
-  "boilpayment-toss==0.1.0",
-  "boilpayment-portone==0.1.0",
-  "boilpayment-polar==0.1.0",
-  "boilpayment-apple==0.1.0",
-  "boilpayment-google-play==0.1.0",
+  "boilpayment-core==0.2.0",
+  "boilpayment-credits==0.2.0",
+  "boilpayment-lifecycle==0.2.0",
+  "boilpayment-refund==0.2.0",
+  "boilpayment-usage==0.2.0",
+  "boilpayment-webhook==0.2.0",
+  "boilpayment-notify==0.2.0",
+  "boilpayment-cs==0.2.0",
+  "boilpayment-schema-postgres==0.2.0",
+  "boilpayment-stripe==0.2.0",
+  "boilpayment-toss==0.2.0",
+  "boilpayment-portone==0.2.0",
+  "boilpayment-polar==0.2.0",
+  "boilpayment-apple==0.2.0",
+  "boilpayment-google-play==0.2.0",
 ]
 classifiers = [
   "Development Status :: 3 - Alpha",

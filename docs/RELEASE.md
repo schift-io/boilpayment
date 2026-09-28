@@ -17,6 +17,15 @@ skew between the facade and what it wraps can't happen.
 **Repository:** every `package.json` (`homepage`/`repository`/`bugs`) and `pyproject.toml`
 (`[project.urls]`) points at `https://github.com/schift-io/boilpayment`. See "저장소 URL" below.
 
+## 0.2.0 release notes (breaking)
+
+- **Fresh install only.** 0.2.0 has no upgrade path from 0.1.0: stop and remove every 0.1.0 worker,
+  then install 0.2.0 against a new database. Mixed releases and 0.1.0 data are unsupported;
+  `boilpayment check` exits 1 when it sees an older release's renewal grants (EC:A69).
+- The kit no longer generates framework examples (`paykit/webhook.ts|py`). INTEGRATION.md §3 lists
+  what `handleWebhook` takes (EC:A68).
+- Workspace versions are already `0.2.0` (step 1 is done for this release).
+
 ## 0. Pre-flight checklist
 
 Run from the repo root, in this order, and stop if any step fails:
@@ -46,7 +55,7 @@ this table before publishing those two provider packages.
 
 ## 1. Version bump
 
-All packages are at `0.1.0` right now, kept in lockstep manually. For a coordinated release, bump
+All packages are at `0.2.0` right now, kept in lockstep manually. For a coordinated release, bump
 every `version` field in the same commit:
 
 ```bash

@@ -833,3 +833,8 @@ settlement after the initial pending response. Low-level primitives remain avail
 
 Reserved checkout/purchase entitlement operations are business evidence and must not be removed by routine
 short-lived operation retention. This is distinct from the ordinary retry retention window.
+
+
+## [EC:A73] [EC:A74] startCheckout 거절
+customer.status in (frozen, banned) -> customer_<status>
+자체 청구 결제사(nativeSubscriptions=false) + 구독 플랜 -> use_start_subscription (주문을 만들기 전)
