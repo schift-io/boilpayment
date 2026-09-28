@@ -337,13 +337,17 @@ def normalize_payment_intent(pi: Any, invoice: Any | None = None) -> Payment:
         period=_invoice_period(invoice) if invoice is not None else None,
         occurred_at=_dt(pi.created),
         failure=_failure_from_last_error(getattr(pi, "last_payment_error", None)),
-        raw={
-            **_as_dict(pi),
-            "metadata": {
-                **_as_dict(_get(pi, "metadata")),
-                **_invoice_subscription_metadata(invoice),
-            },
-        },
+        raw=(
+            {
+                **_as_dict(pi),
+                "metadata": {
+                    **_as_dict(_get(pi, "metadata")),
+                    **_invoice_subscription_metadata(invoice),
+                },
+            }
+            if invoice is not None
+            else _as_dict(pi)
+        ),
         provider_ref_aliases=_ref_aliases(  # EC:E24
             [_get(invoice, "id") if invoice is not None else None, _get(pi, "invoice"), _get(pi, "latest_charge")]
         ),
