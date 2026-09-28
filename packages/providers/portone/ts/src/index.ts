@@ -286,7 +286,7 @@ export class PortoneProvider implements PaymentProvider {
   }
 
   capabilities(): ProviderCapabilities {
-    return { nativeSubscriptions: false, partialRefund: true, meters: false, scheduling: this.scheduling, webhookSignature: true, checkout: 'hosted' };
+    return { nativeSubscriptions: false, partialRefund: true, meters: false, scheduling: this.scheduling, webhookSignature: true, checkout: 'hosted', upgradeGrant: 'sync' };
   }
 
   // EC:L1 — one `provider.request` event per HTTP call, redacted (EC:L2) by the Logger implementation.

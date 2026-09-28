@@ -1,6 +1,7 @@
 // spec: packages/lifecycle/spec/lifecycle.pseudo.md — EC:A7 A15 A17 A25 A32 B12
 import { Clock, LedgerStore, PaymentKitError, Payment, Policy, Repo, Subscription, keyMatchesInstant } from 'boilpayment-core';
 import { grantForPeriod, GrantResult, rolloverOnRenewal, RolloverResult } from 'boilpayment-credits';
+import { pendingUpgradeGrantKey } from './upgrade.js';
 
 export interface OnRenewalPaidInput {
   sub: Subscription;
@@ -50,6 +51,7 @@ export async function onRenewalPaid(input: OnRenewalPaidInput): Promise<OnRenewa
     const updated = needsAdvance ? { ...sub, planId: sub.scheduledPlanId ?? sub.planId,
       scheduledPlanId: null, currentPeriod: period, status: 'active' as const, graceUntil: null } : sub;
     if (needsAdvance) await repo.subscriptions.put(updated);
+    await grantPendingUpgrade({ sub, payment, period, existingPaymentId: existing.reference.paymentId ?? null, ledger, repo, clock }); // EC:A77
     return {
       sub: updated,
       grant: { entry: existing, duplicated: true, deferred: false, offset: 0, offsetEntries: [] },
@@ -112,4 +114,25 @@ export async function onRenewalPaid(input: OnRenewalPaidInput): Promise<OnRenewa
   await repo.subscriptions.put(updated);
 
   return { sub: updated, grant, rollover, duplicated: false, recovered: wasRecovering };
+}
+
+/**
+ * EC:A77 — a paid provider order for a period already granted, other than the one that paid for it (a
+ * Polar plan-change order), releases the upgrade delta the upgrade left waiting for it. A redelivery of
+ * the period's own payment never does.
+ */
+async function grantPendingUpgrade(input: { sub: Subscription; payment: Payment; period: { start: Date; end: Date }; existingPaymentId: string | null; ledger: LedgerStore; repo: Repo; clock: Clock }): Promise<void> {
+  const { sub, payment, period, ledger, repo, clock } = input;
+  if (payment.status !== 'succeeded' || payment.id === input.existingPaymentId) return;
+  const key = pendingUpgradeGrantKey(sub.id, sub.planId, period.start);
+  const op = await repo.operations.get(key);
+  if (!op || op.status !== 'in_progress') return;
+  const pending = op.result as { amount: number; expiresAt: string | null; reason: string };
+  await ledger.append({
+    customerId: sub.customerId, pool: 'paid', kind: 'grant', amount: pending.amount, unitPriceMinor: null, currency: null,
+    expiresAt: pending.expiresAt ? new Date(pending.expiresAt) : null, source: 'subscription',
+    reference: { subscriptionId: sub.id, periodStart: period.start, paymentId: payment.id },
+    idempotencyKey: `grant:upgrade:${sub.id}:${sub.planId}:${period.start.toISOString()}`, actor: 'system', reason: pending.reason,
+  });
+  await repo.operations.put({ ...op, status: 'done', completedAt: clock.now() });
 }

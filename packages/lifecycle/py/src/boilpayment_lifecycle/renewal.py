@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
+from datetime import datetime
 
 from boilpayment_core import (
     Clock,
+    LedgerReference,
     LedgerStore,
+    NewLedgerEntry,
     Payment,
     PaymentKitError,
     Policy,
     Repo,
     Subscription,
+    iso_z,
     key_matches_instant,
 )
 from boilpayment_credits import (
@@ -87,6 +92,7 @@ async def on_renewal_paid(input: OnRenewalPaidInput) -> OnRenewalPaidResult:
         ) if needs_advance else sub
         if needs_advance:
             await repo.subscriptions.put(updated)
+        await _grant_pending_upgrade(sub, payment, period, existing.reference.payment_id, ledger, repo, clock)  # EC:A77
         return OnRenewalPaidResult(
             sub=updated,
             grant=GrantResult(entry=existing, duplicated=True, deferred=False),
@@ -166,3 +172,25 @@ async def on_renewal_paid(input: OnRenewalPaidInput) -> OnRenewalPaidResult:
         duplicated=False,
         recovered=was_recovering,
     )
+
+
+async def _grant_pending_upgrade(sub, payment, period, existing_payment_id, ledger, repo, clock) -> None:  # type: ignore[no-untyped-def]
+    """EC:A77 -- a paid provider order for a period already granted, other than the one that paid for it (a
+    Polar plan-change order), releases the upgrade delta the upgrade left waiting for it. Mirrors renewal.ts."""
+    from .upgrade import pending_upgrade_grant_key
+
+    if payment.status != "succeeded" or payment.id == existing_payment_id:
+        return
+    key = pending_upgrade_grant_key(sub.id, sub.plan_id, period.start)
+    op = await repo.operations.get(key)
+    if op is None or op.status != "in_progress":
+        return
+    pending = op.result or {}
+    expires = pending.get("expiresAt")
+    await ledger.append(NewLedgerEntry(
+        customer_id=sub.customer_id, pool="paid", kind="grant", amount=int(pending["amount"]), unit_price_minor=None, currency=None,
+        expires_at=datetime.fromisoformat(expires) if expires else None, source="subscription",
+        reference=LedgerReference(subscription_id=sub.id, period_start=period.start, payment_id=payment.id),
+        idempotency_key=f"grant:upgrade:{sub.id}:{sub.plan_id}:{iso_z(period.start)}", actor="system", reason=str(pending.get("reason", "upgrade")),
+    ))
+    await repo.operations.put(dataclasses.replace(op, status="done", completed_at=clock.now()))

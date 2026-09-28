@@ -28,22 +28,22 @@ async function setup() {
 }
 
 describe('EC:A1 A2 upgrade.mode x upgrade.creditDelta', () => {
-  it("immediate_prorate_reset_anchor + full_delta: creditDelta=200, anchor resets to day 16, period Jan16->Feb16", async () => {
+  it("native immediate_prorate_reset_anchor: the provider's new period (Jan16->Feb16, anchor 16) is kept and no delta is granted (EC:A77 — the new period's invoice grants)", async () => {
     const { clock, ledger, repo, ids } = await setup();
     const sub = mkSub();
     await repo.subscriptions.put(sub);
     const provider = new FakeNativeProvider();
-    provider.setDummySub(sub);
+    provider.setDummySub({ ...sub, anchorDay: 16, currentPeriod: { start: new Date('2024-01-16T00:00:00.000Z'), end: new Date('2024-02-16T00:00:00.000Z') } });
     const policy = resolvePolicy(); // default: immediate_prorate_reset_anchor, full_delta
 
     const res = await upgrade({ sub, newPlan: planB, policy, provider, ledger, repo, clock, ids });
-    expect(res.creditDelta).toBe(200);
+    expect(res.creditDelta).toBe(0);
     expect(res.sub.anchorDay).toBe(16);
     expect(res.sub.currentPeriod).toEqual({ start: new Date('2024-01-16T00:00:00.000Z'), end: new Date('2024-02-16T00:00:00.000Z') });
     expect(res.sub.planId).toBe(planB.id);
     expect(provider.changeSubscriptionCalled).toBe(1);
     const bal = await ledger.balance('cust_1', undefined, clock.now());
-    expect(bal.available).toBe(200);
+    expect(bal.available).toBe(0);
   });
 
   it('immediate_prorate_keep_anchor + full_delta: creditDelta=200, currentPeriod/anchorDay unchanged', async () => {
@@ -61,13 +61,13 @@ describe('EC:A1 A2 upgrade.mode x upgrade.creditDelta', () => {
     expect(provider.changeSubscriptionCalled).toBe(1);
   });
 
-  it("immediate_prorate_reset_anchor + prorated_delta: creditDelta=floor(200 * 16/31)=103", async () => {
+  it("immediate_prorate_keep_anchor + prorated_delta: creditDelta=floor(200 * 16/31)=103", async () => {
     const { clock, ledger, repo, ids } = await setup();
     const sub = mkSub();
     await repo.subscriptions.put(sub);
     const provider = new FakeNativeProvider();
     provider.setDummySub(sub);
-    const policy = resolvePolicy({ upgrade: { creditDelta: 'prorated_delta' } });
+    const policy = resolvePolicy({ upgrade: { mode: 'immediate_prorate_keep_anchor', creditDelta: 'prorated_delta' } });
 
     const res = await upgrade({ sub, newPlan: planB, policy, provider, ledger, repo, clock, ids });
     expect(res.creditDelta).toBe(103);
@@ -142,7 +142,7 @@ describe('EC:J1-J5 upgrade operation idempotency', () => {
     await repo.subscriptions.put(sub);
     const provider = new FakeNativeProvider();
     provider.setDummySub(sub);
-    const policy = resolvePolicy();
+    const policy = resolvePolicy({ upgrade: { mode: 'immediate_prorate_keep_anchor' } });
 
     const first = await upgrade({ sub, newPlan: planB, policy, provider, ledger, repo, clock, ids });
     const second = await upgrade({ sub, newPlan: planB, policy, provider, ledger, repo, clock, ids });

@@ -488,6 +488,10 @@ export interface ProviderCapabilities {
   /** EC:N1 — 'on_device' for in-app purchase stores (Apple, Google Play): the purchase happens in
    * the app and the server verifies the store's proof (see store.ts). Absent means 'hosted'. */
   checkout?: 'hosted' | 'on_device';
+  /** EC:A77 — 'on_payment' when an immediate plan change is charged as its own provider order whose
+   * payment arrives later (Polar): the upgrade's credits wait for that order's paid webhook. Absent
+   * means the change is paid (or refused) before changeSubscription returns (Stripe error_if_incomplete). */
+  upgradeGrant?: 'sync' | 'on_payment';
 }
 
 export interface CreateCheckoutInput {

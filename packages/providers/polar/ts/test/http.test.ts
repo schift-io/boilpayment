@@ -127,7 +127,7 @@ describe('[EC:F(Polar)] PolarProvider HTTP methods (fetch stubbed — no network
     expect(init.method).toBe('GET');
   });
 
-  it('[EC:A1] changeSubscription(proration=immediate) -> PATCH /v1/subscriptions/{ref} {product_id, proration_behavior:"prorate"}; resetAnchor ignored', async () => {
+  it('[EC:A1] changeSubscription(proration=immediate) -> PATCH /v1/subscriptions/{ref} {product_id, proration_behavior:"invoice"} (EC:A77); resetAnchor ignored', async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({ id: 'sub_1', customer_id: 'cust_abc', status: 'active', current_period_start: '2024-01-01T00:00:00.000Z', current_period_end: '2024-01-31T00:00:00.000Z', cancel_at_period_end: false, created_at: '2024-01-01T00:00:00.000Z' }),
     );
@@ -135,7 +135,7 @@ describe('[EC:F(Polar)] PolarProvider HTTP methods (fetch stubbed — no network
     const { url, init } = lastCall();
     expect(url).toBe('https://sandbox-api.polar.sh/v1/subscriptions/sub_1');
     expect(init.method).toBe('PATCH');
-    expect(JSON.parse(init.body as string)).toEqual({ product_id: 'prod_new', proration_behavior: 'prorate' });
+    expect(JSON.parse(init.body as string)).toEqual({ product_id: 'prod_new', proration_behavior: 'invoice' });
   });
 
   it('[EC:A1] changeSubscription(proration=none) -> proration_behavior:"next_period"', async () => {

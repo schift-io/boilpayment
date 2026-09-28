@@ -734,6 +734,9 @@ class ProviderCapabilities:
     # EC:N1 -- "on_device" for in-app purchase stores (Apple, Google Play): the purchase happens in
     # the app and the server verifies the store's proof (see store.py). Default "hosted".
     checkout: Literal["hosted", "on_device"] = "hosted"
+    # EC:A77 -- "on_payment" when an immediate plan change is charged as its own provider order whose
+    # payment arrives later (Polar): the upgrade's credits wait for that order's paid webhook.
+    upgrade_grant: Literal["sync", "on_payment"] = "sync"
 
 
 @dataclass(kw_only=True, slots=True)

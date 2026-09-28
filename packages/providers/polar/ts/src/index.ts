@@ -332,7 +332,7 @@ export class PolarProvider implements PaymentProvider {
   }
 
   capabilities(): ProviderCapabilities {
-    return { nativeSubscriptions: true, partialRefund: true, meters: true, scheduling: 'provider', webhookSignature: true, checkout: 'hosted' };
+    return { nativeSubscriptions: true, partialRefund: true, meters: true, scheduling: 'provider', webhookSignature: true, checkout: 'hosted', upgradeGrant: 'on_payment' };
   }
 
   async createCustomer(input: { email: string; name?: string; metadata?: Record<string, string> }): Promise<{ ref: string }> {
@@ -387,7 +387,9 @@ export class PolarProvider implements PaymentProvider {
   ): Promise<Subscription> {
     const sub = await this.request<Record<string, any>>('PATCH', `/v1/subscriptions/${providerRef}`, {
       product_id: input.newPriceRef,
-      proration_behavior: input.proration === 'immediate' ? 'prorate' : 'next_period',
+      // EC:A77 — 'invoice' charges the difference now as its own order ('prorate' only adds it to the next
+      // invoice, which a cancel at period end never produces).
+      proration_behavior: input.proration === 'immediate' ? 'invoice' : 'next_period',
     });
     return normalizeSubscription(sub);
   }

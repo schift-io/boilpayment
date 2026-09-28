@@ -323,7 +323,7 @@ class TestChangeSubscription:
         assert str(req.url) == "https://sandbox-api.polar.sh/v1/subscriptions/sub_1"
         assert recorder.body() == {
             "product_id": "prod_new",
-            "proration_behavior": "prorate",
+            "proration_behavior": "invoice",
         }
 
     def test_ec_a1_proration_none_maps_to_next_period(self, recorder):

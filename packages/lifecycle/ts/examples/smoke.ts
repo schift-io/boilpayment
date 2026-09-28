@@ -199,9 +199,10 @@ async function main(): Promise<void> {
   await consume({ customerId: sub.customerId, amount: 30, policy, ledger, clock, idempotencyKey: 'consume_1' });
   await print('02_consume_30');
 
-  // 3. mid-cycle upgrade to plan B on Jan 16 (default policy: immediate_prorate_reset_anchor, full_delta)
+  // 3. mid-cycle upgrade to plan B on Jan 16 (keep_anchor, full_delta: a native reset_anchor change grants
+  //    nothing itself — the provider's new-period invoice does, EC:A77)
   clock.advance(15 * 86_400_000); // Jan 1 -> Jan 16
-  const u1 = await upgrade({ sub, newPlan: planB, policy, provider, ledger, repo, clock, ids });
+  const u1 = await upgrade({ sub, newPlan: planB, policy: resolvePolicy({ upgrade: { mode: 'immediate_prorate_keep_anchor' } }), provider, ledger, repo, clock, ids });
   sub = u1.sub;
   console.log(`03_upgrade_full_delta: creditDelta=${u1.creditDelta} anchorDay=${sub.anchorDay}`);
   await print('03_upgrade_full_delta');

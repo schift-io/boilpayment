@@ -424,6 +424,17 @@ const server = createServer(async (req, res) => {
       if (body.product_id !== undefined && body.product_id !== null) {
         const product = PRODUCTS[body.product_id];
         if (!product) return json(res, 422, { error: 'validation_error', detail: `unknown product id: ${body.product_id}` });
+        // proration_behavior:'invoice' charges the price difference for the rest of the period now, as its
+        // own order (billing_reason 'subscription_update'); 'prorate' only adds it to the next invoice.
+        if (body.proration_behavior === 'invoice' && product.amount > sub.amount) {
+          const startMs = new Date(sub.current_period_start).getTime(); const endMs = new Date(sub.current_period_end).getTime();
+          const share = Math.max(0, Math.min(1, (endMs - Date.now()) / (endMs - startMs)));
+          const order = buildOrderForProduct({ product, customerId: sub.customer_id, subscriptionId: sub.id, checkoutId: null });
+          order.billing_reason = 'subscription_update';
+          const amount = Math.round((product.amount - sub.amount) * share);
+          Object.assign(order, { subtotal_amount: amount, net_amount: amount, total_amount: amount, refundable_amount: amount });
+          order.items[0].amount = amount; order.items[0].proration = true;
+        }
         sub.product_id = product.id;
         sub.amount = product.amount;
         sub.currency = product.currency;

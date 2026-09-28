@@ -93,7 +93,7 @@ export class AppleProvider implements PaymentProvider, StorePurchaseProvider {
   }
 
   capabilities(): ProviderCapabilities {
-    return { nativeSubscriptions: true, partialRefund: false, meters: false, scheduling: 'provider', webhookSignature: true, checkout: 'on_device' };
+    return { nativeSubscriptions: true, partialRefund: false, meters: false, scheduling: 'provider', webhookSignature: true, checkout: 'on_device', upgradeGrant: 'sync' };
   }
 
   private now(): Date { return this.config.now?.() ?? new Date(); }

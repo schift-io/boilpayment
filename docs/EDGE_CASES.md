@@ -91,6 +91,7 @@
 | A74 | Toss·PortOne 구독 플랜에도 `startCheckout` 이 결제창 주문을 만들어, 승인하면 돈만 받고 등록은 `use_start_subscription` 으로 거절됨(round-9 A9-18) | (구현 규칙) | 자체 청구 결제사의 구독 플랜은 `startCheckout` 에서 주문을 만들기 전에 `use_start_subscription` 으로 거절한다 | cs | P0 |
 | A75 | 초과 사용량 청구가 빌링키를 발급받은 customerKey 대신 고객의 결제사 참조를 보내 Toss 가 거절하고, 그러면 `closePeriods` 전체가 멈춰 다른 고객의 초과 청구도 빠짐(round-9 A9-11) | (구현 규칙) | 초과 청구는 구독의 `billingCustomerRef` 를 먼저 보낸다(A60 과 같은 규칙). `settleDuePeriods` 는 구독 하나의 오류를 모아 두고 나머지 구독을 모두 처리한 뒤 `usage_settlement_errors`(각 구독의 코드·메시지)로 알린다. 첫 청구가 성공한 적 없는 닫힌 가입은 사용량 주인 후보에서 뺀다 | usage | P0 |
 | A76 | 업그레이드 추가금을 환불하면 크레딧만 회수되고 새 플랜·재설정된 기간이 남아, 다음 갱신이 새 플랜 요금으로 청구됨(round-9 A9-5) | (구현 규칙) | 업그레이드 결제 행이 업그레이드 전 플랜·기간·기준일을 기록한다. 그 결제가 전액 환불되면(킷 환불·결제사 콘솔 환불 모두) 업그레이드한 플랜이 아직 현재 플랜일 때 구독을 이전 플랜·기간·기준일로 되돌린다. 부분 환불은 구독을 바꾸지 않는다 | refund · lifecycle | P0 |
+| A77 | 결제사 네이티브 업그레이드의 크레딧이 결제와 어긋남 — Stripe reset_anchor 는 킷의 차액과 새 기간 인보이스의 지급이 둘 다 들어가고, Polar 는 결제 없이 차액을 먼저 주며 `prorate` 가 다음 청구서로 미뤄져 기간 말 취소면 추가금이 청구되지 않음(round-9 A9-6 A9-7) | (구현 규칙) | 네이티브 변경 뒤 기간·기준일은 결제사 응답을 따른다. Stripe reset_anchor 는 킷이 차액을 주지 않는다(새 기간 인보이스가 지급). Polar 는 `proration_behavior:'invoice'` 로 차액을 별도 주문으로 바로 청구하고(`capabilities().upgradeGrant='on_payment'`), 킷은 차액을 대기 작업으로 남겼다가 그 기간의 다른 결제(변경 주문)가 paid 로 오면 한 번 지급한다. 기간 결제의 재전송은 지급하지 않는다 | lifecycle · providers.polar | P0 |
 
 ## B. 크레딧 원장
 

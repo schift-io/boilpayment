@@ -14,6 +14,7 @@ from boilpayment_core import (
     LedgerStore,
     Money,
     NewLedgerEntry,
+    Operation,
     PaymentKitError,
     PaymentProvider,
     Period,
@@ -93,6 +94,11 @@ def _deserialize(v: dict) -> UpgradeResult:
 # re-charging/re-granting. See spec/lifecycle.pseudo.md [EC:A1 A2 A8] "멱등성" note.
 # EC:A61 — the change is decided against the stored row, under a per-subscription lease taken before any
 # charge: two upgrades at once (pro and max) cannot both charge, and a stale snapshot is refused.
+def pending_upgrade_grant_key(sub_id: str, plan_id: str, period_start: datetime) -> str:
+    """EC:A77 -- the operation holding an upgrade delta that waits for its provider order to be paid."""
+    return f"upgrade-grant:{sub_id}:{plan_id}:{iso_z(period_start)}"
+
+
 async def upgrade(input: UpgradeInput) -> UpgradeResult:
     # EC:J13 (A7-3) -- an earlier release's key for this upgrade, in an older time form, is reused, and so
     # is the time text its charge key carried.
@@ -242,11 +248,12 @@ async def _do_upgrade(input: UpgradeInput, stamp: str) -> UpgradeResult:
     # via the billing key (change_subscription would otherwise have triggered the provider's own
     # proration invoice).
     scoped_provider = scope_provider(provider, input.correlation_id)
+    changed: Subscription | None = None
     if native:
         if sub.provider_ref is None:
             raise PaymentKitError("native subscription mutation requires its provider reference", "subscription_provider_ref_required")
         price_ref = resolve_price_ref(new_plan, sub.provider, sub.currency)
-        await scoped_provider.change_subscription(
+        changed = await scoped_provider.change_subscription(
             sub.provider_ref,
             new_price_ref=price_ref,
             proration="immediate",
@@ -293,7 +300,12 @@ async def _do_upgrade(input: UpgradeInput, stamp: str) -> UpgradeResult:
     current_period: Period = sub.current_period
     anchor_day = sub.anchor_day
 
-    if reset_anchor:
+    if native:
+        # EC:A77 -- the provider decides the period after a native change (Polar never resets the anchor).
+        if changed is not None and getattr(changed, "current_period", None) is not None:
+            current_period = changed.current_period
+            anchor_day = changed.anchor_day or anchor_day
+    elif reset_anchor:
         # EC:A71 — the new anchor is today's civil day in the policy timezone (a UTC day gives a KST
         # 1st-of-month upgrade the previous month's last day, and a two-month first period).
         anchor_day = civil_day_of(now, policy.period.timezone)
@@ -310,7 +322,13 @@ async def _do_upgrade(input: UpgradeInput, stamp: str) -> UpgradeResult:
     # EC:A59 -- a self-scheduled reset_anchor upgrade bought a whole new period less the old period's unused
     # share, so it grants the new plan's credits less the old plan's unused share (either credit_delta).
     full_delta = new_plan.credits_per_period - old_plan.credits_per_period
-    if reset_anchor and not native:
+    # EC:A77 -- a native reset_anchor change is billed by the provider as a new period whose paid invoice
+    # grants it: no delta on top. A provider that bills the change as a later order (Polar) gets its delta
+    # granted when that order's paid webhook arrives.
+    grant_on_payment = native and getattr(provider.capabilities(), "upgrade_grant", "sync") == "on_payment"
+    if native and reset_anchor and not grant_on_payment:
+        delta = 0
+    elif reset_anchor and not native:
         delta = new_plan.credits_per_period - scale_minor(old_plan.credits_per_period, num, den, "floor")
     elif policy.upgrade.credit_delta == "full_delta":
         delta = full_delta
@@ -319,7 +337,15 @@ async def _do_upgrade(input: UpgradeInput, stamp: str) -> UpgradeResult:
         delta = math.floor(full_delta * ratio)
 
     grant: LedgerEntry | None = None
-    if delta > 0:
+    if delta > 0 and grant_on_payment:
+        key = pending_upgrade_grant_key(sub.id, new_plan.id, current_period.start)
+        await repo.operations.put(Operation(
+            id=key, key=key, kind="lifecycle.upgrade_grant", payload_hash="", status="in_progress", error=None,
+            created_at=now, completed_at=None, attempts=0,
+            result={"amount": delta, "expiresAt": None if policy.credits.rollover == "full" else iso_z(current_period.end),
+                    "reason": f"upgrade:{old_plan.id}->{new_plan.id}"},
+        ))
+    elif delta > 0:
         # EC:J5 — deterministic ledger idempotency key (sub + target plan + *original* period
         # start, not clock.now()); see docs/EDGE_CASES.md §J J5.
         idempotency_key = await ledger_instant_key(
@@ -349,7 +375,7 @@ async def _do_upgrade(input: UpgradeInput, stamp: str) -> UpgradeResult:
         grant = result.entry
 
     def change(base: Subscription) -> Subscription:
-        if reset_anchor:
+        if reset_anchor or native:
             return replace_sub(base, plan_id=new_plan.id, scheduled_plan_id=None, current_period=current_period, anchor_day=anchor_day)
         return replace_sub(base, plan_id=new_plan.id, scheduled_plan_id=None)
 

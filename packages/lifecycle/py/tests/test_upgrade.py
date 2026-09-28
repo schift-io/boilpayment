@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from datetime import UTC, datetime
 
 import pytest
@@ -78,13 +79,15 @@ async def setup():
     return clock, ledger, repo, ids
 
 
-def test_immediate_prorate_reset_anchor_full_delta():
+def test_native_reset_anchor_keeps_provider_period_and_grants_no_delta():
+    """EC:A77 -- the new period's invoice grants; the kit adds no delta."""
     async def scenario():
         clock, ledger, repo, ids = await setup()
         sub = mk_sub()
         await repo.subscriptions.put(sub)
         provider = FakeNativeProvider()
-        provider.set_dummy_sub(sub)
+        provider.set_dummy_sub(dataclasses.replace(sub, anchor_day=16, current_period=Period(
+            start=datetime(2024, 1, 16, tzinfo=UTC), end=datetime(2024, 2, 16, tzinfo=UTC))))
         policy = resolve_policy()
 
         res = await upgrade(
@@ -99,14 +102,14 @@ def test_immediate_prorate_reset_anchor_full_delta():
                 ids=ids,
             )
         )
-        assert res.credit_delta == 200
+        assert res.credit_delta == 0
         assert res.sub.anchor_day == 16
         assert res.sub.current_period.start == datetime(2024, 1, 16, tzinfo=UTC)
         assert res.sub.current_period.end == datetime(2024, 2, 16, tzinfo=UTC)
         assert res.sub.plan_id == PLAN_B.id
         assert provider.change_subscription_called == 1
         bal = await ledger.balance("cust_1", None, clock.now())
-        assert bal.available == 200
+        assert bal.available == 0
 
     run(scenario())
 
@@ -140,14 +143,14 @@ def test_immediate_prorate_keep_anchor_full_delta():
     run(scenario())
 
 
-def test_immediate_prorate_reset_anchor_prorated_delta():
+def test_immediate_prorate_keep_anchor_prorated_delta():
     async def scenario():
         clock, ledger, repo, ids = await setup()
         sub = mk_sub()
         await repo.subscriptions.put(sub)
         provider = FakeNativeProvider()
         provider.set_dummy_sub(sub)
-        policy = resolve_policy({"upgrade": {"creditDelta": "prorated_delta"}})
+        policy = resolve_policy({"upgrade": {"mode": "immediate_prorate_keep_anchor", "creditDelta": "prorated_delta"}})
 
         res = await upgrade(
             UpgradeInput(
@@ -271,7 +274,7 @@ def test_j1_calling_upgrade_twice_with_default_key_grants_exactly_once():
         await repo.subscriptions.put(sub)
         provider = FakeNativeProvider()
         provider.set_dummy_sub(sub)
-        policy = resolve_policy()
+        policy = resolve_policy({"upgrade": {"mode": "immediate_prorate_keep_anchor"}})
 
         first = await upgrade(
             UpgradeInput(

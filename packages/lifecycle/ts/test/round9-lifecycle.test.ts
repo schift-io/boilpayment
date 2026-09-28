@@ -1,8 +1,8 @@
 // spec: packages/lifecycle/spec/lifecycle.pseudo.md — EC:A71 A72 (round-9 A9-4 A9-8 A9-9)
 import { describe, expect, it } from 'vitest';
-import { FixedClock, InMemoryLedger, InMemoryRepo, Plan, SequentialIdGen, Subscription, resolvePolicy } from 'boilpayment-core';
-import { reactivate, scheduler, startSubscription, upgrade } from '../src/index.js';
-import { FakeSelfSchedulingProvider } from './helpers.js';
+import { FixedClock, InMemoryLedger, InMemoryRepo, Payment, Plan, SequentialIdGen, Subscription, resolvePolicy } from 'boilpayment-core';
+import { onRenewalPaid, reactivate, scheduler, startSubscription, upgrade } from '../src/index.js';
+import { FakeNativeProvider, FakeSelfSchedulingProvider } from './helpers.js';
 
 const basic: Plan = { id: 'basic', name: 'Basic', interval: 'month', creditsPerPeriod: 1000, usageIncluded: 0, trialDays: 0, prices: [{ currency: 'KRW', amountMinor: 9900 }] };
 const pro: Plan = { id: 'pro', name: 'Pro', interval: 'month', creditsPerPeriod: 3000, usageIncluded: 0, trialDays: 0, prices: [{ currency: 'KRW', amountMinor: 19900 }] };
@@ -116,5 +116,42 @@ describe('[EC:A73] a banned customer is never charged again', () => {
     await expect(reactivate({ sub: stored, policy: e.policy, provider: e.provider, ledger: e.ledger, repo: e.repo, clock: e.clock }))
       .rejects.toMatchObject({ code: 'customer_banned' });
     expect((await e.repo.subscriptions.get('s1'))?.status).toBe('canceled');
+  });
+});
+
+describe('[EC:A77] a provider that bills a plan change as a later order (Polar) grants the delta when that order is paid', () => {
+  class OnPaymentProvider extends FakeNativeProvider {
+    override capabilities() { return { ...super.capabilities(), upgradeGrant: 'on_payment' as const }; }
+  }
+  const pay = (id: string, amountMinor: number): Payment => ({
+    id, customerId: 'c1', provider: 'stripe', providerRef: `ref_${id}`, subscriptionId: 's1', amount: { amountMinor, currency: 'KRW' },
+    status: 'succeeded', kind: 'subscription', period: null, occurredAt: new Date('2026-04-11T00:00:00.000Z'), failure: null, cashReceipt: null,
+  });
+
+  it('no grant at upgrade; the change order grants the delta once; a redelivered cycle payment grants nothing', async () => {
+    const e = await base('2026-04-11T00:00:00.000Z', resolvePolicy({ upgrade: { mode: 'immediate_prorate_keep_anchor' } }));
+    const sub: Subscription = {
+      id: 's1', customerId: 'c1', planId: 'basic', provider: 'stripe', providerRef: 'ps_1', status: 'active',
+      currentPeriod: { start: new Date('2026-04-01T00:00:00.000Z'), end: new Date('2026-05-01T00:00:00.000Z') },
+      anchorDay: 1, cancelAtPeriodEnd: false, graceUntil: null, billingKey: null, scheduledPlanId: null, currency: 'KRW',
+      version: 0, createdAt: new Date('2026-04-01T00:00:00.000Z'),
+    };
+    await e.repo.subscriptions.put(sub);
+    const cycle = pay('pay_cycle', 9900);
+    await onRenewalPaid({ sub: (await e.repo.subscriptions.get('s1'))!, payment: cycle, policy: e.policy, ledger: e.ledger, repo: e.repo, clock: e.clock });
+    const provider = new OnPaymentProvider();
+    provider.setDummySub(sub);
+    const res = await upgrade({ sub: (await e.repo.subscriptions.get('s1'))!, newPlan: pro, policy: e.policy, provider, ledger: e.ledger, repo: e.repo, clock: e.clock, ids: new SequentialIdGen('id_') });
+    expect(res.grant).toBeNull();
+    const balance = async () => (await e.ledger.balance('c1', 'paid', e.clock.now())).available;
+    expect(await balance()).toBe(1000);
+    // A redelivered cycle payment releases nothing.
+    await onRenewalPaid({ sub: (await e.repo.subscriptions.get('s1'))!, payment: cycle, policy: e.policy, ledger: e.ledger, repo: e.repo, clock: e.clock });
+    expect(await balance()).toBe(1000);
+    // The plan-change order is paid: the delta (full_delta 2000) is granted, once.
+    const change = pay('pay_change', 6666);
+    await onRenewalPaid({ sub: (await e.repo.subscriptions.get('s1'))!, payment: change, policy: e.policy, ledger: e.ledger, repo: e.repo, clock: e.clock });
+    await onRenewalPaid({ sub: (await e.repo.subscriptions.get('s1'))!, payment: change, policy: e.policy, ledger: e.ledger, repo: e.repo, clock: e.clock });
+    expect(await balance()).toBe(3000);
   });
 });

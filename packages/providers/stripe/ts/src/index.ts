@@ -486,7 +486,7 @@ export class StripeProvider implements PaymentProvider {
   }
 
   capabilities(): ProviderCapabilities {
-    return { nativeSubscriptions: true, partialRefund: true, meters: true, scheduling: 'provider', webhookSignature: true, checkout: 'hosted' };
+    return { nativeSubscriptions: true, partialRefund: true, meters: true, scheduling: 'provider', webhookSignature: true, checkout: 'hosted', upgradeGrant: 'sync' };
   }
 
   async createCustomer(input: { email: string; name?: string; metadata?: Record<string, string> }): Promise<{ ref: string }> {

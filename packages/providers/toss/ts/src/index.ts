@@ -386,7 +386,7 @@ export class TossProvider implements PaymentProvider {
   }
 
   capabilities(): ProviderCapabilities {
-    return { nativeSubscriptions: false, partialRefund: true, meters: false, scheduling: 'self', webhookSignature: false, checkout: 'hosted' };
+    return { nativeSubscriptions: false, partialRefund: true, meters: false, scheduling: 'self', webhookSignature: false, checkout: 'hosted', upgradeGrant: 'sync' };
   }
 
   private authHeader(): string {

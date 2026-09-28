@@ -303,13 +303,14 @@ async def main() -> None:
     )
     await show("02_consume_30")
 
-    # 3. mid-cycle upgrade to plan B on Jan 16 (default policy: immediate_prorate_reset_anchor, full_delta)
+    # 3. mid-cycle upgrade to plan B on Jan 16 (keep_anchor, full_delta: a native reset_anchor change grants
+    #    nothing itself -- the provider's new-period invoice does, EC:A77)
     clock.advance(15 * 86_400_000)  # Jan 1 -> Jan 16
     u1 = await upgrade(
         UpgradeInput(
             sub=sub,
             new_plan=plan_b,
-            policy=policy,
+            policy=resolve_policy({"upgrade": {"mode": "immediate_prorate_keep_anchor"}}),
             provider=provider,
             ledger=ledger,
             repo=repo,

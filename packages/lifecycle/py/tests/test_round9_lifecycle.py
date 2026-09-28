@@ -13,6 +13,8 @@ from boilpayment_core import (
     FixedClock,
     InMemoryLedger,
     InMemoryRepo,
+    Money,
+    Payment,
     PaymentKitError,
     Period,
     Plan,
@@ -22,15 +24,17 @@ from boilpayment_core import (
     resolve_policy,
 )
 from boilpayment_lifecycle import (
+    OnRenewalPaidInput,
     ReactivateInput,
     StartSubscriptionInput,
     UpgradeInput,
+    on_renewal_paid,
     reactivate,
     scheduler,
     start_subscription,
     upgrade,
 )
-from helpers import FakeSelfSchedulingProvider
+from helpers import FakeNativeProvider, FakeSelfSchedulingProvider
 
 BASIC = Plan(id="basic", name="Basic", interval="month", credits_per_period=1000, usage_included=0, trial_days=0,
              prices=[PlanPrice(currency="KRW", amount_minor=9900)])
@@ -169,5 +173,51 @@ def test_a73_reactivate_refused_for_banned_customer() -> None:
         assert await code(reactivate(ReactivateInput(sub=stored, policy=policy, provider=provider, ledger=ledger, repo=repo,
                                                      clock=clock))) == "customer_banned"
         assert (await repo.subscriptions.get("s1")).status == "canceled"
+
+    asyncio.run(scenario())
+
+
+class OnPaymentProvider(FakeNativeProvider):
+    def capabilities(self):  # type: ignore[no-untyped-def]
+        return dataclasses.replace(super().capabilities(), upgrade_grant="on_payment")
+
+
+def _pay(pid: str, amount: int) -> Payment:
+    return Payment(id=pid, customer_id="c1", provider="stripe", provider_ref=f"ref_{pid}", subscription_id="s1",
+                   amount=Money(amount_minor=amount, currency="KRW"), status="succeeded", kind="subscription", period=None,
+                   occurred_at=d("2026-04-11T00:00:00Z"), failure=None, cash_receipt=None)
+
+
+def test_a77_on_payment_upgrade_grants_when_change_order_paid() -> None:
+    async def scenario() -> None:
+        repo, ledger, _provider, clock, _ = await base("2026-04-11T00:00:00Z")
+        policy = resolve_policy({"upgrade": {"mode": "immediate_prorate_keep_anchor"}})
+        sub = Subscription(
+            id="s1", customer_id="c1", plan_id="basic", provider="stripe", provider_ref="ps_1", status="active",
+            current_period=Period(start=d("2026-04-01T00:00:00Z"), end=d("2026-05-01T00:00:00Z")), anchor_day=1,
+            cancel_at_period_end=False, grace_until=None, billing_key=None, scheduled_plan_id=None, currency="KRW",
+            version=0, created_at=d("2026-04-01T00:00:00Z"))
+        await repo.subscriptions.put(sub)
+
+        async def paid(p: Payment) -> None:
+            await on_renewal_paid(OnRenewalPaidInput(sub=await repo.subscriptions.get("s1"), payment=p, policy=policy,  # type: ignore[arg-type]
+                                                     ledger=ledger, repo=repo, clock=clock))
+
+        async def balance() -> int:
+            return (await ledger.balance("c1", "paid", clock.now())).available
+
+        cycle = _pay("pay_cycle", 9900)
+        await paid(cycle)
+        provider = OnPaymentProvider()
+        provider.set_dummy_sub(sub)
+        res = await upgrade(UpgradeInput(sub=await repo.subscriptions.get("s1"), new_plan=PRO, policy=policy, provider=provider,  # type: ignore[arg-type]
+                                         ledger=ledger, repo=repo, clock=clock, ids=SequentialIdGen("id_")))
+        assert res.grant is None and await balance() == 1000
+        await paid(cycle)
+        assert await balance() == 1000
+        change = _pay("pay_change", 6666)
+        await paid(change)
+        await paid(change)
+        assert await balance() == 3000
 
     asyncio.run(scenario())

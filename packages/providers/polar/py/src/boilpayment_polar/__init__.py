@@ -428,6 +428,7 @@ class PolarProvider:
             meters=True,
             scheduling="provider",
             webhook_signature=True,
+            upgrade_grant="on_payment",  # EC:A77
         )
 
     async def create_customer(
@@ -504,7 +505,8 @@ class PolarProvider:
             f"/v1/subscriptions/{provider_ref}",
             {
                 "product_id": new_price_ref,
-                "proration_behavior": "prorate"
+                # EC:A77 -- "invoice" charges the difference now as its own order.
+                "proration_behavior": "invoice"
                 if proration == "immediate"
                 else "next_period",
             },
