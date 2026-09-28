@@ -27,6 +27,7 @@ from boilpayment_core import (
     Operation,
     Payment,
     PaymentFailure,
+    PaymentKitError,
     PaymentProvider,
     Period,
     PlanPrice,
@@ -288,6 +289,13 @@ async def _charge_attempt_held(input: ChargeAttemptInput) -> ChargeAttemptOutcom
         asked = await _ask_provider(input, stored, notifier, Money(amount_minor=price.amount_minor, currency=price.currency))
         if asked is not None:
             return asked
+
+    if stored is None:
+        # EC:A73 -- a banned customer (a lost dispute) is never charged again (see charge-attempt.ts).
+        owner = await repo.customers.get(sub.customer_id)
+        if owner is not None and owner.status == "banned":
+            raise PaymentKitError("customer is banned; not charged", "customer_banned",
+                                  {"subscription_id": sub.id, "customer_id": sub.customer_id})
 
     pending = stored or Payment(
         id=row_id,

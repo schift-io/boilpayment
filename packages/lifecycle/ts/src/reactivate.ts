@@ -146,6 +146,11 @@ async function restoreCanceledCredits(opts: {
 export async function reactivate(input: ReactivateInput): Promise<ReactivateResult> {
   const { sub, policy, provider, ledger, repo, clock } = input;
   const key = input.idempotencyKey ?? `reactivate:${sub.id}:${sub.currentPeriod.start.toISOString()}`;
+  // EC:A73 — a banned customer (a lost dispute) does not get a subscription back.
+  const owner = await repo.customers.get(sub.customerId);
+  if (owner && owner.status === 'banned') {
+    throw new PaymentKitError('customer is banned', 'customer_banned', { subscriptionId: sub.id, customerId: sub.customerId });
+  }
 
   const { result } = await runIdempotent<ReactivateResult>({
     repo,

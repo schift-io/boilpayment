@@ -71,9 +71,14 @@ describe('[EC:A65 A67] Toss checkout registration', () => {
     expect(payment.kind).toBe('topup');
   });
 
-  it('a Toss subscription plan is refused with use_start_subscription', async () => {
-    const deps = await tossSetup('month');
-    await expect(registerCompletedCheckout({ ...deps, customerId: 'u1', checkoutId: 'ord_checkout_1', paymentRef: 'pk_1' }))
-      .rejects.toMatchObject({ code: 'use_start_subscription' });
+  it('a Toss subscription plan is refused at checkout with use_start_subscription (EC:A74), before any order', async () => {
+    await expect(tossSetup('month')).rejects.toMatchObject({ code: 'use_start_subscription' });
+  });
+
+  it.each(['banned', 'frozen'] as const)('a %s customer cannot start a checkout (EC:A73)', async (status) => {
+    const deps = await tossSetup(null);
+    await deps.repo.customers.put({ ...(await deps.repo.customers.get('u1'))!, status });
+    await expect(startCheckout({ ...deps, customerId: 'u1', planId: 'p', provider: 'toss', currency: 'KRW', requestId: 'r2', successUrl: 'https://x/ok', cancelUrl: 'https://x/no' }))
+      .rejects.toMatchObject({ code: `customer_${status}` });
   });
 });

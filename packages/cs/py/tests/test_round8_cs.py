@@ -4,10 +4,12 @@ A8-7 (EC:A65 A67 Toss checkout registration). Mirrors ts/test/round8-cs.test.ts.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
 from boilpayment_core import (
     Checkout,
     CollectingNotifier,
@@ -115,7 +117,7 @@ async def toss_setup(interval: str | None):  # type: ignore[no-untyped-def]
     async def list_payments(**kwargs: Any) -> list[Payment]:
         return []  # Toss's transaction list lags a fresh payment
 
-    toss = SimpleNamespace(name="toss", create_checkout=create_checkout, get_payment=get_payment, list_payments=list_payments)
+    toss = SimpleNamespace(name="toss", capabilities=lambda: SimpleNamespace(native_subscriptions=False), create_checkout=create_checkout, get_payment=get_payment, list_payments=list_payments)
     deps = {"policy": resolve_policy(), "providers": {"toss": toss}, "ledger": InMemoryLedger(ids), "repo": repo, "clock": CLOCK, "ids": ids}
     await start_checkout(StartCheckoutInput(**deps, customer_id="u1", plan_id="p", provider="toss", currency="KRW", request_id="r1",
                                             success_url="https://x/ok", cancel_url="https://x/no"))
@@ -131,14 +133,30 @@ def test_a67_toss_topup_registers_without_the_lagging_list() -> None:
     asyncio.run(scenario())
 
 
-def test_a65_toss_subscription_plan_is_refused() -> None:
+def test_a65_a74_toss_subscription_plan_is_refused_at_checkout() -> None:
     async def scenario() -> None:
-        deps = await toss_setup("month")
         try:
-            await register_completed_checkout(RegisterCompletedCheckoutInput(**deps, customer_id="u1", checkout_id="ord_checkout_1", payment_ref="pk_1"))
+            await toss_setup("month")
         except PaymentKitError as err:
             assert err.code == "use_start_subscription"
         else:
             raise AssertionError("expected use_start_subscription")
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("status", ["banned", "frozen"])
+def test_a73_banned_or_frozen_customer_cannot_checkout(status: str) -> None:
+    async def scenario() -> None:
+        deps = await toss_setup(None)
+        owner = await deps["repo"].customers.get("u1")
+        await deps["repo"].customers.put(dataclasses.replace(owner, status=status))
+        try:
+            await start_checkout(StartCheckoutInput(**deps, customer_id="u1", plan_id="p", provider="toss", currency="KRW", request_id="r2",
+                                                    success_url="https://x/ok", cancel_url="https://x/no"))
+        except PaymentKitError as err:
+            assert err.code == f"customer_{status}"
+        else:
+            raise AssertionError("expected refusal")
 
     asyncio.run(scenario())

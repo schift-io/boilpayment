@@ -1,7 +1,7 @@
 // spec: packages/lifecycle/spec/lifecycle.pseudo.md — EC:A71 A72 (round-9 A9-4 A9-8 A9-9)
 import { describe, expect, it } from 'vitest';
 import { FixedClock, InMemoryLedger, InMemoryRepo, Plan, SequentialIdGen, Subscription, resolvePolicy } from 'boilpayment-core';
-import { startSubscription, upgrade } from '../src/index.js';
+import { reactivate, scheduler, startSubscription, upgrade } from '../src/index.js';
 import { FakeSelfSchedulingProvider } from './helpers.js';
 
 const basic: Plan = { id: 'basic', name: 'Basic', interval: 'month', creditsPerPeriod: 1000, usageIncluded: 0, trialDays: 0, prices: [{ currency: 'KRW', amountMinor: 9900 }] };
@@ -83,5 +83,38 @@ describe('[EC:A72] startSubscription honors multiplePerCustomer and never hides 
     const ok = await startSubscription(input(e, 'd2'));
     expect(ok.sub.status).toBe('active');
     expect((await e.repo.subscriptions.list()).map((s) => s.status).sort()).toEqual(['active', 'expired']);
+  });
+});
+
+describe('[EC:A73] a banned customer is never charged again', () => {
+  async function banned(at = '2026-05-01T01:00:00.000Z') {
+    const e = await base(at, resolvePolicy());
+    await e.repo.customers.put({ id: 'c1', email: null, providerRefs: [], status: 'banned', createdAt: new Date('2026-01-01T00:00:00.000Z') });
+    const sub: Subscription = {
+      id: 's1', customerId: 'c1', planId: 'basic', provider: 'toss', providerRef: null, status: 'active',
+      currentPeriod: { start: new Date('2026-04-01T00:00:00.000Z'), end: new Date('2026-05-01T00:00:00.000Z') },
+      anchorDay: 1, cancelAtPeriodEnd: false, graceUntil: null, billingKey: 'bk1', scheduledPlanId: null, currency: 'KRW',
+      version: 0, createdAt: new Date('2026-04-01T00:00:00.000Z'),
+    };
+    await e.repo.subscriptions.put(sub);
+    return { ...e, sub: (await e.repo.subscriptions.get('s1')) as Subscription };
+  }
+
+  it('the scheduler does not charge a banned customer\'s due renewal', async () => {
+    const e = await banned();
+    const res = await scheduler.tick({ provider: e.provider, repo: e.repo, policy: e.policy, ledger: e.ledger, clock: e.clock, ids: new SequentialIdGen('id_') });
+    expect(res.errors.map((x) => x.code)).toEqual(['customer_banned']);
+    expect(e.provider.orderIds).toEqual([]);
+    expect(await e.repo.payments.list()).toEqual([]);
+  });
+
+  it('reactivate is refused', async () => {
+    const e = await banned('2026-04-20T00:00:00.000Z');
+    const canceled = { ...e.sub, status: 'canceled' as const };
+    await e.repo.subscriptions.put(canceled);
+    const stored = (await e.repo.subscriptions.get('s1')) as Subscription;
+    await expect(reactivate({ sub: stored, policy: e.policy, provider: e.provider, ledger: e.ledger, repo: e.repo, clock: e.clock }))
+      .rejects.toMatchObject({ code: 'customer_banned' });
+    expect((await e.repo.subscriptions.get('s1'))?.status).toBe('canceled');
   });
 });

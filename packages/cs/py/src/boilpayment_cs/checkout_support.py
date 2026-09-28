@@ -33,6 +33,16 @@ class StartCheckoutInput(SupportDeps):
 
 async def start_checkout(input: StartCheckoutInput) -> Checkout:
     key = f"checkout-entitlement:{input.customer_id}:{input.request_id}"
+    # EC:A73 -- a frozen or banned customer (an open or lost dispute) buys nothing.
+    owner = await input.repo.customers.get(input.customer_id)
+    if owner is not None and owner.status != "active":
+        raise PaymentKitError(f"customer is {owner.status}", f"customer_{owner.status}", {"customer_id": input.customer_id})
+    # EC:A74 -- a Toss/PortOne subscription plan starts with start_subscription (a billing key), never a checkout order.
+    selling = await input.repo.plans.get(input.plan_id)
+    seller = input.providers.get(input.provider)
+    if selling is not None and selling.interval and seller is not None and not seller.capabilities().native_subscriptions:
+        raise PaymentKitError(f"{input.provider} subscription plans start with start_subscription", "use_start_subscription",
+                              {"plan_id": input.plan_id, "provider": input.provider})
 
     async def capture() -> CheckoutSnapshot:
         customer = await input.repo.customers.get(input.customer_id)

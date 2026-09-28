@@ -199,6 +199,10 @@ async def reactivate(input: ReactivateInput) -> ReactivateResult:
     # EC:J13 (A7-3) -- an earlier release's key for this reactivation, in an older time form, is reused.
     key, stamp = await operation_instant_key(input.repo, "lifecycle.reactivate", f"reactivate:{sub.id}:", sub.current_period.start)
     key = input.idempotency_key or key
+    # EC:A73 -- a banned customer (a lost dispute) does not get a subscription back.
+    owner = await input.repo.customers.get(sub.customer_id)
+    if owner is not None and owner.status == "banned":
+        raise PaymentKitError("customer is banned", "customer_banned", {"subscription_id": sub.id, "customer_id": sub.customer_id})
 
     result = await run_idempotent(
         repo=input.repo,

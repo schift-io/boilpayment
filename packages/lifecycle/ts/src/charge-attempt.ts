@@ -6,7 +6,7 @@
 // attempt, so every charge that may have moved money has a local row, and a retry of the same
 // attempt re-drives the same provider idempotency key instead of charging again.
 import { createHash } from 'node:crypto';
-import { Clock, Money, NoopNotifier, Notifier, Operation, Payment, PaymentProvider, PlanPrice, ProviderError, Repo, Subscription, keyMatchesInstant,
+import { Clock, Money, NoopNotifier, Notifier, Operation, Payment, PaymentKitError, PaymentProvider, PlanPrice, ProviderError, Repo, Subscription, keyMatchesInstant,
   expectedAttemptAmount, holdAttemptForReview, isLegacyAttemptRow, isUnderReview, lookupMismatch,
 } from 'boilpayment-core';
 import type { Period } from 'boilpayment-core';
@@ -246,6 +246,14 @@ async function chargeAttemptHeld(input: ChargeAttemptInput): Promise<ChargeAttem
     if (asked) return asked;
   }
 
+  if (!stored) {
+    // EC:A73 — a banned customer (a lost dispute) is never charged again: a new charge is refused before
+    // it is written or sent (renewal, dunning retry, sign-up, reactivated subscription).
+    const owner = await repo.customers.get(sub.customerId);
+    if (owner?.status === 'banned') {
+      throw new PaymentKitError('customer is banned; not charged', 'customer_banned', { subscriptionId: sub.id, customerId: sub.customerId });
+    }
+  }
   const pending: Payment = stored ?? {
     id,
     customerId: sub.customerId,

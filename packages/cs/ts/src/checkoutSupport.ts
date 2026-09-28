@@ -14,6 +14,15 @@ export interface RegisterCompletedCheckoutInput extends SupportDeps {
 /** Capture immutable sale rules before a provider checkout can be created. */
 export async function startCheckout(input: StartCheckoutInput): Promise<Checkout> {
   const key = `checkout-entitlement:${input.customerId}:${input.requestId}`;
+  // EC:A73 — a frozen or banned customer (an open or lost dispute) buys nothing.
+  const owner = await input.repo.customers.get(input.customerId);
+  if (owner && owner.status !== 'active') throw new PaymentKitError(`customer is ${owner.status}`, `customer_${owner.status}`, { customerId: input.customerId });
+  // EC:A74 — a Toss/PortOne subscription plan starts with startSubscription (a billing key), never a one-time checkout order.
+  const selling = await input.repo.plans.get(input.planId);
+  const seller = input.providers[input.provider];
+  if (selling?.interval && seller && !seller.capabilities().nativeSubscriptions) {
+    throw new PaymentKitError(`${input.provider} subscription plans start with startSubscription`, 'use_start_subscription', { planId: input.planId, provider: input.provider });
+  }
   const { result: snapshot } = await runIdempotent<CheckoutSnapshot>({ repo: input.repo, clock: input.clock, key, kind: 'checkout.entitlement',
     payload: { customerId: input.customerId, planId: input.planId, provider: input.provider, currency: input.currency },
     serialize: (value) => value, deserialize: parseCheckoutSnapshot,

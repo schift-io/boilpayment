@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from datetime import datetime
 from typing import Any
 
 import pytest
 from boilpayment_core import (
+    Customer,
     FixedClock,
     InMemoryLedger,
     InMemoryRepo,
@@ -19,7 +21,15 @@ from boilpayment_core import (
     Subscription,
     resolve_policy,
 )
-from boilpayment_lifecycle import StartSubscriptionInput, UpgradeInput, start_subscription, upgrade
+from boilpayment_lifecycle import (
+    ReactivateInput,
+    StartSubscriptionInput,
+    UpgradeInput,
+    reactivate,
+    scheduler,
+    start_subscription,
+    upgrade,
+)
 from helpers import FakeSelfSchedulingProvider
 
 BASIC = Plan(id="basic", name="Basic", interval="month", credits_per_period=1000, usage_included=0, trial_days=0,
@@ -30,7 +40,7 @@ SEOUL = resolve_policy({"period": {"timezone": "Asia/Seoul"}})
 
 
 def d(s: str) -> datetime:
-    return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    return datetime.fromisoformat(s)
 
 
 async def code(aw: Any) -> str:
@@ -123,5 +133,41 @@ def test_a72_declined_signup_closed_and_next_allowed() -> None:
         ok = await start(env, "d2")
         assert ok.sub.status == "active"
         assert sorted(s.status for s in await env[0].subscriptions.list()) == ["active", "expired"]
+
+    asyncio.run(scenario())
+
+
+async def banned(at: str = "2026-05-01T01:00:00Z"):  # type: ignore[no-untyped-def]
+    repo, ledger, provider, clock, policy = await base(at, resolve_policy())
+    await repo.customers.put(Customer(id="c1", email=None, provider_refs=[], status="banned", created_at=d("2026-01-01T00:00:00Z")))
+    await repo.subscriptions.put(Subscription(
+        id="s1", customer_id="c1", plan_id="basic", provider="toss", provider_ref=None, status="active",
+        current_period=Period(start=d("2026-04-01T00:00:00Z"), end=d("2026-05-01T00:00:00Z")), anchor_day=1,
+        cancel_at_period_end=False, grace_until=None, billing_key="bk1", scheduled_plan_id=None, currency="KRW",
+        version=0, created_at=d("2026-04-01T00:00:00Z")))
+    return repo, ledger, provider, clock, policy
+
+
+def test_a73_scheduler_does_not_charge_banned_customer() -> None:
+    async def scenario() -> None:
+        repo, ledger, provider, clock, policy = await banned()
+        res = await scheduler.tick(scheduler.SchedulerTickInput(provider=provider, repo=repo, policy=policy, ledger=ledger,
+                                                                clock=clock, ids=SequentialIdGen("id_")))
+        assert [e.code for e in res.errors] == ["customer_banned"]
+        assert provider.order_ids == []
+        assert await repo.payments.list() == []
+
+    asyncio.run(scenario())
+
+
+def test_a73_reactivate_refused_for_banned_customer() -> None:
+    async def scenario() -> None:
+        repo, ledger, provider, clock, policy = await banned("2026-04-20T00:00:00Z")
+        stored = await repo.subscriptions.get("s1")
+        await repo.subscriptions.put(dataclasses.replace(stored, status="canceled"))
+        stored = await repo.subscriptions.get("s1")
+        assert await code(reactivate(ReactivateInput(sub=stored, policy=policy, provider=provider, ledger=ledger, repo=repo,
+                                                     clock=clock))) == "customer_banned"
+        assert (await repo.subscriptions.get("s1")).status == "canceled"
 
     asyncio.run(scenario())

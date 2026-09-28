@@ -87,6 +87,8 @@
 | A70 | Python 크레딧 만료 알림의 중복 방지 id 시간 형식이 바뀌어(isoformat → iso_z) 업그레이드 당일 같은 알림이 한 번 더 감(round-8 A8-12) | (구현 규칙) | 오늘 id 를 iso_z 와 이전 두 형식(세션 시간대 isoformat, UTC isoformat)으로 모두 조회해 하나라도 있으면 보내지 않는다 | credits | P2 |
 | A71 | 정책 시간대가 Asia/Seoul 이면 `startSubscription` 과 reset_anchor 업그레이드의 첫 기간이 약 두 달 — 기준일을 UTC 날짜로 잡아 KST 1일 시작이 전달 말일 기준일이 됨(round-9 A9-4) | `policy.period.timezone` | 기준일은 시작 시각의 정책 시간대 날짜(`civilDayOf`/`civil_day_of`)다. KST 5/1 05:00 시작은 KST 6/1 05:00 에 끝나고, KST 1/31 시작은 2/28 로 clamp 된다 | lifecycle · core | P0 |
 | A72 | `startSubscription` 이 `multiplePerCustomer=deny` 를 무시해 requestId 가 다르면 활성 구독이 둘, 매달 두 번 청구. 두 번째 가입의 청구가 거절되면 `incomplete` 행이 현재 구독이 되어 결제한 구독의 크레딧을 못 씀(round-9 A9-8 A9-9) | (구현 규칙) | 정책 `subscription.multiplePerCustomer` 가 `deny` 이면 고객 단위 리스 안에서 살아 있는 구독(`active`·`trialing`·`past_due`·`incomplete`)을 확인하고 있으면 `subscription_exists` 로 청구 전에 거절한다. 첫 청구가 거절된 가입은 `expired` 로 닫고, 같은 requestId 는 계속 `subscription_start_declined` 다. 생성 코드의 현재 구독은 살아 있는 구독을 먼저 고른다 | lifecycle · cli | P0 |
+| A73 | 밴된 고객이 계속 청구됨 — 취소된 구독을 `reactivate` 하면 tick 이 청구하고, 충전 결제는 받아서 쓸 수 없는 크레딧을 줌(round-9 A9-10) | (구현 규칙) | 새 청구(`chargeAttempt`: 갱신·dunning 재시도·가입)는 고객이 `banned` 면 쓰기·전송 전에 `customer_banned` 로 거절한다. `reactivate` 도 `customer_banned` 로 거절하고, `startCheckout` 은 `frozen`·`banned` 고객을 `customer_<status>` 로 거절한다 | lifecycle · cs | P0 |
+| A74 | Toss·PortOne 구독 플랜에도 `startCheckout` 이 결제창 주문을 만들어, 승인하면 돈만 받고 등록은 `use_start_subscription` 으로 거절됨(round-9 A9-18) | (구현 규칙) | 자체 청구 결제사의 구독 플랜은 `startCheckout` 에서 주문을 만들기 전에 `use_start_subscription` 으로 거절한다 | cs | P0 |
 
 ## B. 크레딧 원장
 
