@@ -3,6 +3,7 @@ import { Clock, CsCase, LedgerStore, PaymentKitError, Payment, Plan, Policy, Rep
 import { grantForPeriod, GrantResult, rolloverOnRenewal, RolloverResult } from 'boilpayment-credits';
 import { applyChange, pendingUpgradeGrantKey } from './upgrade.js';
 import type { UpgradeAnchorIntent } from './upgrade.js';
+import { endGraceExpiry } from './grace-expiry.js';
 
 export interface OnRenewalPaidInput {
   sub: Subscription;
@@ -190,6 +191,9 @@ export async function onRenewalPaid(input: OnRenewalPaidInput): Promise<OnRenewa
       currentPeriod: period, status: 'active' as const, graceUntil: null } : sub;
     if (needsAdvance) await repo.subscriptions.put(updated);
     await grantPendingUpgrade({ sub, payment, period, existingPaymentId: existing.reference.paymentId ?? null, ledger, repo, clock }); // EC:A77
+    if (payment.status === 'succeeded') {
+      await endGraceExpiry({ sub, currentGrant: existing, ledger, clock });
+    }
     return {
       sub: updated,
       grant: { entry: existing, duplicated: true, deferred: false, offset: 0, offsetEntries: [] },
@@ -235,6 +239,9 @@ export async function onRenewalPaid(input: OnRenewalPaidInput): Promise<OnRenewa
     ledger,
     clock,
   });
+  if (grant.entry !== null) {
+    await endGraceExpiry({ sub, currentGrant: grant.entry, ledger, clock });
+  }
 
   // EC:A32 — a late payment for a subscription the provider already canceled/expired buys the
   // period it paid for (granted above) but never brings the subscription back to active.

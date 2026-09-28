@@ -115,6 +115,29 @@ async def _open_reconcile_mismatch(
 async def _resolve_reconciled_plan(
     sub: Subscription, payment: Payment, input: RecoverMissingGrantsInput,
 ) -> tuple[Plan | None, CsCase | None]:
+    expected_plan_id = sub.scheduled_plan_id or sub.plan_id
+    expected = await input.repo.plans.get(expected_plan_id)
+    currency = payment.amount.currency.upper()
+    expected_matches = (
+        expected is not None
+        and expected.interval is not None
+        and any(
+            (
+                (price.provider_price_refs or {}).get(payment.provider) is not None
+                and _raw_contains(
+                    payment.raw,
+                    (price.provider_price_refs or {})[payment.provider],
+                )
+            )
+            or (
+                price.currency.upper() == currency
+                and price.amount_minor == payment.amount.amount_minor
+            )
+            for price in expected.prices
+        )
+    )
+    if expected_matches:
+        return expected, None
     plans = [plan for plan in await input.repo.plans.list() if plan.interval is not None]
     by_provider_ref = [
         plan for plan in plans
@@ -124,7 +147,6 @@ async def _resolve_reconciled_plan(
             for price in plan.prices
         )
     ]
-    currency = payment.amount.currency.upper()
     by_amount = [
         plan for plan in plans
         if any(price.currency.upper() == currency and price.amount_minor == payment.amount.amount_minor
@@ -132,7 +154,6 @@ async def _resolve_reconciled_plan(
     ]
     candidates = by_provider_ref if by_provider_ref else by_amount
     actual = candidates[0] if len(candidates) == 1 else None
-    expected_plan_id = sub.scheduled_plan_id or sub.plan_id
     if actual is not None and actual.id == expected_plan_id:
         return actual, None
 

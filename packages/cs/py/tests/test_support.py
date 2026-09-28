@@ -459,6 +459,187 @@ def test_ot_03_only_uncertain_provider_http_outcomes_become_unknown(status, expe
     anyio.run(go)
 
 
+@pytest.mark.parametrize(("trial_days", "accepted"), [(7, True), (0, False)])
+def test_sb_03_only_trialing_plan_accepts_zero_amount_first_invoice(
+    trial_days, accepted,
+):
+    async def go():
+        deps, provider, _initial_payment = await setup()
+        period = Period(
+            start=deps["clock"].now(), end=datetime(2026, 2, 1, tzinfo=UTC),
+        )
+        plan = Plan(
+            id=f"sb03-{trial_days}", name="SB-03", interval="month",
+            credits_per_period=1000, usage_included=0, trial_days=trial_days,
+            prices=[PlanPrice(
+                currency="USD", amount_minor=1999,
+                provider_price_refs={"stripe": f"price_sb03_{trial_days}"},
+            )],
+        )
+        checkout_id = f"cs_sb03_{trial_days}"
+        payment_ref = f"in_sb03_{trial_days}"
+        subscription_ref = f"sub_sb03_{trial_days}"
+        await deps["repo"].plans.put(plan)
+
+        async def create_checkout(_request):
+            return Checkout(
+                id=checkout_id, provider_ref=checkout_id,
+                url="https://example.test/sub",
+            )
+
+        invoice = Payment(
+            id=f"payment-{payment_ref}", customer_id="cus_1", provider="stripe",
+            provider_ref=payment_ref, subscription_id=subscription_ref,
+            amount=Money(amount_minor=0, currency="USD"), status="succeeded",
+            kind="subscription", period=period, occurred_at=deps["clock"].now(),
+            failure=None,
+            raw={"metadata": {
+                "checkoutEntitlementKey": f"checkout-entitlement:customer:sb03-{trial_days}",
+            }},
+        )
+
+        async def get_payment(_ref):
+            return invoice
+
+        async def list_payments(**_kwargs):
+            return [invoice]
+
+        async def get_subscription(_ref):
+            return Subscription(
+                id=subscription_ref, customer_id="cus_1", plan_id=plan.id,
+                provider="stripe", provider_ref=subscription_ref, status="trialing",
+                current_period=period, anchor_day=1, cancel_at_period_end=False,
+                grace_until=None, billing_key=None, scheduled_plan_id=None,
+                currency="USD", version=0, created_at=deps["clock"].now(),
+            )
+
+        provider.create_checkout = create_checkout
+        provider.get_payment = get_payment
+        provider.list_payments = list_payments
+        provider.get_subscription = get_subscription
+        await start_checkout(StartCheckoutInput(
+            **deps, customer_id="customer", plan_id=plan.id, provider="stripe",
+            currency="USD", request_id=f"sb03-{trial_days}",
+            success_url="https://example.test/ok",
+            cancel_url="https://example.test/cancel",
+        ))
+
+        request = RegisterCompletedCheckoutInput(
+            **deps, customer_id="customer", checkout_id=checkout_id,
+            payment_ref=payment_ref,
+        )
+        if not accepted:
+            with pytest.raises(PaymentKitError) as excinfo:
+                await register_completed_checkout(request)
+            assert excinfo.value.code == "checkout_evidence_mismatch"
+            return
+        payment = await register_completed_checkout(request)
+        assert payment.amount == Money(amount_minor=0, currency="USD")
+        stored = await deps["repo"].subscriptions.get(
+            f"subscription:stripe:{subscription_ref}"
+        )
+        assert stored.status == "trialing"
+        assert stored.plan_id == plan.id
+        assert await deps["ledger"].entries("customer", kind="grant") == []
+
+    anyio.run(go)
+
+
+@pytest.mark.parametrize("provider_name", ["stripe", "polar"])
+def test_sb_06_prefers_subscription_plan_when_catalog_matches_are_ambiguous(
+    provider_name,
+):
+    async def go():
+        deps, provider, initial_payment = await setup()
+        await recover_missing_grant(RecoverMissingGrantInput(
+            **deps, customer_id="customer", payment_id=initial_payment.id,
+            grants=Grants(),
+        ))
+        provider.name = provider_name
+        since = datetime(2025, 12, 31, tzinfo=UTC)
+        previous_period = Period(
+            start=datetime(2025, 12, 1, tzinfo=UTC),
+            end=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+        renewal_period = Period(
+            start=datetime(2026, 1, 1, tzinfo=UTC),
+            end=datetime(2026, 2, 1, tzinfo=UTC),
+        )
+        shared_ref = (
+            "product_sb06_shared" if provider_name == "polar"
+            else "price_sb06_intended"
+        )
+        intended = Plan(
+            id=f"sb06-{provider_name}-intended", name="Intended", interval="month",
+            credits_per_period=1000, usage_included=0, trial_days=0,
+            prices=[PlanPrice(
+                currency="usd", amount_minor=1999,
+                provider_price_refs={provider_name: shared_ref},
+            )],
+        )
+        duplicate = Plan(
+            id=f"sb06-{provider_name}-duplicate", name="Duplicate", interval="month",
+            credits_per_period=2000, usage_included=0, trial_days=0,
+            prices=[PlanPrice(
+                currency="USD", amount_minor=1999,
+                provider_price_refs={
+                    provider_name: shared_ref if provider_name == "polar"
+                    else "price_sb06_duplicate",
+                },
+            )],
+        )
+        subscription_id = f"subscription:{provider_name}:sub_sb06_ambiguous"
+        sub = Subscription(
+            id=subscription_id, customer_id="customer", plan_id=intended.id,
+            provider=provider_name, provider_ref="sub_sb06_ambiguous", status="active",
+            current_period=previous_period, anchor_day=1, cancel_at_period_end=False,
+            grace_until=None, billing_key=None, scheduled_plan_id=None, currency="USD",
+            version=0, created_at=deps["clock"].now(),
+        )
+        renewal = Payment(
+            id="provider-payment-sb06-ambiguous", customer_id="cus_sb06_ambiguous",
+            provider=provider_name, provider_ref=f"pay_sb06_{provider_name}",
+            subscription_id=sub.provider_ref,
+            amount=Money(amount_minor=1999, currency="USD"), status="succeeded",
+            kind="subscription", period=None if provider_name == "polar" else renewal_period,
+            occurred_at=renewal_period.start, failure=None,
+            raw={"product": {"id": shared_ref}} if provider_name == "polar" else None,
+        )
+        await deps["repo"].customers.put(Customer(
+            id="customer", email=None,
+            provider_refs=[ProviderRef(provider=provider_name, ref=renewal.customer_id)],
+            status="active", created_at=deps["clock"].now(),
+        ))
+        await deps["repo"].plans.put(intended)
+        await deps["repo"].plans.put(duplicate)
+        await deps["repo"].subscriptions.put(sub)
+
+        async def list_payments(**_kwargs):
+            return [renewal]
+
+        async def get_subscription(_provider_ref):
+            return replace(sub, current_period=renewal_period)
+
+        provider.list_payments = list_payments
+        provider.get_subscription = get_subscription
+        scan = RecoverMissingGrantsInput(
+            **{**deps, "providers": {provider_name: provider}},
+            grants=Grants(), since=since,
+        )
+
+        cases = await recover_missing_grants(scan)
+        await recover_missing_grants(scan)
+        grants = await deps["ledger"].entries(
+            "customer", kind="grant", source="subscription",
+        )
+        assert len(grants) == 1
+        assert grants[0].amount == 1000
+        assert cases == []
+        assert await deps["repo"].cs_cases.list(kind="reconcile_mismatch") == []
+
+    anyio.run(go)
+
+
 @pytest.mark.parametrize(
     ("provider_name", "status"),
     [

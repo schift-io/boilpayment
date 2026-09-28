@@ -51,6 +51,112 @@ describe('EC:A7 B12 onRenewalPaid — same-period reactivation must not regrant'
     expect(bal.available).toBe(100); // only granted once
   });
 
+  it('[SB-08] provider-active recovery ends the linked prior-period grace extension', async () => {
+    const { clock, ledger, repo } = await setup();
+    const recoveryPlan: Plan = { ...plan, creditsPerPeriod: 1000 };
+    await repo.plans.put(recoveryPlan);
+    const nextPeriod = { start: period.end, end: new Date('2024-03-01T00:00:00.000Z') };
+    const recoveredAt = new Date('2024-02-04T00:00:00.000Z');
+    clock.advance(recoveredAt.getTime() - period.start.getTime());
+    const previous = (await ledger.append({
+      customerId: 'cust_1', pool: 'paid', kind: 'grant', amount: 1000, unitPriceMinor: 1,
+      currency: 'USD', expiresAt: period.end, source: 'subscription',
+      reference: { subscriptionId: 'sub_1', periodStart: period.start, paymentId: 'pay_previous' },
+      idempotencyKey: `grant:sub_1:${period.start.toISOString()}`, actor: 'system', reason: null,
+    })).entry;
+    await ledger.consume({
+      customerId: 'cust_1', poolOrder: ['paid'], amount: 101, idempotencyKey: 'consume:previous',
+      meta: {}, now: period.start, negativeBalance: 'block', negativeFloor: 0,
+    });
+    await ledger.append({
+      customerId: 'cust_1', pool: 'paid', kind: 'adjust', amount: 0, unitPriceMinor: null,
+      currency: 'USD', expiresAt: new Date('2024-02-08T00:00:00.000Z'), source: 'subscription',
+      reference: { subscriptionId: 'sub_1', periodStart: period.start, grantId: previous.id },
+      idempotencyKey: `adjust:grace-expiry:sub_1:${previous.id}:2024-02-08T00:00:00.000Z`,
+      actor: 'system', reason: 'SB-07 grace_expiry_extension',
+    });
+    const providerAdvanced = mkSub({ status: 'active', currentPeriod: nextPeriod, graceUntil: null });
+    await repo.subscriptions.put(providerAdvanced);
+
+    const result = await onRenewalPaid({
+      sub: providerAdvanced,
+      payment: mkPayment({ id: 'pay_recovery', providerRef: 'pi_recovery', period: nextPeriod, occurredAt: recoveredAt }),
+      policy: resolvePolicy(), ledger, repo, clock,
+    });
+
+    const grants = await ledger.entries('cust_1', { kind: 'grant', source: 'subscription' });
+    expect(grants.map((entry) => entry.amount)).toEqual([1000, 1000]);
+    expect(result.sub.status).toBe('active');
+    expect((await ledger.balance('cust_1', undefined, recoveredAt)).available).toBe(1000);
+  });
+
+  it('[SB-08] an existing-grant replay still closes the linked grace extension', async () => {
+    const { clock, ledger, repo } = await setup();
+    const nextPeriod = { start: period.end, end: new Date('2024-03-01T00:00:00.000Z') };
+    const recoveredAt = new Date('2024-02-04T00:00:00.000Z');
+    clock.advance(recoveredAt.getTime() - period.start.getTime());
+    const previous = (await ledger.append({
+      customerId: 'cust_1', pool: 'paid', kind: 'grant', amount: 100, unitPriceMinor: 10,
+      currency: 'USD', expiresAt: period.end, source: 'subscription',
+      reference: { subscriptionId: 'sub_1', periodStart: period.start, paymentId: 'pay_previous' },
+      idempotencyKey: `grant:sub_1:${period.start.toISOString()}`, actor: 'system', reason: null,
+    })).entry;
+    await ledger.append({
+      customerId: 'cust_1', pool: 'paid', kind: 'adjust', amount: 0, unitPriceMinor: null,
+      currency: 'USD', expiresAt: new Date('2024-02-08T00:00:00.000Z'), source: 'subscription',
+      reference: { subscriptionId: 'sub_1', periodStart: period.start, grantId: previous.id },
+      idempotencyKey: `adjust:grace-expiry:sub_1:${previous.id}`, actor: 'system', reason: 'SB-07 grace_expiry_extension',
+    });
+    await ledger.append({
+      customerId: 'cust_1', pool: 'paid', kind: 'grant', amount: 100, unitPriceMinor: 10,
+      currency: 'USD', expiresAt: nextPeriod.end, source: 'subscription',
+      reference: { subscriptionId: 'sub_1', periodStart: nextPeriod.start, paymentId: 'pay_recovery' },
+      idempotencyKey: `grant:sub_1:${nextPeriod.start.toISOString()}`, actor: 'system', reason: null,
+    });
+    const providerAdvanced = mkSub({ status: 'active', currentPeriod: nextPeriod, graceUntil: null });
+    await repo.subscriptions.put(providerAdvanced);
+
+    const result = await onRenewalPaid({
+      sub: providerAdvanced,
+      payment: mkPayment({ id: 'pay_recovery', providerRef: 'pi_recovery', period: nextPeriod, occurredAt: recoveredAt }),
+      policy: resolvePolicy(), ledger, repo, clock,
+    });
+
+    expect(result.duplicated).toBe(true);
+    expect((await ledger.balance('cust_1', undefined, recoveredAt)).available).toBe(100);
+    expect((await ledger.entries('cust_1')).filter((entry) => entry.reason === 'SB-08 grace_expiry_end')).toHaveLength(1);
+  });
+
+  it('[SB-08] a late grace extension cannot revive credits after recovery', async () => {
+    const { clock, ledger, repo } = await setup();
+    const nextPeriod = { start: period.end, end: new Date('2024-03-01T00:00:00.000Z') };
+    const recoveredAt = new Date('2024-02-04T00:00:00.000Z');
+    clock.advance(recoveredAt.getTime() - period.start.getTime());
+    const previous = (await ledger.append({
+      customerId: 'cust_1', pool: 'paid', kind: 'grant', amount: 100, unitPriceMinor: 10,
+      currency: 'USD', expiresAt: period.end, source: 'subscription',
+      reference: { subscriptionId: 'sub_1', periodStart: period.start, paymentId: 'pay_previous' },
+      idempotencyKey: `grant:sub_1:${period.start.toISOString()}`, actor: 'system', reason: null,
+    })).entry;
+    const providerAdvanced = mkSub({ status: 'active', currentPeriod: nextPeriod, graceUntil: null });
+    await repo.subscriptions.put(providerAdvanced);
+
+    await onRenewalPaid({
+      sub: providerAdvanced,
+      payment: mkPayment({ id: 'pay_recovery', providerRef: 'pi_recovery', period: nextPeriod, occurredAt: recoveredAt }),
+      policy: resolvePolicy(), ledger, repo, clock,
+    });
+    await ledger.append({
+      customerId: 'cust_1', pool: 'paid', kind: 'adjust', amount: 0, unitPriceMinor: null,
+      currency: 'USD', expiresAt: new Date('2024-02-08T00:00:00.000Z'), source: 'subscription',
+      reference: { subscriptionId: 'sub_1', periodStart: period.start, grantId: previous.id },
+      idempotencyKey: `adjust:grace-expiry:sub_1:${previous.id}`, actor: 'system', reason: 'SB-07 grace_expiry_extension',
+    });
+
+    expect((await ledger.entries('cust_1')).filter((entry) => entry.reason === 'SB-08 grace_expiry_end')).toHaveLength(1);
+    expect((await ledger.balance('cust_1', undefined, recoveredAt)).available).toBe(100);
+  });
+
   it('EC:A17 recovered=true when the subscription was past_due before this call', async () => {
     const { clock, ledger, repo } = await setup();
     const sub = mkSub({ status: 'past_due', graceUntil: new Date('2024-01-08T00:00:00.000Z') });

@@ -240,7 +240,7 @@ def test_consume_fifo_by_expiry_skips_already_expired_grants():
     asyncio.run(run())
 
 
-def test_sb_07_balance_and_consume_honor_append_only_grace_expiry_extension():
+def test_sb_07_sb_08_balance_and_consume_honor_grace_extension_and_recovery_end():
     async def run():
         from boilpayment_core import ConsumeInput
 
@@ -304,6 +304,41 @@ def test_sb_07_balance_and_consume_honor_append_only_grace_expiry_extension():
                 )
             )
             assert result.ok is True
+            await ledger.append(
+                NewLedgerEntry(
+                    customer_id=customer_id,
+                    pool="paid",
+                    kind="adjust",
+                    amount=0,
+                    unit_price_minor=None,
+                    currency="USD",
+                    expires_at=during_grace,
+                    source="subscription",
+                    reference=LedgerReference(grant_id=grant.id),
+                    idempotency_key=f"adjust:end:{grant.id}",
+                    actor="system",
+                    reason="SB-08 grace_expiry_end",
+                )
+            )
+            await ledger.append(
+                NewLedgerEntry(
+                    customer_id=customer_id,
+                    pool="paid",
+                    kind="adjust",
+                    amount=0,
+                    unit_price_minor=None,
+                    currency="USD",
+                    expires_at=during_grace + timedelta(days=1),
+                    source="subscription",
+                    reference=LedgerReference(grant_id=grant.id),
+                    idempotency_key=f"adjust:end-later:{grant.id}",
+                    actor="system",
+                    reason="SB-08 grace_expiry_end",
+                )
+            )
+            assert (
+                await ledger.balance(customer_id, "paid", during_grace)
+            ).available == 0
         finally:
             await drop_test_db(db)
 

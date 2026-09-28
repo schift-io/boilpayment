@@ -107,10 +107,42 @@ describe('EC:B14 expiry filter at consume/balance time', () => {
         idempotencyKey: `extend:${grant.id}`, actor: 'system', reason: 'SB-07 grace_expiry_extension',
       });
     }
+    await ledger.append({
+      customerId: 'c1', pool: 'paid', kind: 'adjust', amount: 0, unitPriceMinor: null,
+      currency: null, expiresAt: new Date('2026-01-04T00:00:00.000Z'), source: 'subscription',
+      reference: { grantId: unbounded.id }, idempotencyKey: `end:${unbounded.id}`,
+      actor: 'system', reason: 'SB-08 grace_expiry_end',
+    });
 
     const balance = await ledger.balance('c1', 'paid', NOW);
     expect(balance.available).toBe(15);
     expect(balance.expiring).toEqual([{ expiresAt: graceUntil, amount: 10 }]);
+  });
+
+  it('[SB-08] the first grace-end marker caps an extension without shortening the original expiry', async () => {
+    const clock = new FixedClock(NOW);
+    const ledger = new InMemoryLedger(new SequentialIdGen('led_'), clock);
+    const originalExpiry = new Date('2026-01-02T00:00:00.000Z');
+    const grant = (await ledger.append(mkGrant({
+      customerId: 'c1', pool: 'paid', amount: 10, idempotencyKey: 'g_recovered', expiresAt: originalExpiry,
+    }))).entry;
+    const graceUntil = new Date('2026-01-08T00:00:00.000Z');
+    const recoveredAt = new Date('2026-01-04T00:00:00.000Z');
+    const duplicateAt = new Date('2026-01-05T00:00:00.000Z');
+    for (const [reason, expiresAt, suffix] of [
+      ['SB-07 grace_expiry_extension', graceUntil, 'extension'],
+      ['SB-08 grace_expiry_end', recoveredAt, 'first-end'],
+      ['SB-08 grace_expiry_end', duplicateAt, 'duplicate-end'],
+    ] as const) {
+      await ledger.append({
+        customerId: 'c1', pool: 'paid', kind: 'adjust', amount: 0, unitPriceMinor: null,
+        currency: null, expiresAt, source: 'subscription', reference: { grantId: grant.id },
+        idempotencyKey: `${suffix}:${grant.id}`, actor: 'system', reason,
+      });
+    }
+
+    expect((await ledger.balance('c1', 'paid', new Date('2026-01-03T00:00:00.000Z'))).available).toBe(10);
+    expect((await ledger.balance('c1', 'paid', recoveredAt)).available).toBe(0);
   });
 
   it('EC:B14 a grant whose expiresAt <= now is excluded from consume even though the batch has not run', async () => {

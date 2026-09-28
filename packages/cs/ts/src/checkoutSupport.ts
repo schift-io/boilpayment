@@ -1,5 +1,5 @@
 import { PaymentKitError, ProviderError, runIdempotent } from 'boilpayment-core';
-import type { Checkout, Payment, ProviderName } from 'boilpayment-core';
+import type { Checkout, Payment, ProviderName, Subscription } from 'boilpayment-core';
 import type { SupportDeps } from './support.js';
 import { parseCheckoutSnapshot, parsePurchaseSnapshot, matchesCheckoutPayment } from './purchaseSnapshot.js';
 import type { CheckoutSnapshot, PurchaseSnapshot } from './purchaseSnapshot.js';
@@ -113,11 +113,21 @@ export async function registerCompletedCheckout(input: RegisterCompletedCheckout
     throw new PaymentKitError(`${snapshot.provider} subscriptions start with startSubscription (billing key), not a checkout payment`, 'use_start_subscription');
   }
   const live = await provider.getPayment(input.paymentRef);
+  let subscriptionEvidence: { readonly ref: string; readonly live: Subscription } | null = null;
+  if (snapshot.plan.interval !== null) {
+    const subscriptionRef = input.subscriptionRef ?? live.subscriptionId;
+    if (!subscriptionRef || live.subscriptionId !== subscriptionRef) throw new PaymentKitError('subscription payment correlation missing', 'checkout_evidence_missing');
+    const liveSub = await provider.getSubscription(subscriptionRef);
+    if (liveSub.customerId !== snapshot.customerId && liveSub.customerId !== snapshot.customerRef) throw new PaymentKitError('subscription ownership mismatch', 'checkout_evidence_mismatch');
+    subscriptionEvidence = { ref: subscriptionRef, live: liveSub };
+  }
   // EC:A67 — Toss and PortOne bind the payment to this checkout by its own order id (checked below), so the
   // customer's payment list (which lags a fresh payment and has no customer filter on Toss) is not asked.
   const listed = bound ? [] : await provider.listPayments({ customerRef: snapshot.customerRef, since: new Date(snapshot.capturedAt) });
+  const trialInvoice = snapshot.provider === 'stripe' && snapshot.plan.trialDays > 0
+    && subscriptionEvidence?.live.status === 'trialing' && live.amount.amountMinor === 0;
   if (!matchesCheckoutPayment(snapshot, live.raw, input.paymentRef) || live.providerRef !== input.paymentRef || live.provider !== snapshot.provider || live.status !== 'succeeded'
-    || live.amount.amountMinor !== snapshot.price.amountMinor || live.amount.currency !== snapshot.price.currency
+    || (live.amount.amountMinor !== snapshot.price.amountMinor && !trialInvoice) || live.amount.currency !== snapshot.price.currency
     || (!bound && !listed.some((payment) => payment.providerRef === input.paymentRef))
     || (live.customerId !== '' && live.customerId !== snapshot.customerId && live.customerId !== snapshot.customerRef)) {
     throw new PaymentKitError('provider payment does not match captured sale', 'checkout_evidence_mismatch');
@@ -126,15 +136,12 @@ export async function registerCompletedCheckout(input: RegisterCompletedCheckout
   let subscriptionId: string | null = null;
   let period = live.period;
   if (snapshot.plan.interval !== null) {
-    const subscriptionRef = input.subscriptionRef ?? live.subscriptionId;
-    if (!subscriptionRef || live.subscriptionId !== subscriptionRef) throw new PaymentKitError('subscription payment correlation missing', 'checkout_evidence_missing');
-    const liveSub = await provider.getSubscription(subscriptionRef);
-    if (liveSub.customerId !== snapshot.customerId && liveSub.customerId !== snapshot.customerRef) throw new PaymentKitError('subscription ownership mismatch', 'checkout_evidence_mismatch');
-    subscriptionId = `subscription:${snapshot.provider}:${subscriptionRef}`;
-    period = live.period ?? liveSub.currentPeriod;
+    if (!subscriptionEvidence) throw new PaymentKitError('subscription payment correlation missing', 'checkout_evidence_missing');
+    subscriptionId = `subscription:${snapshot.provider}:${subscriptionEvidence.ref}`;
+    period = live.period ?? subscriptionEvidence.live.currentPeriod;
     const existing = await input.repo.subscriptions.get(subscriptionId);
     // EC:A28 — the subscription is charged in the currency it was bought in.
-    if (!existing) await input.repo.subscriptions.put({ ...liveSub, id: subscriptionId, customerId: snapshot.customerId, planId: snapshot.plan.id, provider: snapshot.provider, providerRef: subscriptionRef, currency: snapshot.price.currency });
+    if (!existing) await input.repo.subscriptions.put({ ...subscriptionEvidence.live, id: subscriptionId, customerId: snapshot.customerId, planId: snapshot.plan.id, provider: snapshot.provider, providerRef: subscriptionEvidence.ref, currency: snapshot.price.currency });
   }
   const purchase: PurchaseSnapshot = { ...snapshot, paymentId, paymentRef: input.paymentRef,
     purchasedAt: live.occurredAt.toISOString(), subscriptionId, period: period ? { start: period.start.toISOString(), end: period.end.toISOString() } : null };

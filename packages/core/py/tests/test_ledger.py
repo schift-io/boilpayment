@@ -238,12 +238,75 @@ def test_sb_07_linked_grace_expiry_extends_dated_grant_but_null_stays_null():
                     reason="SB-07 grace_expiry_extension",
                 )
             )
+        await ledger.append(
+            NewLedgerEntry(
+                customer_id="c1",
+                pool="paid",
+                kind="adjust",
+                amount=0,
+                source="subscription",
+                reference=LedgerReference(grant_id=unbounded.id),
+                idempotency_key=f"end:{unbounded.id}",
+                actor="system",
+                expires_at=datetime(2026, 1, 4, tzinfo=UTC),
+                reason="SB-08 grace_expiry_end",
+            )
+        )
 
         balance = await ledger.balance("c1", "paid", NOW)
         assert balance.available == 15
         assert [(item.expires_at, item.amount) for item in balance.expiring] == [
             (grace_until, 10)
         ]
+
+    run(scenario())
+
+
+def test_sb_08_first_grace_end_caps_extension_without_shortening_original():
+    async def scenario():
+        clock = FixedClock(NOW)
+        ledger = InMemoryLedger(SequentialIdGen("led_"), clock)
+        original_expiry = datetime(2026, 1, 2, tzinfo=UTC)
+        grant = (
+            await ledger.append(
+                mk_grant(
+                    customer_id="c1",
+                    pool="paid",
+                    amount=10,
+                    idempotency_key="g_recovered",
+                    expires_at=original_expiry,
+                )
+            )
+        ).entry
+        grace_until = datetime(2026, 1, 8, tzinfo=UTC)
+        recovered_at = datetime(2026, 1, 4, tzinfo=UTC)
+        duplicate_at = datetime(2026, 1, 5, tzinfo=UTC)
+        for reason, expires_at, suffix in (
+            ("SB-07 grace_expiry_extension", grace_until, "extension"),
+            ("SB-08 grace_expiry_end", recovered_at, "first-end"),
+            ("SB-08 grace_expiry_end", duplicate_at, "duplicate-end"),
+        ):
+            await ledger.append(
+                NewLedgerEntry(
+                    customer_id="c1",
+                    pool="paid",
+                    kind="adjust",
+                    amount=0,
+                    source="subscription",
+                    reference=LedgerReference(grant_id=grant.id),
+                    idempotency_key=f"{suffix}:{grant.id}",
+                    actor="system",
+                    expires_at=expires_at,
+                    reason=reason,
+                )
+            )
+
+        assert (
+            await ledger.balance(
+                "c1", "paid", datetime(2026, 1, 3, tzinfo=UTC)
+            )
+        ).available == 10
+        assert (await ledger.balance("c1", "paid", recovered_at)).available == 0
 
     run(scenario())
 

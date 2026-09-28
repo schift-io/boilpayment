@@ -1,19 +1,25 @@
--- 0015_grace_credit_expiry.sql — SB-07 append-only grace-period expiry extensions.
+-- 0015_grace_credit_expiry.sql — SB-07/SB-08 append-only grace-period expiry changes.
 
 create or replace function paykit_effective_grant_expiry(p_grant_id text, p_original timestamptz)
 returns timestamptz as $$
   select case
     when p_original is null then null
-    else greatest(
-      p_original,
-      coalesce((
-        select max(le.expires_at)
-        from ledger_entries le
-        where le.kind = 'adjust'
-          and le.amount = 0
-          and le.reason = 'SB-07 grace_expiry_extension'
-          and le.reference ->> 'grantId' = p_grant_id
-      ), p_original)
+    else (
+      select least(
+        greatest(p_original, coalesce(
+          max(le.expires_at) filter (where le.reason = 'SB-07 grace_expiry_extension'),
+          p_original
+        )),
+        greatest(p_original, coalesce(
+          min(le.expires_at) filter (where le.reason = 'SB-08 grace_expiry_end'),
+          max(le.expires_at) filter (where le.reason = 'SB-07 grace_expiry_extension'),
+          p_original
+        ))
+      )
+      from ledger_entries le
+      where le.kind = 'adjust'
+        and le.amount = 0
+        and le.reference ->> 'grantId' = p_grant_id
     )
   end;
 $$ language sql stable;
@@ -86,4 +92,4 @@ end;
 $$ language plpgsql;
 
 comment on function paykit_effective_grant_expiry (text, timestamptz) is
-  'SB-07 — max original/linked grace expiry; a null original stays unbounded.';
+  'SB-07/SB-08 — linked grace extension capped by first recovery, never below original; null stays unbounded.';

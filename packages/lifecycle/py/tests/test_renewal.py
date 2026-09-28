@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from datetime import UTC, datetime
 
 from boilpayment_core import (
+    ConsumeInput,
     FixedClock,
     InMemoryLedger,
     InMemoryRepo,
+    LedgerReference,
     Money,
+    NewLedgerEntry,
     Payment,
     Period,
     Plan,
@@ -120,6 +124,281 @@ def test_ec_a7_b12_second_call_same_period_does_not_double_grant():
 
         bal = await ledger.balance("cust_1", None, clock.now())
         assert bal.available == 100
+
+    run(scenario())
+
+
+def test_sb_08_provider_active_recovery_ends_linked_prior_period_grace_extension():
+    async def scenario():
+        clock, ledger, repo = await setup()
+        recovery_plan = dataclasses.replace(PLAN, credits_per_period=1000)
+        await repo.plans.put(recovery_plan)
+        next_period = Period(
+            start=PERIOD.end, end=datetime(2024, 3, 1, tzinfo=UTC)
+        )
+        recovered_at = datetime(2024, 2, 4, tzinfo=UTC)
+        clock.advance(int((recovered_at - PERIOD.start).total_seconds() * 1000))
+        previous = (
+            await ledger.append(
+                NewLedgerEntry(
+                    customer_id="cust_1",
+                    pool="paid",
+                    kind="grant",
+                    amount=1000,
+                    unit_price_minor=1,
+                    currency="USD",
+                    expires_at=PERIOD.end,
+                    source="subscription",
+                    reference=LedgerReference(
+                        subscription_id="sub_1",
+                        period_start=PERIOD.start,
+                        payment_id="pay_previous",
+                    ),
+                    idempotency_key=f"grant:sub_1:{PERIOD.start.isoformat()}",
+                    actor="system",
+                )
+            )
+        ).entry
+        await ledger.consume(
+            ConsumeInput(
+                customer_id="cust_1",
+                pool_order=["paid"],
+                amount=101,
+                idempotency_key="consume:previous",
+                meta=LedgerReference(),
+                now=PERIOD.start,
+                negative_balance="block",
+                negative_floor=0,
+            )
+        )
+        await ledger.append(
+            NewLedgerEntry(
+                customer_id="cust_1",
+                pool="paid",
+                kind="adjust",
+                amount=0,
+                unit_price_minor=None,
+                currency="USD",
+                expires_at=datetime(2024, 2, 8, tzinfo=UTC),
+                source="subscription",
+                reference=LedgerReference(
+                    subscription_id="sub_1",
+                    period_start=PERIOD.start,
+                    grant_id=previous.id,
+                ),
+                idempotency_key=(
+                    f"adjust:grace-expiry:sub_1:{previous.id}:"
+                    "2024-02-08T00:00:00+00:00"
+                ),
+                actor="system",
+                reason="SB-07 grace_expiry_extension",
+            )
+        )
+        provider_advanced = mk_sub(
+            status="active", current_period=next_period, grace_until=None
+        )
+        await repo.subscriptions.put(provider_advanced)
+
+        result = await on_renewal_paid(
+            OnRenewalPaidInput(
+                sub=provider_advanced,
+                payment=mk_payment(
+                    id="pay_recovery",
+                    provider_ref="pi_recovery",
+                    period=next_period,
+                    occurred_at=recovered_at,
+                ),
+                policy=resolve_policy(),
+                ledger=ledger,
+                repo=repo,
+                clock=clock,
+            )
+        )
+
+        grants = await ledger.entries(
+            "cust_1", kind="grant", source="subscription"
+        )
+        assert [entry.amount for entry in grants] == [1000, 1000]
+        assert result.sub.status == "active"
+        assert (await ledger.balance("cust_1", None, recovered_at)).available == 1000
+
+    run(scenario())
+
+
+def test_sb_08_existing_grant_replay_closes_linked_grace_extension():
+    async def scenario():
+        clock, ledger, repo = await setup()
+        next_period = Period(
+            start=PERIOD.end, end=datetime(2024, 3, 1, tzinfo=UTC)
+        )
+        recovered_at = datetime(2024, 2, 4, tzinfo=UTC)
+        clock.advance(int((recovered_at - PERIOD.start).total_seconds() * 1000))
+        previous = (
+            await ledger.append(
+                NewLedgerEntry(
+                    customer_id="cust_1",
+                    pool="paid",
+                    kind="grant",
+                    amount=100,
+                    unit_price_minor=10,
+                    currency="USD",
+                    expires_at=PERIOD.end,
+                    source="subscription",
+                    reference=LedgerReference(
+                        subscription_id="sub_1",
+                        period_start=PERIOD.start,
+                        payment_id="pay_previous",
+                    ),
+                    idempotency_key=f"grant:sub_1:{PERIOD.start.isoformat()}",
+                    actor="system",
+                )
+            )
+        ).entry
+        await ledger.append(
+            NewLedgerEntry(
+                customer_id="cust_1",
+                pool="paid",
+                kind="adjust",
+                amount=0,
+                unit_price_minor=None,
+                currency="USD",
+                expires_at=datetime(2024, 2, 8, tzinfo=UTC),
+                source="subscription",
+                reference=LedgerReference(
+                    subscription_id="sub_1",
+                    period_start=PERIOD.start,
+                    grant_id=previous.id,
+                ),
+                idempotency_key=f"adjust:grace-expiry:sub_1:{previous.id}",
+                actor="system",
+                reason="SB-07 grace_expiry_extension",
+            )
+        )
+        await ledger.append(
+            NewLedgerEntry(
+                customer_id="cust_1",
+                pool="paid",
+                kind="grant",
+                amount=100,
+                unit_price_minor=10,
+                currency="USD",
+                expires_at=next_period.end,
+                source="subscription",
+                reference=LedgerReference(
+                    subscription_id="sub_1",
+                    period_start=next_period.start,
+                    payment_id="pay_recovery",
+                ),
+                idempotency_key=f"grant:sub_1:{next_period.start.isoformat()}",
+                actor="system",
+            )
+        )
+        provider_advanced = mk_sub(
+            status="active", current_period=next_period, grace_until=None
+        )
+        await repo.subscriptions.put(provider_advanced)
+
+        result = await on_renewal_paid(
+            OnRenewalPaidInput(
+                sub=provider_advanced,
+                payment=mk_payment(
+                    id="pay_recovery",
+                    provider_ref="pi_recovery",
+                    period=next_period,
+                    occurred_at=recovered_at,
+                ),
+                policy=resolve_policy(),
+                ledger=ledger,
+                repo=repo,
+                clock=clock,
+            )
+        )
+
+        assert result.duplicated is True
+        assert (await ledger.balance("cust_1", None, recovered_at)).available == 100
+        assert len([
+            entry for entry in await ledger.entries("cust_1")
+            if entry.reason == "SB-08 grace_expiry_end"
+        ]) == 1
+
+    run(scenario())
+
+
+def test_sb_08_late_grace_extension_cannot_revive_credits_after_recovery():
+    async def scenario():
+        clock, ledger, repo = await setup()
+        next_period = Period(
+            start=PERIOD.end, end=datetime(2024, 3, 1, tzinfo=UTC)
+        )
+        recovered_at = datetime(2024, 2, 4, tzinfo=UTC)
+        clock.advance(int((recovered_at - PERIOD.start).total_seconds() * 1000))
+        previous = (
+            await ledger.append(
+                NewLedgerEntry(
+                    customer_id="cust_1",
+                    pool="paid",
+                    kind="grant",
+                    amount=100,
+                    unit_price_minor=10,
+                    currency="USD",
+                    expires_at=PERIOD.end,
+                    source="subscription",
+                    reference=LedgerReference(
+                        subscription_id="sub_1",
+                        period_start=PERIOD.start,
+                        payment_id="pay_previous",
+                    ),
+                    idempotency_key=f"grant:sub_1:{PERIOD.start.isoformat()}",
+                    actor="system",
+                )
+            )
+        ).entry
+        provider_advanced = mk_sub(
+            status="active", current_period=next_period, grace_until=None
+        )
+        await repo.subscriptions.put(provider_advanced)
+
+        await on_renewal_paid(
+            OnRenewalPaidInput(
+                sub=provider_advanced,
+                payment=mk_payment(
+                    id="pay_recovery",
+                    provider_ref="pi_recovery",
+                    period=next_period,
+                    occurred_at=recovered_at,
+                ),
+                policy=resolve_policy(),
+                ledger=ledger,
+                repo=repo,
+                clock=clock,
+            )
+        )
+        await ledger.append(
+            NewLedgerEntry(
+                customer_id="cust_1",
+                pool="paid",
+                kind="adjust",
+                amount=0,
+                unit_price_minor=None,
+                currency="USD",
+                expires_at=datetime(2024, 2, 8, tzinfo=UTC),
+                source="subscription",
+                reference=LedgerReference(
+                    subscription_id="sub_1",
+                    period_start=PERIOD.start,
+                    grant_id=previous.id,
+                ),
+                idempotency_key=f"adjust:grace-expiry:sub_1:{previous.id}",
+                actor="system",
+                reason="SB-07 grace_expiry_extension",
+            )
+        )
+
+        assert len([
+            entry for entry in await ledger.entries("cust_1")
+            if entry.reason == "SB-08 grace_expiry_end"
+        ]) == 1
+        assert (await ledger.balance("cust_1", None, recovered_at)).available == 100
 
     run(scenario())
 

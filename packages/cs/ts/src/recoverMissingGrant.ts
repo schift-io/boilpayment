@@ -49,17 +49,24 @@ async function resolveReconciledPlan(input: {
   readonly sub: Subscription; readonly payment: Payment; readonly deps: RecoverMissingGrantsInput;
 }): Promise<{ readonly plan: Plan | null; readonly mismatchCase: CsCase | null }> {
   const { sub, payment, deps } = input;
+  const expectedPlanId = sub.scheduledPlanId ?? sub.planId;
+  const expected = await deps.repo.plans.get(expectedPlanId);
+  const currency = payment.amount.currency.toUpperCase();
+  const expectedMatches = expected?.interval !== null && expected?.prices.some((price) => {
+    const ref = price.providerPriceRefs?.[payment.provider];
+    return (ref !== undefined && rawContains(payment.raw, ref))
+      || (price.currency.toUpperCase() === currency && price.amountMinor === payment.amount.amountMinor);
+  });
+  if (expected && expectedMatches) return { plan: expected, mismatchCase: null };
   const plans = (await deps.repo.plans.list()).filter((plan) => plan.interval !== null);
   const byProviderRef = plans.filter((plan) => plan.prices.some((price) => {
     const ref = price.providerPriceRefs?.[payment.provider];
     return ref !== undefined && rawContains(payment.raw, ref);
   }));
-  const currency = payment.amount.currency.toUpperCase();
   const byAmount = plans.filter((plan) => plan.prices.some((price) =>
     price.currency.toUpperCase() === currency && price.amountMinor === payment.amount.amountMinor));
   const candidates = byProviderRef.length > 0 ? byProviderRef : byAmount;
   const actual = candidates.length === 1 ? candidates[0] ?? null : null;
-  const expectedPlanId = sub.scheduledPlanId ?? sub.planId;
   if (actual?.id === expectedPlanId) return { plan: actual, mismatchCase: null };
 
   // SB-14 — a renewal charged at another (or ambiguous) price must never receive the scheduled

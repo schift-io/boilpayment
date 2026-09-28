@@ -33,6 +33,7 @@ from boilpayment_credits import (
     rollover_on_renewal,
 )
 
+from ._grace_expiry import EndGraceExpiryInput, end_grace_expiry
 from .internal import replace_sub
 
 _NO_ROLLOVER = RolloverResult(entries=[], banked=0, expired=0)
@@ -359,6 +360,13 @@ async def on_renewal_paid(input: OnRenewalPaidInput) -> OnRenewalPaidResult:
         if needs_advance:
             await repo.subscriptions.put(updated)
         await _grant_pending_upgrade(sub, payment, period, existing.reference.payment_id, ledger, repo, clock)  # EC:A77
+        if payment.status == "succeeded":
+            await end_grace_expiry(EndGraceExpiryInput(
+                sub=sub,
+                current_grant=existing,
+                ledger=ledger,
+                clock=clock,
+            ))
         return OnRenewalPaidResult(
             sub=updated,
             grant=GrantResult(entry=existing, duplicated=True, deferred=False),
@@ -414,6 +422,13 @@ async def on_renewal_paid(input: OnRenewalPaidInput) -> OnRenewalPaidResult:
             clock=clock,
         )
     )
+    if grant.entry is not None:
+        await end_grace_expiry(EndGraceExpiryInput(
+            sub=sub,
+            current_grant=grant.entry,
+            ledger=ledger,
+            clock=clock,
+        ))
 
     # EC:A32 -- a late payment for a subscription the provider already canceled/expired buys the
     # period it paid for (granted above) but never brings the subscription back to active.
