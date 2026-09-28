@@ -155,6 +155,27 @@ it('uses original paid invoice currency for historical usage after a plan change
 it('refuses to reconstruct unproven historical periods from the current plan', async () => {
   const input = await given();
   await input.repo.subscriptions.put({ ...input.sub, currentPeriod: { start: input.period.end, end: new Date('2026-07-01T00:00:00Z') } });
-  await expect(settleDuePeriods({ ...input, providers: { stripe: input.provider } })).rejects.toMatchObject({ code: 'invalid_usage_period' });
+  await expect(settleDuePeriods({ ...input, providers: { stripe: input.provider } })).rejects.toMatchObject({ code: 'usage_settlement_errors', details: { errors: [{ code: 'invalid_usage_period' }] } });
   expect(input.provider.calls).toHaveLength(0);
+});
+
+it('[EC:A75] charges with the customer key the billing key was issued under', async () => {
+  const input = await given();
+  const sub = { ...input.sub, billingCustomerRef: 'billing_customer_key' };
+  await input.repo.subscriptions.put(sub);
+  await settlePeriod({ ...input, sub });
+  expect(input.provider.calls.map((c) => c.customerRef)).toEqual(['billing_customer_key']);
+});
+
+it('[EC:A75] one subscription failing does not stop the others; the failure is raised after the run', async () => {
+  const input = await given();
+  await input.repo.subscriptions.put(input.sub);
+  // A second customer whose usage has no provable period fails; the first still settles.
+  const other = { ...input.sub, id: 'sub_other', customerId: 'cust_other', currentPeriod: { start: input.period.end, end: new Date('2026-07-01T00:00:00Z') } };
+  await input.repo.subscriptions.put(other);
+  await input.repo.usageEvents.put({ id: 'event_other', customerId: 'cust_other', meter: 'call', quantity: 8, occurredAt: input.period.start, receivedAt: input.clock.now(), periodStart: input.period.start, idempotencyKey: 'event_other', meta: null });
+  const err = await settleDuePeriods({ ...input, providers: { stripe: input.provider } }).then(() => null, (e) => e);
+  expect(err?.code).toBe('usage_settlement_errors');
+  expect(err?.details.errors).toMatchObject([{ subscriptionId: 'sub_other', code: 'invalid_usage_period' }]);
+  expect(input.provider.calls).toHaveLength(1);
 });

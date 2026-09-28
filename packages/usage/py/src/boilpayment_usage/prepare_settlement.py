@@ -78,7 +78,8 @@ async def prepare_settlement(
             "Usage amount exceeds safe integer range", "invalid_usage_quantity"
         )
     customer = await repo.customers.get(sub.customer_id)
-    customer_ref = (
+    # EC:A60 A75 -- the customer key the billing key was issued under (Toss refuses any other).
+    customer_ref = sub.billing_customer_ref or (
         next(
             (
                 ref.ref

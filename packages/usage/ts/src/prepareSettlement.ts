@@ -28,7 +28,8 @@ export async function prepareSettlement(input: SettlePeriodInput): Promise<Prepa
   const targetAmount = Math.max(0, total - policy.usage.includedQuantity) * unitPrice;
   if (!Number.isSafeInteger(targetAmount)) throw new PaymentKitError('Usage amount exceeds safe integer range', 'invalid_usage_quantity');
   const customer = await repo.customers.get(sub.customerId);
-  const customerRef = customer?.providerRefs.find((ref) => ref.provider === provider.name)?.ref;
+  // EC:A60 A75 — the customer key the billing key was issued under (Toss refuses any other).
+  const customerRef = sub.billingCustomerRef || customer?.providerRefs.find((ref) => ref.provider === provider.name)?.ref;
   const policyHash = hashPayload({ currency, unitPrice, included: policy.usage.includedQuantity, provider: provider.name, customerRef, billingKey: sub.billingKey, periodEnd: period.end.getTime() });
   if (operations.some((operation) => operation.payloadHash !== policyHash)) throw new PaymentKitError('Resolve existing settlement before changing its billing rules', 'usage_billing_policy_changed');
   let settledAmount = 0;

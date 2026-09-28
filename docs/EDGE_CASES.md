@@ -89,6 +89,7 @@
 | A72 | `startSubscription` 이 `multiplePerCustomer=deny` 를 무시해 requestId 가 다르면 활성 구독이 둘, 매달 두 번 청구. 두 번째 가입의 청구가 거절되면 `incomplete` 행이 현재 구독이 되어 결제한 구독의 크레딧을 못 씀(round-9 A9-8 A9-9) | (구현 규칙) | 정책 `subscription.multiplePerCustomer` 가 `deny` 이면 고객 단위 리스 안에서 살아 있는 구독(`active`·`trialing`·`past_due`·`incomplete`)을 확인하고 있으면 `subscription_exists` 로 청구 전에 거절한다. 첫 청구가 거절된 가입은 `expired` 로 닫고, 같은 requestId 는 계속 `subscription_start_declined` 다. 생성 코드의 현재 구독은 살아 있는 구독을 먼저 고른다 | lifecycle · cli | P0 |
 | A73 | 밴된 고객이 계속 청구됨 — 취소된 구독을 `reactivate` 하면 tick 이 청구하고, 충전 결제는 받아서 쓸 수 없는 크레딧을 줌(round-9 A9-10) | (구현 규칙) | 새 청구(`chargeAttempt`: 갱신·dunning 재시도·가입)는 고객이 `banned` 면 쓰기·전송 전에 `customer_banned` 로 거절한다. `reactivate` 도 `customer_banned` 로 거절하고, `startCheckout` 은 `frozen`·`banned` 고객을 `customer_<status>` 로 거절한다 | lifecycle · cs | P0 |
 | A74 | Toss·PortOne 구독 플랜에도 `startCheckout` 이 결제창 주문을 만들어, 승인하면 돈만 받고 등록은 `use_start_subscription` 으로 거절됨(round-9 A9-18) | (구현 규칙) | 자체 청구 결제사의 구독 플랜은 `startCheckout` 에서 주문을 만들기 전에 `use_start_subscription` 으로 거절한다 | cs | P0 |
+| A75 | 초과 사용량 청구가 빌링키를 발급받은 customerKey 대신 고객의 결제사 참조를 보내 Toss 가 거절하고, 그러면 `closePeriods` 전체가 멈춰 다른 고객의 초과 청구도 빠짐(round-9 A9-11) | (구현 규칙) | 초과 청구는 구독의 `billingCustomerRef` 를 먼저 보낸다(A60 과 같은 규칙). `settleDuePeriods` 는 구독 하나의 오류를 모아 두고 나머지 구독을 모두 처리한 뒤 `usage_settlement_errors`(각 구독의 코드·메시지)로 알린다. 첫 청구가 성공한 적 없는 닫힌 가입은 사용량 주인 후보에서 뺀다 | usage | P0 |
 
 ## B. 크레딧 원장
 

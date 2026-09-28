@@ -85,7 +85,38 @@ def test_unproven_historical_period_is_not_guessed():
                 providers={"stripe": input["provider"]},
                 clock=input["clock"],
             )
-        assert error.value.code == "invalid_usage_period"
+        assert error.value.code == "usage_settlement_errors"
+        assert [e["code"] for e in error.value.details["errors"]] == ["invalid_usage_period"]
         assert not input["provider"].calls
+
+    anyio.run(run)
+
+
+def test_a75_billing_customer_ref_is_sent():
+    async def run():
+        input = await given()
+        input["sub"] = replace(input["sub"], billing_customer_ref="billing_customer_key")
+        await input["repo"].subscriptions.put(input["sub"])
+        await settle_period(**input)
+        assert [c[2] for c in input["provider"].calls] == ["billing_customer_key"]
+
+    anyio.run(run)
+
+
+def test_a75_one_failure_does_not_stop_the_others():
+    async def run():
+        input = await given()
+        await input["repo"].subscriptions.put(input["sub"])
+        other = replace(input["sub"], id="sub_other", customer_id="cust_other",
+                        current_period=Period(start=input["period"].end, end=datetime(2026, 7, 1, tzinfo=UTC)))
+        await input["repo"].subscriptions.put(other)
+        events = await input["repo"].usage_events.list(customer_id=input["sub"].customer_id)
+        await input["repo"].usage_events.put(replace(events[0], id="event_other", customer_id="cust_other", idempotency_key="event_other"))
+        with pytest.raises(PaymentKitError) as error:
+            await settle_due_periods(policy=input["policy"], repo=input["repo"], ledger=input["ledger"],
+                                     providers={"stripe": input["provider"]}, clock=input["clock"])
+        assert error.value.code == "usage_settlement_errors"
+        assert [(e["subscription_id"], e["code"]) for e in error.value.details["errors"]] == [("sub_other", "invalid_usage_period")]
+        assert len(input["provider"].calls) == 1
 
     anyio.run(run)
