@@ -173,7 +173,7 @@ export function generateIndexPy(config: PaykitConfig): string {
   if (hasCredits) {
     l.push(`    class _CreditsDeps:`);
     l.push(`        async def topup(self, *, customer_id: str, payment: Any, credits: int | None, policy: Any, ledger: Any, clock: Any, repo: Any) -> Any:`);
-    l.push(`            return await apply_purchased_grant(ApplyPurchasedGrantInput(customer_id=customer_id, payment_id=payment.id, policy=policy, providers=providers, repo=repo, ledger=ledger, clock=clock, ids=ids, grants=support_grants))`);
+    l.push(`            return await apply_purchased_grant(ApplyPurchasedGrantInput(customer_id=customer_id, payment_id=payment.id, policy=policy, providers=providers, repo=repo, ledger=ledger, clock=clock, ids=ids, notifier=notifier, grants=support_grants))`);
     l.push('');
   }
   l.push(`    class _CsDeps:`);

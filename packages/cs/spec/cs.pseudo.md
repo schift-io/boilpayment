@@ -289,6 +289,28 @@ Toss·PortOne 결제는 주문번호(orderId / paymentId)가 이 체크아웃과
   (Toss 거래 조회는 새 결제를 늦게 보이고, endDate 는 다음 초로 올린다)
 ```
 
+## [EC:A85] banned 뒤 도착한 일회성 결제 — 지급 대신 환불 검토
+
+```pseudo
+registerCompletedCheckout: 결제와 purchase.entitlement 를 기록·검증만 한다(지급 없음)
+payment.succeeded webhook / recoverMissingGrant / reconcile:
+  모두 applyPurchasedGrant({ customerId, paymentId, ... }) 로 수렴한다
+
+applyPurchasedGrant, snapshot.plan.interval is null:
+  customer.status != 'banned': 기존 topup 지급을 그대로 실행한다  # frozen 포함, 변경 없음
+  customer.status == 'banned':
+    key = "topup:{payment.id}"                         # 실제 지급과 같은 operation key
+    runIdempotent(key, kind='credits.topup'):
+      같은 결제를 참조하는 기존 refund case 가 없으면:
+        case = openCase(kind='refund', referenceId=payment.id)
+        escalate(case, 'paid top-up belongs to a banned customer; refund review required')
+        # cs.needs_human 한 번
+      return {entry:null, duplicated:false, deferred:true} # ledger append 없음
+
+웹훅 재전송·누락 복구는 저장된 no-grant 결과를 재생해 case·알림을 더 만들지 않는다.
+구독 지급/갱신에는 이 분기를 적용하지 않는다(갱신의 customer_banned 규칙은 lifecycle 소유).
+```
+
 ## [EC:B11][EC:D9] dispute
 
 ```pseudo

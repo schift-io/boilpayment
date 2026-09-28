@@ -99,6 +99,7 @@
 | A82 | Polar 플랜 변경 주문의 결제 웹훅이 변경 호출이 돌아오기 전에 오면, 기다리는 차액이 아직 없어 200 으로 끝나고 크레딧이 지급되지 않음(round-10 A10-3) | (구현 규칙) | 기다리는 차액 연산을 결제사 호출 전에 쓰고, 키에서 플랜을 뺀다(구독+기간 시작). 변경 호출이 실패하면 그 연산을 failed 로 닫는다 | lifecycle | P0 |
 | A83 | 결제사가 확정하지 않은(pending)·거절한(failed) 초과 사용량 청구가 첫 `closePeriods` 에서만 오류로 보이고 이후 실행은 조용히 성공함(round-10 A10-5) | (구현 규칙) | 정산 결과가 pending·failed 인 기간은 실행마다 `usage_settlement_errors` 목록에 `overage_charge_pending`/`overage_charge_failed` 로 남는다 | usage | P0 |
 | A84 | Polar 업그레이드의 변경 응답이 유실돼 재시도하면 이미 지급된 대기 차액이 다시 열리고, 같은 주문이 새 이벤트 ID 로 다시 오면 차액이 두 번 지급됨. 키에 플랜이 없어 같은 기간의 두 번째 변경이 첫 변경의 대기분을 덮어씀(round-10 A10-8, A82 회귀) | (구현 규칙) | 대기 차액은 같은 업그레이드(from->to)의 in_progress·done 작업을 다시 쓰지 않는다(failed 만 다시 연다). 같은 기간에 다른 변경의 주문이 아직 미결제면 `upgrade_payment_pending` 으로 거절한다. 지급 멱등 키는 `grant:<대기 키>:<from->to>` 로, 웹훅 시점의 구독 플랜과 무관하다 | lifecycle | P0 |
+| A85 | 충전 체크아웃 뒤 CS 분쟁 패소로 고객이 banned 됐지만 결제가 뒤늦게 성공하면, 쓸 수 없는 크레딧을 지급하고 돈은 받은 채 남음(round-10 A10-6) | (구현 규칙) | 일회성 결제는 결제 행을 기록한 뒤 고객이 banned 면 크레딧을 지급하지 않고, 결제 ID를 참조하는 환불 검토 CS 건(`refund`)을 `needs_human` 으로 한 번만 열어 `cs.needs_human` 을 한 번 보낸다. 웹훅 재전송·누락 복구(`recoverMissingGrant`·reconcile)는 같은 topup 멱등 키를 재생한다. frozen 은 기존대로 지급한다 | cs · credits | P0 |
 
 ## B. 크레딧 원장
 
