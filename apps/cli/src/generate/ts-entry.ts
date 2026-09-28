@@ -363,7 +363,7 @@ export function generateIndexTs(config: PaykitConfig): string {
   l.push('');
   l.push(`  /**`);
   l.push(`   * EC:E3 E4 E5 E13 — webhook receipt is provider-scoped. Route \`${config.infra.webhookPath}/:provider\``);
-  l.push(`   * to this (see ./webhook.ts for framework snippets), or pass { provider } explicitly when only`);
+  l.push(`   * to this (INTEGRATION.md §3), or pass { provider } explicitly when only`);
   l.push(`   * one provider is configured.`);
   l.push(`   */`);
   const tossOrigin = config.providers.includes('toss'); // EC:E18 — Toss allowlists by peer address

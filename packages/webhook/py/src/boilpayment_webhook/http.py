@@ -1,9 +1,8 @@
 # HTTP adapter — framework-agnostic. See spec/webhook.pseudo.md.
 # NOTE: ts has both create_node_handler and a Fetch-API (Request/Response) adapter;
 # Fetch's Request/Response are JS/browser/Node-runtime types with no Python stdlib
-# equivalent, so only the framework-agnostic handler is mirrored here. Concrete
-# framework glue (FastAPI/Django) is documented as example usage in examples/, per
-# ARCHITECTURE.md §6 ("프레임워크 무관 핸들러 + 예시 주석").
+# equivalent, so only the framework-agnostic handler is mirrored here. The kit ships no
+# framework glue: INTEGRATION.md §3 lists what to pass (raw body, headers, socket address).
 from __future__ import annotations
 
 import dataclasses

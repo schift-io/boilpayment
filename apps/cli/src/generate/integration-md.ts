@@ -236,41 +236,34 @@ export function generateIntegrationMd(config: PaykitConfig): string {
   l.push('파싱한 객체를 다시 문자열로 만들면 바이트가 달라져 검증이 실패합니다.');
   l.push('');
   const tossHook = config.providers.includes('toss');
+  const multi = config.providers.length > 1;
+  l.push('웹 프레임워크와 무관합니다. 요청에서 세 가지를 꺼내 넘기고, 돌려받은 `status` 로 응답하세요.');
+  l.push('');
+  l.push('| 넘길 것 | 어디서 |');
+  l.push('|---|---|');
+  l.push('| 원본 바디 | 요청 바디 바이트를 UTF-8 문자열로 (파싱하지 않은 것) |');
+  l.push('| 헤더 | 요청 헤더 전체를 이름→값 객체로 |');
+  if (tossHook) l.push('| 연결 주소 | 요청을 보낸 소켓의 IP (`X-Forwarded-For` 같은 헤더 말고) |');
+  if (multi) l.push('| provider | 경로 파라미터 등으로 어느 결제사 웹훅인지 (`' + config.providers.join('` · `') + '`) |');
+  l.push('');
   if (tossHook) {
     l.push('**Toss 웹훅은 서명이 없어 Toss 가 공개한 발신 주소에서 온 것만 받습니다** (EC:E18). 그래서 연결한');
-    l.push('소켓의 주소를 `remoteAddress` 로 넘겨야 합니다. 헤더(`X-Forwarded-For`)는 누구나 쓸 수 있어 쓰지 않습니다.');
-    l.push('Next.js 라우트 핸들러는 소켓 주소를 주지 않으므로 Toss 웹훅은 Express 같은 서버로 받으세요.');
+    l.push('소켓의 주소를 넘겨야 합니다. 헤더는 누구나 쓸 수 있어 쓰지 않습니다. 소켓 주소를 주지 않는 런타임에서는 Toss 웹훅을 받을 수 없습니다.');
     l.push('');
   }
+  const tsOpts = [multi ? 'provider' : '', tossHook ? 'remoteAddress' : ''].filter(Boolean);
+  const pyOpts = [multi ? 'provider=provider' : '', tossHook ? 'remote_address=remote_address' : ''].filter(Boolean);
   if (ts(config)) {
     l.push('```ts');
-    if (tossHook) {
-      l.push('// Express — raw body 로 받습니다');
-      l.push(`app.post('${webhookPath}', express.raw({ type: '*/*' }), async (req, res) => {`);
-      l.push('  const raw = req.body.toString(\'utf8\');       // ← 파싱하지 말 것');
-      l.push('  const result = await kit.handleWebhook(raw, req.headers as Record<string, string>, { remoteAddress: req.socket.remoteAddress });');
-      l.push('  res.status(result.status).end();');
-      l.push('});');
-    } else {
-      l.push('// Next.js app router — app' + webhookPath + '/route.ts');
-      l.push("export async function POST(req: Request) {");
-      l.push('  const raw = await req.text();                 // ← 파싱하지 말 것');
-      l.push('  const headers = Object.fromEntries(req.headers);');
-      l.push('  const res = await kit.handleWebhook(raw, headers);');
-      l.push('  return new Response(null, { status: res.status });');
-      l.push('}');
-    }
+    l.push(`const result = await kit.handleWebhook(rawBody, headers${tsOpts.length ? `, { ${tsOpts.join(', ')} }` : ''});`);
+    l.push('// 응답: HTTP result.status, 바디 없음');
     l.push('```');
     l.push('');
   }
   if (py(config)) {
     l.push('```python');
-    l.push('# FastAPI');
-    l.push(`@app.post("${webhookPath}")`);
-    l.push('async def paykit_webhook(request: Request):');
-    l.push('    raw = (await request.body()).decode()        # ← 파싱하지 말 것');
-    l.push(`    res = await kit["handle_webhook"](raw, dict(request.headers)${tossHook ? ', remote_address=request.client.host if request.client else None' : ''})`);
-    l.push('    return Response(status_code=res.status)            # ReceiveResult: 속성으로 읽습니다');
+    l.push(`result = await kit["handle_webhook"](raw_body, headers${pyOpts.length ? ', ' + pyOpts.join(', ') : ''})`);
+    l.push('# 응답: HTTP result.status (ReceiveResult 의 속성), 바디 없음');
     l.push('```');
     l.push('');
   }

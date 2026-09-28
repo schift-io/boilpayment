@@ -284,7 +284,6 @@ cs (ts: boilpayment-cs · py: boilpayment_cs)
 2. 생성:
    - `paykit/` — 선택 언어로 모듈 조합한 진입점 (`createPaymentKit(config, deps)` / `create_payment_kit`)
    - `paykit/migrations/*.sql` — 선택 모듈분
-   - `paykit/webhook.(ts|py)` — 프레임워크 무관 핸들러 + Next.js/Express/FastAPI 예시 주석
    - `.env.example` — provider 키 · DB URL · 알림 키
    - `POLICY.md` — 정책 요약 (사람용)
 3. 약관 생성 명령은 미지원.

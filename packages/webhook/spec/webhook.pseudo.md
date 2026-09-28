@@ -22,8 +22,7 @@ with the right async method shape works, real or fake.
 ```
 Python: ReceiveResult 는 dataclass — result.status (result["status"] 는 TypeError, 모든 웹훅이 500)
 Toss (서명 없음, 발신 주소 허용목록 EC:E18): 소켓 주소를 remote_address / remoteAddress 로 넘긴다
-  FastAPI request.client.host · Django request.META["REMOTE_ADDR"] · Express req.socket.remoteAddress
-  Next.js 라우트 핸들러는 소켓 주소가 없다 -> Toss 는 Express 등으로 받는다
+  (요청을 보낸 소켓의 IP. 소켓 주소를 주지 않는 런타임에서는 Toss 웹훅을 받을 수 없다)
 ```
 
 ## [EC:E5] webhook.receive — store immediately, 200, process async

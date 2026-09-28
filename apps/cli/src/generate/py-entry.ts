@@ -310,7 +310,7 @@ export function generateIndexPy(config: PaykitConfig): string {
   l.push('');
   const tossOrigin = config.providers.includes('toss'); // EC:E18 — Toss allowlists by peer address
   l.push(`    async def handle_webhook(raw_body: str, headers: dict[str, str], provider: str | None = None${tossOrigin ? ', remote_address: str | None = None' : ''}):`);
-  l.push(`        """EC:E3 E4 E5 E13 — webhook receipt is provider-scoped. See ./webhook.py for framework snippets."""`);
+  l.push(`        """EC:E3 E4 E5 E13 — webhook receipt is provider-scoped. See INTEGRATION.md §3."""`);
   l.push(`        configured = list(providers.keys())`);
   l.push(`        provider_name = provider or (configured[0] if len(configured) == 1 else None)`);
   l.push(`        if provider_name is None:`);

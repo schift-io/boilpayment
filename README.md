@@ -49,7 +49,6 @@ POLICY.md               the rules you chose, in plain language
 INTEGRATION.md          wiring guide with the exact function names generated for you
 .env.example            provider keys, DATABASE_URL, notification settings
 paykit/index.ts|py      createPaymentKit / create_payment_kit
-paykit/webhook.ts|py    framework-agnostic webhook handler
 paykit/migrations/*.sql Postgres schema (versioned)
 ```
 
@@ -92,8 +91,9 @@ const checkout = await kit.checkout({
 // after the provider confirms payment, from a trusted server callback:
 await kit.registerCompletedCheckout({ customerId, checkoutId: checkout.id, paymentRef });
 
-// webhook route: pass the raw body, not parsed JSON
-const res = await kit.handleWebhook(await req.text(), Object.fromEntries(req.headers));
+// webhook: any HTTP server. Pass the RAW body string (not parsed JSON) and the request headers;
+// with several providers pass { provider }, for Toss also { remoteAddress } (the socket's IP).
+const { status } = await kit.handleWebhook(rawBody, headers);   // answer with HTTP `status`, no body
 
 // refund by rule, recover a missing grant
 await kit.support.requestRefund({ customerId, paymentId, requestId });
@@ -115,7 +115,7 @@ await kit["initialize"]()
 checkout = await kit["checkout"](customer_id=cid, plan_id=plan_id, provider="stripe", currency="USD",
                                  request_id=attempt_id, success_url=ok_url, cancel_url=back_url)
 await kit["register_completed_checkout"](customer_id=cid, checkout_id=checkout.id, payment_ref=ref)
-res = await kit["handle_webhook"]((await request.body()).decode(), dict(request.headers))
+result = await kit["handle_webhook"](raw_body, headers)  # raw body str + headers dict; answer with result.status
 await kit["support"]["request_refund"](customer_id=cid, payment_id=pid, request_id=req_id)
 ```
 

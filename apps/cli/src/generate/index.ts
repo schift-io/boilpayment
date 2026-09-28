@@ -1,6 +1,6 @@
 // Orchestrates all generators. Writes into `outDir`:
 //   paykit.config.json, POLICY.md, INTEGRATION.md, .env.example   (project root)
-//   paykit/index.ts, paykit/index.py, paykit/webhook.ts, paykit/webhook.py, paykit/migrations/*.sql
+//   paykit/index.ts, paykit/index.py, paykit/migrations/*.sql
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { resolvePolicy } from 'boilpayment-core';
@@ -9,7 +9,6 @@ import { toPaykitConfig } from '../wizard-state.js';
 import { writeConfig } from '../config.js';
 import { generateIndexTs } from './ts-entry.js';
 import { generateIndexPy } from './py-entry.js';
-import { generateWebhookTs, generateWebhookPy } from './webhook.js';
 import { generateMigrations, type MigrationsResult } from './migrations.js';
 import { generateEnvExample } from './env.js';
 import { generatePolicyMd } from './policy-md.js';
@@ -59,11 +58,9 @@ export async function generateAll(config: PaykitConfig, outDir: string, opts: Ge
 
   if (config.languages.includes('ts')) {
     await writeFile(path.join(paykitDir, 'index.ts'), generateIndexTs(config));
-    await writeFile(path.join(paykitDir, 'webhook.ts'), generateWebhookTs(config));
   }
   if (config.languages.includes('py')) {
     await writeFile(path.join(paykitDir, 'index.py'), generateIndexPy(config));
-    await writeFile(path.join(paykitDir, 'webhook.py'), generateWebhookPy(config));
     await writeFile(path.join(paykitDir, '__init__.py'), '');
   }
   // EC:M1 — only for developers who already have paying customers.
