@@ -39,13 +39,13 @@
   },
   "dependencies": {
     "boilpayment-core": "workspace:*",
-    "pg": "^8.13.0"
+    "pg": "^8.13.0",
+    "@types/pg": "^8.11.0"
   },
   "devDependencies": {
     "typescript": "^5.6.0",
     "@types/node": "^22.0.0",
-    "vitest": "^2.1.0",
-    "@types/pg": "^8.11.0"
+    "vitest": "^2.1.0"
   },
   "homepage": "https://github.com/schift-io/boilpayment#readme",
   "repository": {
