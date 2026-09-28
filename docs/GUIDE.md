@@ -96,7 +96,8 @@ checkout ──► provider payment page ──► registerCompletedCheckout ─
 
    | Provider | `paymentRef` | Where you get it |
    |---|---|---|
-   | Stripe | PaymentIntent id (`pi_...`) | the Checkout Session's `payment_intent` after it completes |
+   | Stripe, one-time | PaymentIntent id (`pi_...`) | the Checkout Session's `payment_intent` after it completes |
+   | Stripe, subscription | first Invoice id (`in_...`) | the Checkout Session's `invoice`; also pass `subscriptionRef` (`sub_...`) |
    | Polar | Order id | the order created by the checkout (`order.paid` webhook or the Orders API) |
    | Toss | `paymentKey` | the widget's success callback; call `kit.deps.providers.toss.confirmPayment` first |
    | PortOne | the checkout's `providerRef` | you pass it to the PortOne browser SDK as `paymentId` |
