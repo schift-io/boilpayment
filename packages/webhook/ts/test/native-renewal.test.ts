@@ -142,11 +142,18 @@ describe('SB-03 Stripe trial subscription checkout persistence', () => {
       status: 'trialing', currentPeriod: trialPeriod, anchorDay: 15, cancelAtPeriodEnd: false, graceUntil: null,
       billingKey: null, scheduledPlanId: null, version: 0, createdAt: clock.now(),
     };
+    const openingInvoice: Payment = {
+      id: 'in_trial_opening', customerId: '', provider: 'stripe', providerRef: 'in_trial_opening', subscriptionId: subscriptionRef,
+      amount: { amountMinor: 0, currency: 'USD' }, status: 'succeeded', kind: 'subscription', period: trialPeriod,
+      occurredAt: trialPeriod.start, failure: null, cashReceipt: null, raw: { billing_reason: 'subscription_create' },
+    };
     const renewal: Payment = {
       id: 'in_trial_paid', customerId: '', provider: 'stripe', providerRef: 'in_trial_paid', subscriptionId: subscriptionRef,
       amount: { amountMinor: 2000, currency: 'USD' }, status: 'succeeded', kind: 'subscription', period: paidPeriod,
-      occurredAt: paidPeriod.start, failure: null, cashReceipt: null,
+      occurredAt: paidPeriod.start, failure: null, cashReceipt: null, raw: { billing_reason: 'subscription_cycle' },
     };
+    let remotePayment = openingInvoice;
+    let lifecycleCalls = 0;
     const verify = ({ rawBody }: { headers: Record<string, string>; rawBody: string }): NormalizedEvent => {
       const raw = JSON.parse(rawBody);
       const object = raw.data.object;
@@ -159,17 +166,22 @@ describe('SB-03 Stripe trial subscription checkout persistence', () => {
     };
     const provider = new FakeProvider({
       name: 'stripe', verify,
-      getPaymentImpl: () => renewal,
+      getPaymentImpl: () => remotePayment,
       getSubscriptionImpl: () => ({ ...remoteSub, status: remoteStatus, currentPeriod: remoteStatus === 'trialing' ? trialPeriod : paidPeriod }),
     });
     const lifecycle: LifecycleDeps = {
       onRenewalPaid: async (input) => {
+        lifecycleCalls += 1;
         await input.ledger.append({
           customerId: input.sub.customerId, pool: 'paid', kind: 'grant', amount: 100,
           unitPriceMinor: null, currency: null, expiresAt: input.payment.period?.end ?? null, source: 'subscription',
           reference: { subscriptionId: input.sub.id, paymentId: input.payment.id },
           idempotencyKey: `renewal:${input.payment.id}`, actor: 'system', reason: null,
         });
+        const current = await input.repo.subscriptions.get(input.sub.id);
+        if (current && input.payment.period) {
+          await input.repo.subscriptions.put({ ...current, status: 'active', currentPeriod: input.payment.period });
+        }
       },
       dunning: { onPaymentFailed: async () => {} },
     };
@@ -178,6 +190,10 @@ describe('SB-03 Stripe trial subscription checkout persistence', () => {
       kind: 'checkout.entitlement', payloadHash: 'snapshot', status: 'done',
       result: { customerId: 'cust_local', provider: 'stripe', plan: { id: 'plan_trial' }, price: { currency: 'USD' } },
       error: null, createdAt: clock.now(), completedAt: clock.now(), attempts: 1,
+    });
+    await repo.plans.put({
+      id: 'plan_trial', name: 'Trial plan', interval: 'month', creditsPerPeriod: 100, usageIncluded: 0,
+      trialDays: 14, prices: [{ currency: 'USD', amountMinor: 2000, providerPriceRefs: { stripe: 'price_trial' } }],
     });
     const handlers = defaultHandlers({ policy: DEFAULT_POLICY, ledger, repo, notifier, clock, ids: new SequentialIdGen('pay_'), lifecycle });
     const deliver = async (raw: Record<string, unknown>) => {
@@ -197,13 +213,41 @@ describe('SB-03 Stripe trial subscription checkout persistence', () => {
     });
     expect((await ledger.balance('cust_local', 'paid', clock.now())).available).toBe(0);
 
+    const opening = await deliver({
+      id: 'evt_trial_opening', type: 'invoice.paid',
+      data: { object: { id: openingInvoice.providerRef, customer: 'cus_provider', subscription: subscriptionRef } },
+    });
+    const openingRedelivery = await deliver({
+      id: 'evt_trial_opening_redelivery', type: 'invoice.paid',
+      data: { object: { id: openingInvoice.providerRef, customer: 'cus_provider', subscription: subscriptionRef } },
+    });
+    expect(opening?.status).toBe('processed');
+    expect(openingRedelivery?.status).toBe('processed');
+    expect(await repo.payments.list({ providerRef: openingInvoice.providerRef } as Partial<Payment>)).toEqual([
+      expect.objectContaining({
+        amount: { amountMinor: 0, currency: 'USD' },
+        raw: expect.objectContaining({ boilpaymentTrialOpeningInvoice: true }),
+      }),
+    ]);
+    expect(await repo.subscriptions.get(subscriptionId)).toMatchObject({ status: 'trialing', currentPeriod: trialPeriod });
+    expect((await ledger.balance('cust_local', 'paid', clock.now())).available).toBe(0);
+    expect(lifecycleCalls).toBe(0);
+
+    remotePayment = renewal;
     remoteStatus = 'active';
     const paid = await deliver({
       id: 'evt_trial_paid', type: 'invoice.paid',
       data: { object: { id: renewal.providerRef, customer: 'cus_provider', subscription: subscriptionRef } },
     });
+    const paidRedelivery = await deliver({
+      id: 'evt_trial_paid_redelivery', type: 'invoice.paid',
+      data: { object: { id: renewal.providerRef, customer: 'cus_provider', subscription: subscriptionRef } },
+    });
     expect(paid?.status).toBe('processed');
+    expect(paidRedelivery?.status).toBe('processed');
     expect((await ledger.balance('cust_local', 'paid', paidPeriod.start)).available).toBe(100);
+    expect(lifecycleCalls).toBe(2);
+    expect(await repo.subscriptions.get(subscriptionId)).toMatchObject({ status: 'active', currentPeriod: paidPeriod });
     expect(await repo.payments.list({ providerRef: renewal.providerRef } as Partial<Payment>)).toHaveLength(1);
   });
 

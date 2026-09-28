@@ -25,6 +25,18 @@ function rawContains(value: unknown, expected: string): boolean {
   return false;
 }
 
+function rawField(value: unknown, field: string): unknown {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  return Object.entries(value).find(([key]) => key === field)?.[1];
+}
+
+function markTrialOpeningInvoice(value: unknown): Record<string, unknown> {
+  const raw = value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value))
+    : {};
+  return { ...raw, boilpaymentTrialOpeningInvoice: true };
+}
+
 async function openReconcileMismatch(input: {
   readonly sub: Subscription; readonly payment: Payment; readonly deps: RecoverMissingGrantsInput;
   readonly actualPlanId: string | null; readonly reason?: string;
@@ -140,13 +152,17 @@ export async function recoverMissingGrants(input: RecoverMissingGrantsInput): Pr
         if (!current || (current.status !== 'active' && current.status !== 'past_due')) continue;
         const existing = (await input.repo.payments.list({ provider: current.provider, providerRef: remote.providerRef }))[0];
         if (existing && (existing.customerId !== current.customerId || existing.subscriptionId !== current.id)) continue;
+        const raw = remote.raw ?? existing?.raw;
+        const trialOpeningInvoice = rawField(existing?.raw, 'boilpaymentTrialOpeningInvoice') === true;
         let payment: Payment = {
           id: existing?.id ?? input.ids.newId(), customerId: current.customerId, provider: current.provider,
           providerRef: remote.providerRef, subscriptionId: current.id, amount: remote.amount, status: remote.status,
           kind: 'subscription', period: remote.period ?? existing?.period ?? null, occurredAt: remote.occurredAt, failure: remote.failure,
-          cashReceipt: existing?.cashReceipt ?? null, raw: remote.raw, providerRefAliases: remote.providerRefAliases,
+          cashReceipt: existing?.cashReceipt ?? null, raw: trialOpeningInvoice ? markTrialOpeningInvoice(raw) : raw,
+          providerRefAliases: remote.providerRefAliases,
         };
         await input.repo.payments.put(payment);
+        if (trialOpeningInvoice) continue;
         const resolved = await resolveReconciledPlan({ sub: current, payment, deps: input });
         if (resolved.mismatchCase && !reconciledCases.some((item) => item.id === resolved.mismatchCase?.id)) {
           reconciledCases.push(resolved.mismatchCase);
@@ -184,6 +200,7 @@ export async function recoverMissingGrants(input: RecoverMissingGrantsInput): Pr
   const results: CsCase[] = [...reconciledCases];
   for (const payment of payments) {
     if ((input.since && payment.occurredAt < input.since) || payment.kind === 'overage') continue;
+    if (rawField(payment.raw, 'boilpaymentTrialOpeningInvoice') === true) continue;
     // EC:A46 — a declined charge bought nothing, and a self-scheduled attempt still pending belongs to
     // the scheduler (EC:A36 A38): neither is a missing grant.
     if (payment.status === 'failed') continue;

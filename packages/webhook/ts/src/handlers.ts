@@ -314,6 +314,24 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
         await parkLateRenewal(storedSub, payment);
         return;
       }
+      const storedPlan = storedSub ? await repo.plans.get(storedSub.planId) : null;
+      const paymentRaw = record(payment.raw);
+      const trialOpeningInvoice = ctx.provider.name === 'stripe'
+        && payment.provider === 'stripe'
+        && payment.kind === 'subscription'
+        && payment.status === 'succeeded'
+        && payment.amount.amountMinor === 0
+        && paymentRaw?.['billing_reason'] === 'subscription_create'
+        && storedSub?.status === 'trialing'
+        && storedPlan !== null
+        && storedPlan.trialDays > 0;
+      if (trialOpeningInvoice) {
+        await repo.payments.put({
+          ...payment,
+          raw: { ...(paymentRaw ?? {}), boilpaymentTrialOpeningInvoice: true },
+        });
+        return;
+      }
       if (lifecycle) {
         // EC:K1 call-site audit — resolveLocalSubscription reads the row, then lifecycle.onRenewalPaid
         // does real work (rollover, grantForPeriod, ledger appends) before its own

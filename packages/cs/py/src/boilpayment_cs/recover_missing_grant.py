@@ -90,6 +90,16 @@ def _raw_contains(value: Any, expected: str) -> bool:
     return False
 
 
+def _preserved_trial_opening_invoice_raw(
+    payment: Payment, existing: Payment | None,
+) -> dict[str, Any] | None:
+    raw = payment.raw if isinstance(payment.raw, dict) else {}
+    existing_raw = existing.raw if existing and isinstance(existing.raw, dict) else {}
+    if existing_raw.get("boilpaymentTrialOpeningInvoice") is True:
+        return {**(raw or existing_raw), "boilpaymentTrialOpeningInvoice": True}
+    return None
+
+
 async def _open_reconcile_mismatch(
     sub: Subscription, payment: Payment, input: RecoverMissingGrantsInput,
     actual_plan_id: str | None, reason: str | None = None,
@@ -347,6 +357,14 @@ async def recover_missing_grants(input: RecoverMissingGrantsInput) -> list[CsCas
                     cash_receipt=existing.cash_receipt if existing else None,
                     raw=remote.raw, provider_ref_aliases=remote.provider_ref_aliases,
                 )
+                trial_opening_raw = _preserved_trial_opening_invoice_raw(
+                    payment, existing,
+                )
+                if trial_opening_raw is not None:
+                    await input.repo.payments.put(
+                        replace(payment, raw=trial_opening_raw)
+                    )
+                    continue
                 await input.repo.payments.put(payment)
                 plan, mismatch_case = await _resolve_reconciled_plan(current, payment, input)
                 if mismatch_case is not None and all(case.id != mismatch_case.id for case in reconciled_cases):
@@ -398,6 +416,8 @@ async def recover_missing_grants(input: RecoverMissingGrantsInput) -> list[CsCas
         if payment.status == "failed":
             continue
         raw = payment.raw if isinstance(payment.raw, dict) else {}
+        if raw.get("boilpaymentTrialOpeningInvoice") is True:
+            continue
         if payment.status == "pending" and raw.get("boilpaymentAttemptKey"):
             continue
         entries = await input.ledger.entries(payment.customer_id, kind="grant")

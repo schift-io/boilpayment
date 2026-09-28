@@ -25,6 +25,8 @@ from boilpayment_core import (
     Operation,
     Payment,
     Period,
+    Plan,
+    PlanPrice,
     SequentialIdGen,
     Subscription,
 )
@@ -235,7 +237,20 @@ def test_sb_03_trial_checkout_persists_subscription_then_first_paid_invoice_gran
             version=0,
             created_at=clock.now(),
         )
-        renewal = Payment(
+        opening_invoice = Payment(
+            id="in_trial_opening",
+            customer_id="",
+            provider="stripe",
+            provider_ref="in_trial_opening",
+            subscription_id=subscription_ref,
+            amount=Money(amount_minor=0, currency="USD"),
+            status="succeeded",
+            kind="subscription",
+            period=trial_period,
+            occurred_at=clock.now(),
+            raw={"billing_reason": "subscription_create"},
+        )
+        paid_invoice = Payment(
             id="in_trial_paid",
             customer_id="",
             provider="stripe",
@@ -246,7 +261,9 @@ def test_sb_03_trial_checkout_persists_subscription_then_first_paid_invoice_gran
             kind="subscription",
             period=paid_period,
             occurred_at=paid_period.start,
+            raw={"billing_reason": "subscription_cycle"},
         )
+        current_payment = {"value": opening_invoice}
 
         def verify(headers, raw_body):
             raw = json.loads(raw_body)
@@ -271,7 +288,7 @@ def test_sb_03_trial_checkout_persists_subscription_then_first_paid_invoice_gran
         provider = FakeProvider(
             name="stripe",
             verify=verify,
-            get_payment_impl=lambda ref: renewal,
+            get_payment_impl=lambda ref: current_payment["value"],
             get_subscription_impl=lambda ref: dataclasses.replace(
                 remote_sub,
                 status=state["status"],
@@ -304,6 +321,12 @@ def test_sb_03_trial_checkout_persists_subscription_then_first_paid_invoice_gran
                         subscription_id=sub.id, payment_id=payment.id
                     ),
                 ))
+                fresh = await repo.subscriptions.get(sub.id)
+                await repo.subscriptions.put(dataclasses.replace(
+                    fresh,
+                    status="active",
+                    current_period=payment.period,
+                ))
 
         operation_key = f"checkout-entitlement-by-id:{checkout_id}"
         await repo.operations.put(Operation(
@@ -321,6 +344,15 @@ def test_sb_03_trial_checkout_persists_subscription_then_first_paid_invoice_gran
             created_at=clock.now(),
             completed_at=clock.now(),
             attempts=1,
+        ))
+        await repo.plans.put(Plan(
+            id="plan_trial",
+            name="Trial plan",
+            interval="month",
+            credits_per_period=100,
+            usage_included=0,
+            trial_days=14,
+            prices=[PlanPrice(currency="USD", amount_minor=2000)],
         ))
         handlers = default_handlers(
             policy=DEFAULT_POLICY,
@@ -370,23 +402,67 @@ def test_sb_03_trial_checkout_persists_subscription_then_first_paid_invoice_gran
         assert stored.current_period == trial_period
         assert (await ledger.balance("cust_local", "paid", clock.now())).available == 0
 
+        opening = await deliver({
+            "id": "evt_trial_opening",
+            "type": "invoice.paid",
+            "data": {"object": {
+                "id": opening_invoice.provider_ref,
+                "customer": "cus_provider",
+                "subscription": subscription_ref,
+            }},
+        })
+        opening_redelivery = await deliver({
+            "id": "evt_trial_opening_redelivery",
+            "type": "invoice.paid",
+            "data": {"object": {
+                "id": opening_invoice.provider_ref,
+                "customer": "cus_provider",
+                "subscription": subscription_ref,
+            }},
+        })
+        assert opening.status == "processed"
+        assert opening_redelivery.status == "processed"
+        opening_payments = await repo.payments.list(
+            provider_ref=opening_invoice.provider_ref
+        )
+        assert len(opening_payments) == 1
+        assert opening_payments[0].raw["boilpaymentTrialOpeningInvoice"] is True
+        stored = await repo.subscriptions.get(subscription_id)
+        assert stored.status == "trialing"
+        assert stored.current_period == trial_period
+        assert await ledger.entries("cust_local", kind="grant") == []
+
         state["status"] = "active"
+        current_payment["value"] = paid_invoice
         paid = await deliver({
             "id": "evt_trial_paid",
             "type": "invoice.paid",
             "data": {"object": {
-                "id": renewal.provider_ref,
+                "id": paid_invoice.provider_ref,
+                "customer": "cus_provider",
+                "subscription": subscription_ref,
+            }},
+        })
+        paid_redelivery = await deliver({
+            "id": "evt_trial_paid_redelivery",
+            "type": "invoice.paid",
+            "data": {"object": {
+                "id": paid_invoice.provider_ref,
                 "customer": "cus_provider",
                 "subscription": subscription_ref,
             }},
         })
         assert paid.status == "processed"
-        assert (
-            await ledger.balance("cust_local", "paid", paid_period.start)
-        ).available == 100
+        assert paid_redelivery.status == "processed"
+        grants = await ledger.entries("cust_local", kind="grant")
+        assert len(grants) == 1
+        assert grants[0].amount == 100
         assert len(
-            await repo.payments.list(provider_ref=renewal.provider_ref)
+            await repo.payments.list(provider_ref=paid_invoice.provider_ref)
         ) == 1
+        stored = await repo.subscriptions.get(subscription_id)
+        assert stored.status == "active"
+        assert stored.current_period == paid_period
 
     asyncio.run(run())
 

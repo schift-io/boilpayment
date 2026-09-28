@@ -440,6 +440,31 @@ def default_handlers(
             if stored_sub is not None and stored_sub.status in ("expired", "canceled"):
                 await park_late_renewal(stored_sub, payment)
                 return
+            raw = payment.raw if isinstance(payment.raw, dict) else {}
+            plan = (
+                await repo.plans.get(stored_sub.plan_id)
+                if stored_sub is not None
+                else None
+            )
+            if (
+                payment.provider == "stripe"
+                and payment.kind == "subscription"
+                and payment.status == "succeeded"
+                and payment.amount.amount_minor == 0
+                and raw.get("billing_reason") == "subscription_create"
+                and stored_sub is not None
+                and stored_sub.status == "trialing"
+                and plan is not None
+                and plan.trial_days > 0
+            ):
+                # SB-03 -- Stripe reports a trial's opening invoice as paid even though no money
+                # moved. Keep the payment for idempotency/audit, but never start a paid period.
+                payment = dataclasses.replace(
+                    payment,
+                    raw={**raw, "boilpaymentTrialOpeningInvoice": True},
+                )
+                await repo.payments.put(payment)
+                return
             if lifecycle is not None:
                 # EC:K1 call-site audit -- resolve_local_subscription reads the row, then
                 # lifecycle.on_renewal_paid does real work (rollover, grant_for_period, ledger

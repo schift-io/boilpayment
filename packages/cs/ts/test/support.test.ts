@@ -179,6 +179,93 @@ it.each([[7, true], [0, false]] as const)('[SB-03] trialDays=%s accepts only a t
   expect(await input.ledger.entries('customer', { kind: 'grant' })).toHaveLength(0);
 });
 
+it('[SB-03] recovery preserves and permanently ignores a marked Stripe trial-opening invoice', async () => {
+  const input = await setup();
+  await recoverMissingGrant(input);
+  const provider = input.providers.stripe;
+  const since = new Date('2025-12-31T00:00:00Z');
+  const trialPeriod = { start: input.clock.now(), end: new Date('2026-01-15T00:00:00Z') };
+  const paidPeriod = { start: trialPeriod.end, end: new Date('2026-02-15T00:00:00Z') };
+  const plan = {
+    id: 'sb03-recovery', name: 'SB-03 recovery', interval: 'month' as const, creditsPerPeriod: 1000,
+    usageIncluded: 0, trialDays: 14,
+    prices: [{ currency: 'USD', amountMinor: 1999, providerPriceRefs: { stripe: 'price_sb03_recovery' } }],
+  };
+  const subscriptionId = 'subscription:stripe:sub_sb03_recovery';
+  const sub = {
+    id: subscriptionId, customerId: 'customer', planId: plan.id, provider: 'stripe' as const,
+    providerRef: 'sub_sb03_recovery', status: 'active' as const, currentPeriod: paidPeriod, anchorDay: 15,
+    cancelAtPeriodEnd: false, graceUntil: null, billingKey: null, scheduledPlanId: null, currency: 'USD',
+    version: 0, createdAt: input.clock.now(),
+  };
+  const openingInvoice: Payment = {
+    id: 'remote-sb03-opening', customerId: 'cus_1', provider: 'stripe', providerRef: 'in_sb03_opening',
+    subscriptionId: sub.providerRef, amount: { amountMinor: 0, currency: 'USD' }, status: 'succeeded',
+    kind: 'subscription', period: trialPeriod, occurredAt: trialPeriod.start, failure: null, cashReceipt: null,
+    raw: { billing_reason: 'subscription_create' },
+  };
+  await input.repo.plans.put(plan);
+  await input.repo.subscriptions.put(sub);
+  await input.repo.payments.put({
+    ...openingInvoice,
+    id: 'local-sb03-opening',
+    customerId: 'customer',
+    subscriptionId,
+    raw: { billing_reason: 'subscription_create', boilpaymentTrialOpeningInvoice: true },
+  });
+  provider.listPayments = async () => [openingInvoice];
+
+  const firstCases = await recoverMissingGrants({ ...input, grants: input.grants, since });
+  const recorded = (await input.repo.payments.list({ providerRef: openingInvoice.providerRef }))[0];
+  expect(recorded).toMatchObject({
+    customerId: 'customer', subscriptionId, raw: expect.objectContaining({ boilpaymentTrialOpeningInvoice: true }),
+  });
+  expect(firstCases).toHaveLength(0);
+  expect(await input.ledger.entries('customer', { kind: 'grant', source: 'subscription' })).toHaveLength(0);
+  expect(await input.repo.csCases.list({ referenceId: recorded?.id })).toHaveLength(0);
+
+  provider.listPayments = async () => [];
+  const replayCases = await recoverMissingGrants({ ...input, grants: input.grants, since });
+  expect(replayCases).toHaveLength(0);
+  expect(await input.ledger.entries('customer', { kind: 'grant', source: 'subscription' })).toHaveLength(0);
+  expect(await input.repo.csCases.list({ referenceId: recorded?.id })).toHaveLength(0);
+});
+
+it('[SB-03] recovery does not silently ignore an unmarked active zero-amount invoice', async () => {
+  const input = await setup();
+  await recoverMissingGrant(input);
+  const provider = input.providers.stripe;
+  const since = new Date('2025-12-31T00:00:00Z');
+  const period = { start: input.clock.now(), end: new Date('2026-01-15T00:00:00Z') };
+  const plan = {
+    id: 'sb03-unmarked', name: 'SB-03 unmarked', interval: 'month' as const, creditsPerPeriod: 1000,
+    usageIncluded: 0, trialDays: 14,
+    prices: [{ currency: 'USD', amountMinor: 1999, providerPriceRefs: { stripe: 'price_sb03_unmarked' } }],
+  };
+  const subscriptionId = 'subscription:stripe:sub_sb03_unmarked';
+  const sub = {
+    id: subscriptionId, customerId: 'customer', planId: plan.id, provider: 'stripe' as const,
+    providerRef: 'sub_sb03_unmarked', status: 'active' as const, currentPeriod: period, anchorDay: 15,
+    cancelAtPeriodEnd: false, graceUntil: null, billingKey: null, scheduledPlanId: null, currency: 'USD',
+    version: 0, createdAt: input.clock.now(),
+  };
+  const invoice: Payment = {
+    id: 'remote-sb03-unmarked', customerId: 'cus_1', provider: 'stripe', providerRef: 'in_sb03_unmarked',
+    subscriptionId: sub.providerRef, amount: { amountMinor: 0, currency: 'USD' }, status: 'succeeded',
+    kind: 'subscription', period, occurredAt: period.start, failure: null, cashReceipt: null,
+    raw: { billing_reason: 'subscription_create' },
+  };
+  await input.repo.plans.put(plan);
+  await input.repo.subscriptions.put(sub);
+  provider.listPayments = async () => [invoice];
+
+  const cases = await recoverMissingGrants({ ...input, grants: input.grants, since });
+  const recorded = (await input.repo.payments.list({ providerRef: invoice.providerRef }))[0];
+  expect(recorded?.raw).not.toMatchObject({ boilpaymentTrialOpeningInvoice: true });
+  expect(cases).toEqual([expect.objectContaining({ kind: 'reconcile_mismatch', status: 'needs_human' })]);
+  expect(await input.ledger.entries('customer', { kind: 'grant', source: 'subscription' })).toHaveLength(0);
+});
+
 it.each(['stripe', 'polar'] as const)('[SB-06] %s prefers the subscription intended plan when catalog matches are ambiguous', async (providerName) => {
   const input = await setup();
   await recoverMissingGrant(input);

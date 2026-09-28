@@ -545,6 +545,173 @@ def test_sb_03_only_trialing_plan_accepts_zero_amount_first_invoice(
     anyio.run(go)
 
 
+def test_sb_03_reconcile_preserves_marked_trial_opening_invoice():
+    async def go():
+        deps, provider, initial_payment = await setup()
+        await recover_missing_grant(RecoverMissingGrantInput(
+            **deps,
+            customer_id="customer",
+            payment_id=initial_payment.id,
+            grants=Grants(),
+        ))
+        trial_period = Period(
+            start=datetime(2026, 1, 1, tzinfo=UTC),
+            end=datetime(2026, 1, 15, tzinfo=UTC),
+        )
+        active_period = Period(
+            start=trial_period.end,
+            end=datetime(2026, 2, 15, tzinfo=UTC),
+        )
+        plan = Plan(
+            id="sb03-reconcile-plan",
+            name="SB-03 reconcile",
+            interval="month",
+            credits_per_period=1000,
+            usage_included=0,
+            trial_days=14,
+            prices=[PlanPrice(
+                currency="USD",
+                amount_minor=1999,
+                provider_price_refs={"stripe": "price_sb03_reconcile"},
+            )],
+        )
+        subscription = Subscription(
+            id="subscription:stripe:sub_sb03_reconcile",
+            customer_id="customer",
+            plan_id=plan.id,
+            provider="stripe",
+            provider_ref="sub_sb03_reconcile",
+            status="active",
+            current_period=active_period,
+            anchor_day=15,
+            cancel_at_period_end=False,
+            grace_until=None,
+            billing_key=None,
+            scheduled_plan_id=None,
+            currency="USD",
+            version=0,
+            created_at=deps["clock"].now(),
+        )
+        opening_invoice = Payment(
+            id="provider-payment-sb03-opening",
+            customer_id="cus_1",
+            provider="stripe",
+            provider_ref="in_sb03_opening",
+            subscription_id=subscription.provider_ref,
+            amount=Money(amount_minor=0, currency="USD"),
+            status="succeeded",
+            kind="subscription",
+            period=trial_period,
+            occurred_at=trial_period.start,
+            failure=None,
+            raw={"billing_reason": "subscription_create"},
+        )
+        await deps["repo"].plans.put(plan)
+        await deps["repo"].subscriptions.put(subscription)
+        await deps["repo"].payments.put(replace(
+            opening_invoice,
+            id="localized-sb03-opening",
+            customer_id=subscription.customer_id,
+            subscription_id=subscription.id,
+            raw={
+                **opening_invoice.raw,
+                "boilpaymentTrialOpeningInvoice": True,
+            },
+        ))
+
+        async def list_payments(**_kwargs):
+            return [opening_invoice]
+
+        provider.list_payments = list_payments
+        scan = RecoverMissingGrantsInput(
+            **deps,
+            grants=Grants(),
+            since=datetime(2025, 12, 31, tzinfo=UTC),
+        )
+
+        first_cases = await recover_missing_grants(scan)
+        second_cases = await recover_missing_grants(replace(scan, since=None))
+        recorded = next(
+            payment
+            for payment in await deps["repo"].payments.list()
+            if payment.provider_ref == opening_invoice.provider_ref
+        )
+
+        assert recorded.raw["boilpaymentTrialOpeningInvoice"] is True
+        assert first_cases == []
+        assert second_cases == []
+        assert await deps["repo"].cs_cases.list(reference_id=recorded.id) == []
+        assert await deps["ledger"].entries(
+            "customer", kind="grant", source="subscription"
+        ) == []
+
+    anyio.run(go)
+
+
+def test_sb_03_reconcile_does_not_ignore_unmarked_zero_invoice():
+    async def go():
+        deps, provider, initial_payment = await setup()
+        await recover_missing_grant(RecoverMissingGrantInput(
+            **deps, customer_id="customer", payment_id=initial_payment.id,
+            grants=Grants(),
+        ))
+        trial_period = Period(
+            start=datetime(2026, 1, 1, tzinfo=UTC),
+            end=datetime(2026, 1, 15, tzinfo=UTC),
+        )
+        plan = Plan(
+            id="sb03-unmarked-plan", name="SB-03 unmarked", interval="month",
+            credits_per_period=1000, usage_included=0, trial_days=14,
+            prices=[PlanPrice(
+                currency="USD", amount_minor=1999,
+                provider_price_refs={"stripe": "price_sb03_unmarked"},
+            )],
+        )
+        subscription = Subscription(
+            id="subscription:stripe:sub_sb03_unmarked", customer_id="customer",
+            plan_id=plan.id, provider="stripe", provider_ref="sub_sb03_unmarked",
+            status="active", current_period=Period(
+                start=trial_period.end, end=datetime(2026, 2, 15, tzinfo=UTC),
+            ),
+            anchor_day=15, cancel_at_period_end=False, grace_until=None,
+            billing_key=None, scheduled_plan_id=None, currency="USD", version=0,
+            created_at=deps["clock"].now(),
+        )
+        opening_invoice = Payment(
+            id="provider-payment-sb03-unmarked", customer_id="cus_1",
+            provider="stripe", provider_ref="in_sb03_unmarked",
+            subscription_id=subscription.provider_ref,
+            amount=Money(amount_minor=0, currency="USD"), status="succeeded",
+            kind="subscription", period=trial_period,
+            occurred_at=trial_period.start, failure=None,
+            raw={"billing_reason": "subscription_create"},
+        )
+        await deps["repo"].plans.put(plan)
+        await deps["repo"].subscriptions.put(subscription)
+
+        async def list_payments(**_kwargs):
+            return [opening_invoice]
+
+        provider.list_payments = list_payments
+        cases = await recover_missing_grants(RecoverMissingGrantsInput(
+            **deps, grants=Grants(), since=datetime(2025, 12, 31, tzinfo=UTC),
+        ))
+        recorded = next(
+            payment for payment in await deps["repo"].payments.list()
+            if payment.provider_ref == opening_invoice.provider_ref
+        )
+
+        assert len(cases) == 1
+        assert cases[0].status == "needs_human"
+        assert cases[0].kind == "reconcile_mismatch"
+        assert recorded.raw.get("boilpaymentTrialOpeningInvoice") is None
+        assert await deps["ledger"].entries(
+            "customer", kind="grant", source="subscription"
+        ) == []
+
+    anyio.run(go)
+
+
 @pytest.mark.parametrize("provider_name", ["stripe", "polar"])
 def test_sb_06_prefers_subscription_plan_when_catalog_matches_are_ambiguous(
     provider_name,
