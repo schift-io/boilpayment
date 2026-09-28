@@ -1,4 +1,4 @@
-import { PaymentKitError, runIdempotent } from 'boilpayment-core';
+import { PaymentKitError, ProviderError, runIdempotent } from 'boilpayment-core';
 import type { Checkout, Payment, ProviderName } from 'boilpayment-core';
 import type { SupportDeps } from './support.js';
 import { parseCheckoutSnapshot, parsePurchaseSnapshot, matchesCheckoutPayment } from './purchaseSnapshot.js';
@@ -36,6 +36,27 @@ export async function startCheckout(input: StartCheckoutInput): Promise<Checkout
     } });
   const provider = input.providers[snapshot.provider];
   if (!provider) throw new PaymentKitError('checkout provider unavailable', 'checkout_evidence_missing');
+  // OT-03 — Stripe/Polar adapters require a provider-side price reference. Validate the captured
+  // sale before invoking createCheckout, and release the unsold snapshot so a catalog repair can
+  // be recaptured by the same request id.
+  if ((snapshot.provider === 'stripe' || snapshot.provider === 'polar')
+    && !snapshot.price.providerPriceRefs?.[snapshot.provider]) {
+    const captured = await input.repo.operations.get(key);
+    if (captured?.status === 'done') await input.repo.operations.put({ ...captured, status: 'failed', result: null,
+      error: 'missing_provider_price_ref', completedAt: input.clock.now() });
+    const legacyKey = `checkout-result:${input.customerId}:${input.requestId}`;
+    const legacy = await input.repo.operations.get(legacyKey);
+    if (legacy?.status === 'done' && typeof legacy.result === 'object' && legacy.result !== null
+      && 'kind' in legacy.result && legacy.result.kind === 'unknown') {
+      await input.repo.operations.put({ ...legacy, status: 'failed', result: null,
+        error: 'missing_provider_price_ref', completedAt: input.clock.now() });
+    }
+    throw new PaymentKitError(
+      `set plan_prices.provider_price_refs for plan ${snapshot.plan.id} / ${snapshot.price.currency}`,
+      'missing_provider_price_ref',
+      { planId: snapshot.plan.id },
+    );
+  }
   const attempt = await runIdempotent<CheckoutAttempt>({ repo: input.repo, clock: input.clock,
     key: `checkout-result:${input.customerId}:${input.requestId}`, kind: 'checkout.entitlement',
     payload: { key, successUrl: input.successUrl, cancelUrl: input.cancelUrl },
@@ -48,6 +69,25 @@ export async function startCheckout(input: StartCheckoutInput): Promise<Checkout
 
         return { kind: 'succeeded', checkout };
       } catch (error) {
+        // OT-03 — the pre-request price validation is definitive; discard the unsold snapshot so a
+        // catalog repair is recaptured on retry. Provider/transport outcomes remain unknown here.
+        if (error instanceof PaymentKitError) {
+          if (error instanceof ProviderError) {
+            const detailStatus = typeof error.details === 'object' && error.details !== null && 'status' in error.details
+              && typeof error.details.status === 'number' ? error.details.status : undefined;
+            const status = error.httpStatus ?? detailStatus;
+            if (status !== undefined && status >= 400 && status < 500 && status !== 408 && status !== 409 && status !== 429) {
+              throw error;
+            }
+            return { kind: 'unknown' };
+          }
+          if (error.code === 'missing_provider_price_ref') {
+            const captured = await input.repo.operations.get(key);
+            if (captured?.status === 'done') await input.repo.operations.put({ ...captured, status: 'failed', result: null,
+              error: error.message, completedAt: input.clock.now() });
+          }
+          throw error;
+        }
         if (error instanceof Error) return { kind: 'unknown' };
         throw error;
       }

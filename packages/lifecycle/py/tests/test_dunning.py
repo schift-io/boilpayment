@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 from boilpayment_core import (
     CollectingNotifier,
+    ConsumeInput,
     FixedClock,
     InMemoryLedger,
     InMemoryRepo,
@@ -21,6 +22,7 @@ from boilpayment_core import (
     Subscription,
     resolve_policy,
 )
+from boilpayment_credits import ExpireDueInput, expire_due
 from boilpayment_lifecycle.dunning import (
     OnGraceExpiredInput,
     OnPaymentFailedInput,
@@ -110,6 +112,69 @@ def test_ec_a13_on_payment_failed_default_grace_7_days():
     run(scenario())
 
 
+def test_sb_07_serializes_grace_extension_against_concurrent_expire_due():
+    class TrackingLedger(InMemoryLedger):
+        def __init__(self):
+            super().__init__(SequentialIdGen("led_"), FixedClock(PERIOD.end))
+            self.calls = 0
+            self.active = 0
+            self.max_active = 0
+
+        async def transaction(self, customer_id, fn):
+            async def tracked():
+                self.calls += 1
+                self.active += 1
+                self.max_active = max(self.max_active, self.active)
+                await asyncio.sleep(0)
+                try:
+                    return await fn()
+                finally:
+                    self.active -= 1
+
+            return await super().transaction(customer_id, tracked)
+
+    async def scenario():
+        clock = FixedClock(PERIOD.end)
+        ledger = TrackingLedger()
+        repo = InMemoryRepo()
+        notifier = CollectingNotifier()
+        sub = mk_sub()
+        await repo.subscriptions.put(sub)
+        await ledger.append(
+            NewLedgerEntry(
+                customer_id=sub.customer_id,
+                pool="paid",
+                kind="grant",
+                amount=100,
+                source="subscription",
+                reference=LedgerReference(
+                    subscription_id=sub.id, period_start=PERIOD.start
+                ),
+                idempotency_key="grant:concurrent",
+                actor="system",
+                expires_at=PERIOD.end,
+            )
+        )
+
+        await asyncio.gather(
+            on_payment_failed(
+                OnPaymentFailedInput(
+                    sub=sub, policy=resolve_policy(), ledger=ledger, repo=repo,
+                    notifier=notifier, clock=clock,
+                )
+            ),
+            expire_due(
+                ExpireDueInput(ledger=ledger, clock=clock, customer_id=sub.customer_id)
+            ),
+        )
+
+        assert ledger.calls == 2
+        assert ledger.max_active == 1
+        assert (await ledger.balance(sub.customer_id, "paid", clock.now())).available == 100
+
+    run(scenario())
+
+
 def test_ec_a13_grace_days_0_no_grace_started_notification():
     async def scenario():
         clock = FixedClock(datetime(2024, 1, 16, tzinfo=UTC))
@@ -126,6 +191,223 @@ def test_ec_a13_grace_days_0_no_grace_started_notification():
         )
         assert res.sub.grace_until == clock.now()
         assert [n.type for n in notifier.sent] == ["payment.failed"]
+
+    run(scenario())
+
+
+def test_sb_07_extends_previous_period_grant_through_grace_idempotently():
+    async def scenario():
+        clock = FixedClock(PERIOD.end)
+        ledger = InMemoryLedger(SequentialIdGen("led_"), clock)
+        repo = InMemoryRepo()
+        notifier = CollectingNotifier()
+        sub = mk_sub()
+        await repo.subscriptions.put(sub)
+        grant = (
+            await ledger.append(
+                NewLedgerEntry(
+                    customer_id=sub.customer_id,
+                    pool="paid",
+                    kind="grant",
+                    amount=100,
+                    unit_price_minor=10,
+                    currency="USD",
+                    expires_at=PERIOD.end,
+                    source="subscription",
+                    reference=LedgerReference(
+                        subscription_id=sub.id, period_start=PERIOD.start
+                    ),
+                    idempotency_key=f"grant:{sub.id}:{PERIOD.start.isoformat()}",
+                    actor="system",
+                )
+            )
+        ).entry
+        policy = resolve_policy()
+
+        first = await on_payment_failed(
+            OnPaymentFailedInput(
+                sub=sub,
+                policy=policy,
+                ledger=ledger,
+                repo=repo,
+                notifier=notifier,
+                clock=clock,
+            )
+        )
+        await on_payment_failed(
+            OnPaymentFailedInput(
+                sub=first.sub,
+                policy=policy,
+                ledger=ledger,
+                repo=repo,
+                notifier=notifier,
+                clock=clock,
+            )
+        )
+
+        grants = await ledger.entries(sub.customer_id, kind="grant")
+        assert len(grants) == 1
+        extended_grant = next(entry for entry in grants if entry.id == grant.id)
+        assert extended_grant.expires_at == PERIOD.end
+        adjustments = [
+            entry
+            for entry in await ledger.entries(sub.customer_id)
+            if entry.kind == "adjust"
+        ]
+        assert len([
+            entry for entry in adjustments
+            if entry.reason == "SB-07 paid_period_preserved"
+        ]) == 1
+        extension = next(
+            entry for entry in adjustments
+            if entry.reason == "SB-07 grace_expiry_extension"
+        )
+        assert extension.amount == 0
+        assert extension.expires_at == first.sub.grace_until
+        assert extension.reference.grant_id == grant.id
+        balance = await ledger.balance(sub.customer_id, "paid", clock.now())
+        assert [(item.expires_at, item.amount) for item in balance.expiring] == [
+            (first.sub.grace_until, 100)
+        ]
+
+        clock.advance(7 * 86_400_000 - 60_000)
+        during_grace = await ledger.consume(
+            ConsumeInput(
+                customer_id=sub.customer_id,
+                pool_order=["paid"],
+                amount=10,
+                idempotency_key="consume:sb07:during",
+                meta=LedgerReference(),
+                now=clock.now(),
+                negative_balance="deny",
+                negative_floor=0,
+                reason="usage",
+            )
+        )
+        assert during_grace.ok is True
+
+        clock.advance(60_000)
+        at_grace_end = await ledger.consume(
+            ConsumeInput(
+                customer_id=sub.customer_id,
+                pool_order=["paid"],
+                amount=1,
+                idempotency_key="consume:sb07:after",
+                meta=LedgerReference(),
+                now=clock.now(),
+                negative_balance="deny",
+                negative_floor=0,
+                reason="usage",
+            )
+        )
+        assert at_grace_end.ok is False
+        assert at_grace_end.shortfall == 1
+
+    run(scenario())
+
+
+def test_sb_07_restores_only_credits_debited_by_expire_due_before_grace():
+    async def scenario():
+        clock = FixedClock(PERIOD.end)
+        ledger = InMemoryLedger(SequentialIdGen("led_"), clock)
+        repo = InMemoryRepo()
+        notifier = CollectingNotifier()
+        sub = mk_sub()
+        await repo.subscriptions.put(sub)
+        grant = (
+            await ledger.append(
+                NewLedgerEntry(
+                    customer_id=sub.customer_id,
+                    pool="paid",
+                    kind="grant",
+                    amount=100,
+                    unit_price_minor=10,
+                    currency="USD",
+                    expires_at=PERIOD.end,
+                    source="subscription",
+                    reference=LedgerReference(
+                        subscription_id=sub.id, period_start=PERIOD.start
+                    ),
+                    idempotency_key=f"grant:{sub.id}:{PERIOD.start.isoformat()}",
+                    actor="system",
+                )
+            )
+        ).entry
+        await ledger.consume(
+            ConsumeInput(
+                customer_id=sub.customer_id,
+                pool_order=["paid"],
+                amount=40,
+                idempotency_key="consume:before-expiry",
+                meta=LedgerReference(),
+                now=datetime.fromtimestamp(PERIOD.end.timestamp() - 0.001, tz=UTC),
+                negative_balance="deny",
+                negative_floor=0,
+            )
+        )
+        await expire_due(
+            ExpireDueInput(ledger=ledger, clock=clock, customer_id=sub.customer_id)
+        )
+
+        first = await on_payment_failed(
+            OnPaymentFailedInput(
+                sub=sub, policy=resolve_policy(), ledger=ledger, repo=repo,
+                notifier=notifier, clock=clock,
+            )
+        )
+        await on_payment_failed(
+            OnPaymentFailedInput(
+                sub=first.sub, policy=resolve_policy(), ledger=ledger, repo=repo,
+                notifier=notifier, clock=clock,
+            )
+        )
+
+        linked = [
+            entry for entry in await ledger.entries(sub.customer_id)
+            if entry.reference.grant_id == grant.id
+        ]
+        assert [entry.amount for entry in linked if entry.kind == "expire"] == [-60]
+        assert [
+            entry.amount for entry in linked
+            if entry.reason == "SB-07 grace_expiry_restore"
+        ] == [60]
+        assert [
+            entry.amount for entry in linked
+            if entry.reason == "SB-07 grace_expiry_extension"
+        ] == [0]
+        balance = await ledger.balance(sub.customer_id, "paid", clock.now())
+        assert balance.available == 60
+        assert [(item.expires_at, item.amount) for item in balance.expiring] == [
+            (first.sub.grace_until, 60)
+        ]
+        clock.advance(7 * 86_400_000 - 1)
+        during_grace = await ledger.consume(
+            ConsumeInput(
+                customer_id=sub.customer_id,
+                pool_order=["paid"],
+                amount=10,
+                idempotency_key="consume:restored-grace",
+                meta=LedgerReference(),
+                now=clock.now(),
+                negative_balance="deny",
+                negative_floor=0,
+            )
+        )
+        assert during_grace.ok is True
+        clock.advance(1)
+        after_grace = await ledger.consume(
+            ConsumeInput(
+                customer_id=sub.customer_id,
+                pool_order=["paid"],
+                amount=1,
+                idempotency_key="consume:restored-expired",
+                meta=LedgerReference(),
+                now=clock.now(),
+                negative_balance="deny",
+                negative_floor=0,
+            )
+        )
+        assert after_grace.ok is False
 
     run(scenario())
 
@@ -168,6 +450,56 @@ def test_ec_a16_revoke_unpaid_period_default_revokes_current_period_grant():
         bal = await ledger.balance("cust_1", None, clock.now())
         assert bal.available == 0
         assert [n.type for n in notifier.sent] == ["grace.ending"]
+
+    run(scenario())
+
+
+def test_sb_09_keeps_marked_paid_period_credits_after_full_rollover_final_failure():
+    async def scenario():
+        clock = FixedClock(PERIOD.end)
+        ledger = InMemoryLedger(SequentialIdGen("led_"), clock)
+        repo = InMemoryRepo()
+        notifier = CollectingNotifier()
+        sub = mk_sub()
+        await repo.subscriptions.put(sub)
+        await ledger.append(
+            NewLedgerEntry(
+                customer_id=sub.customer_id,
+                pool="paid",
+                kind="grant",
+                amount=100,
+                source="subscription",
+                reference=LedgerReference(
+                    subscription_id=sub.id, period_start=PERIOD.start
+                ),
+                idempotency_key=f"grant:{sub.id}:{PERIOD.start.isoformat()}",
+                actor="system",
+                expires_at=None,
+            )
+        )
+        policy = resolve_policy({"credits": {"rollover": "full"}})
+        failed = await on_payment_failed(
+            OnPaymentFailedInput(
+                sub=sub, policy=policy, ledger=ledger, repo=repo,
+                notifier=notifier, clock=clock,
+            )
+        )
+        clock.advance(7 * 86_400_000)
+
+        result = await on_grace_expired(
+            OnGraceExpiredInput(
+                sub=failed.sub, policy=policy, ledger=ledger, repo=repo,
+                notifier=notifier, clock=clock,
+            )
+        )
+
+        assert result.revoked == []
+        assert (await ledger.balance(sub.customer_id, "paid", clock.now())).available == 100
+        markers = [
+            entry for entry in await ledger.entries(sub.customer_id)
+            if entry.reason == "SB-07 paid_period_preserved"
+        ]
+        assert len(markers) == 1
 
     run(scenario())
 

@@ -6,7 +6,7 @@
 // Every assertion checks the exact method/path/Authorization header/Idempotency-Key
 // header/body the spec (packages/providers/stripe/spec/stripe.pseudo.md "엔드포인트 매핑") requires.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { PaymentKitError } from 'boilpayment-core';
+import { PaymentKitError, ProviderError } from 'boilpayment-core';
 import type { CreateCheckoutInput, Plan, PlanPrice } from 'boilpayment-core';
 import { StripeProvider } from '../src/index.js';
 import { installHttpMock, type HttpMock } from './helpers/mockHttp.js';
@@ -75,6 +75,15 @@ describe('[EC:F(Stripe)] createCustomer', () => {
 });
 
 describe('[EC:E6] createCheckout', () => {
+  it('[SB-03] subscription checkout sends the plan trial days to Stripe', async () => {
+    mock.respondJson(200, { id: 'cs_trial', object: 'checkout.session', url: 'https://checkout.stripe.com/cs_trial' });
+    const provider = makeProvider();
+
+    await provider.createCheckout(checkoutInput({ plan: { ...plan(), trialDays: 14 } }));
+
+    expect(new URLSearchParams(mock.requests[0].body).get('subscription_data[trial_period_days]')).toBe('14');
+  });
+
   it('mode=subscription: POST /v1/checkout/sessions with Idempotency-Key = input.idempotencyKey and subscription_data.metadata mirrored', async () => {
     mock.respondJson(200, { id: 'cs_1', object: 'checkout.session', url: 'https://checkout.stripe.com/cs_1' });
     const provider = makeProvider();
@@ -96,7 +105,7 @@ describe('[EC:E6] createCheckout', () => {
     expect(req.body).toContain('subscription_data[metadata][checkoutEntitlementKey]=intent_immutable');
   });
 
-  it('mode=one_time: mode="payment" in body, no subscription_data key sent', async () => {
+  it('[SB-03] mode=one_time stays payment-only and sends no subscription_data', async () => {
     mock.respondJson(200, { id: 'cs_2', object: 'checkout.session', url: 'https://checkout.stripe.com/cs_2' });
     const provider = makeProvider();
 
@@ -121,6 +130,36 @@ describe('[EC:E6] createCheckout', () => {
   it('missing price ref rejects with a PaymentKitError instance', async () => {
     const provider = makeProvider();
     await expect(provider.createCheckout(checkoutInput({ price: price(undefined) }))).rejects.toBeInstanceOf(PaymentKitError);
+  });
+
+  it('[OT-03] definitive Stripe 400 checkout errors preserve status and provider code', async () => {
+    mock.respondJson(400, { error: { type: 'invalid_request_error', code: 'parameter_invalid_integer', message: 'bad price' } });
+    const provider = makeProvider();
+
+    const error = await provider.createCheckout(checkoutInput()).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ProviderError);
+    expect(error).toMatchObject({
+      name: 'ProviderError',
+      httpStatus: 400,
+      failure: { providerCode: 'parameter_invalid_integer', retryable: false },
+    });
+  });
+
+  it('[OT-03] uncertain Stripe 500 checkout errors are retryable ProviderErrors', async () => {
+    mock.respondJson(500, { error: { type: 'api_error', code: 'internal_error', message: 'temporary failure' } });
+    mock.respondJson(500, { error: { type: 'api_error', code: 'internal_error', message: 'temporary failure' } });
+    mock.respondJson(500, { error: { type: 'api_error', code: 'internal_error', message: 'temporary failure' } });
+    const provider = makeProvider();
+
+    const error = await provider.createCheckout(checkoutInput()).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ProviderError);
+    expect(error).toMatchObject({
+      name: 'ProviderError',
+      httpStatus: 500,
+      failure: { providerCode: 'internal_error', retryable: true },
+    });
   });
 });
 

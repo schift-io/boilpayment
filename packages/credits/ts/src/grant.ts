@@ -104,6 +104,7 @@ async function applyNegativeOffset(input: {
   return { offset, entries };
 }
 
+// OT-17 — retain the indivisible minor-unit remainder so refund valuation can reconstruct the exact grant value.
 function priceCredits(amountMinor: number, credits: number): { unitPriceMinor: number; remainderMinor: number } {
   if (credits <= 0) return { unitPriceMinor: 0, remainderMinor: amountMinor };
   const unitPriceMinor = Math.floor(amountMinor / credits);

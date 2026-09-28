@@ -72,6 +72,15 @@ export async function downgrade(input: DowngradeInput): Promise<DowngradeResult>
       if (!oldPlan) throw new PaymentKitError(`plan not found: ${sub.planId}`, 'plan_not_found');
 
       if (policy.downgrade.mode === 'end_of_period') {
+        // SB-14 — native providers must carry the lower price into the next renewal; the local
+        // scheduledPlanId alone can otherwise undergrant while the higher price is still charged.
+        if ((sub.provider === 'stripe' || sub.provider === 'polar') && provider.capabilities().nativeSubscriptions) {
+          if (sub.providerRef === null) throw new PaymentKitError('native subscription mutation requires its provider reference', 'subscription_provider_ref_required');
+          const priceRef = resolvePriceRef(newPlan, sub.provider, sub.currency);
+          await scopeProvider(provider, input.correlationId).changeSubscription(sub.providerRef, {
+            newPriceRef: priceRef, proration: 'none', resetAnchor: false,
+          });
+        }
         const updated: Subscription = { ...sub, scheduledPlanId: newPlan.id };
         await repo.subscriptions.put(updated);
         return { sub: updated, clawback: null };

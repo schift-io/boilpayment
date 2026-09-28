@@ -27,6 +27,7 @@ from boilpayment_core import (
     PaymentKitError,
     Period,
     ProviderCapabilities,
+    ProviderError,
     Refund,
     Subscription,
     WebhookSignatureError,
@@ -791,12 +792,50 @@ class StripeProvider:
         }
         if mode == "subscription":
             params["subscription_data"] = {"metadata": metadata}
+            # SB-03 -- Stripe must own the trial so Checkout does not charge on day one.
+            if input.plan.trial_days > 0:
+                params["subscription_data"]["trial_period_days"] = input.plan.trial_days
         else:
             params["payment_intent_data"] = {"metadata": metadata}
-        session = await self._client.v1.checkout.sessions.create_async(
-            params, options={"idempotency_key": input.idempotency_key}
-        )
-        return Checkout(id=session.id, url=session.url or "", provider_ref=session.id)
+        try:
+            session = await self._client.v1.checkout.sessions.create_async(
+                params, options={"idempotency_key": input.idempotency_key}
+            )
+            return Checkout(id=session.id, url=session.url or "", provider_ref=session.id)
+        except stripe.StripeError as error:
+            status = error.http_status
+            definitive = (
+                status is not None
+                and 400 <= status < 500
+                and status not in (408, 409, 429)
+            )
+            provider_code = error.code or (
+                getattr(error.error, "code", None) if error.error is not None else None
+            )
+            decline_code = (
+                getattr(error.error, "decline_code", None)
+                if error.error is not None
+                else None
+            )
+            normalized = normalize_failure(
+                code=provider_code,
+                decline_code=decline_code,
+                message=str(error),
+            )
+            failure = PaymentFailure(
+                code=normalized.code,
+                provider_code=normalized.provider_code,
+                retryable=not definitive,
+                user_message=normalized.user_message,
+            )
+            # OT-03 -- CS needs a typed status-bearing error to distinguish a definitive
+            # provider rejection from a timeout, connection loss, conflict, rate limit, or 5xx.
+            raise ProviderError(
+                str(error),
+                failure,
+                {"status": status, "providerCode": failure.provider_code},
+                status,
+            ) from error
 
     # EC:E7 E12 — accepts pi_... or in_...
     async def get_payment(self, provider_ref: str) -> Payment:

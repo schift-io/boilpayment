@@ -382,6 +382,7 @@ class PolarProvider:
                     f"polar {method} {path} failed: {res.status_code}",
                     normalize_failure(message=res.text),
                     {"status": res.status_code, "body": res.text},
+                    http_status=res.status_code,
                 )
             result = None if (res.status_code == 204 or not res.content) else res.json()
             await self._logger.log(

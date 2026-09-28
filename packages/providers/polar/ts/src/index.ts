@@ -312,7 +312,7 @@ export class PolarProvider implements PaymentProvider {
           level: 'warn', event: 'provider.request', provider: 'polar', method, path, status,
           durationMs: Date.now() - startedAt, correlationId, providerErrorCode: 'unknown', requestBody: body, responseBody: text,
         });
-        throw new ProviderError(`polar ${method} ${path} failed: ${res.status}`, normalizeFailure({ message: text }), { status: res.status, body: text });
+        throw new ProviderError(`polar ${method} ${path} failed: ${res.status}`, normalizeFailure({ message: text }), { status: res.status, body: text }, res.status);
       }
       const json = res.status === 204 ? undefined : ((await res.json()) as T);
       await this.logger.log({

@@ -112,3 +112,22 @@ describe('EC:A25 onRenewalPaid — only a succeeded payment grants or advances t
     expect(ok.grant.entry?.amount).toBe(100);
   });
 });
+
+describe('[SB-10] terminal native subscriptions reject late successful renewals', () => {
+  it.each(['stripe', 'polar'] as const)('%s canceled/expired subscription is not granted or revived', async (provider) => {
+    for (const status of ['canceled', 'expired'] as const) {
+      const { clock, ledger, repo } = await setup();
+      const sub = mkSub({ provider, providerRef: `${provider}_sub_1`, status });
+      await repo.subscriptions.put(sub);
+
+      await expect(onRenewalPaid({
+        sub,
+        payment: mkPayment({ provider, providerRef: `${provider}_late_payment` }),
+        policy: resolvePolicy(), ledger, repo, clock,
+      })).rejects.toMatchObject({ code: 'subscription_terminal_payment' });
+
+      expect(await ledger.entries(sub.customerId)).toHaveLength(0);
+      expect((await repo.subscriptions.get(sub.id))?.status).toBe(status);
+    }
+  });
+});

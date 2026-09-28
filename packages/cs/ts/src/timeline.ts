@@ -7,6 +7,7 @@
 import {
   Clock, CsCase, CsCaseStatus, LedgerEntry, LedgerKind, LedgerStore, Money, Payment, PaymentStatus,
   Pool, Refund, Repo, Subscription, WebhookEventRecord, WebhookEventStatus, currencyExponent,
+  effectiveGrantExpiry,
 } from 'boilpayment-core';
 
 // ── Public types ─────────────────────────────────────────────────────────────────────────
@@ -154,7 +155,7 @@ async function fetchScoped<T>(
 
 // ── Running balance (EC:B14-style: bucket-scoped expiry, evaluated at each entry's own time) ──
 
-interface BucketState { expiresAt: Date | null; remaining: number }
+interface BucketState { grant: LedgerEntry; remaining: number }
 
 /**
  * Mirrors InMemoryLedger's buildBuckets + unbucketedTotal + expiry rule from `balance()`, computed
@@ -167,9 +168,9 @@ function runningBalances(entries: LedgerEntry[]): number[] {
   const buckets = new Map<string, BucketState>();
   let unbucketed = 0;
   const out: number[] = [];
-  for (const e of entries) {
+  for (const [index, e] of entries.entries()) {
     if (e.kind === 'grant') {
-      buckets.set(e.id, { expiresAt: e.expiresAt, remaining: e.amount });
+      buckets.set(e.id, { grant: e, remaining: e.amount });
     } else {
       const gid = e.reference.grantId;
       const bucket = gid ? buckets.get(gid) : undefined;
@@ -179,7 +180,8 @@ function runningBalances(entries: LedgerEntry[]): number[] {
     const now = e.createdAt.getTime();
     let total = unbucketed;
     for (const b of buckets.values()) {
-      if (b.expiresAt !== null && b.expiresAt.getTime() <= now) continue; // EC:B14
+      const expiresAt = effectiveGrantExpiry(b.grant, entries.slice(0, index + 1));
+      if (expiresAt !== null && expiresAt.getTime() <= now) continue; // EC:B14 SB-07
       total += b.remaining;
     }
     out.push(total);

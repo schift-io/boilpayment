@@ -138,7 +138,10 @@ async def setup_paid_checkout_after_status_change(status: str):
             credits_per_period=100,
             usage_included=0,
             trial_days=0,
-            prices=[PlanPrice(currency="USD", amount_minor=1_000)],
+            prices=[PlanPrice(
+                currency="USD", amount_minor=1_000,
+                provider_price_refs={"stripe": "price_a85"},
+            )],
         )
     )
 

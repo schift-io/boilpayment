@@ -20,7 +20,10 @@ def test_ec_a28_checkout_subscription_currency() -> None:
         deps, provider, _ = await setup()
         period = Period(start=deps["clock"].now(), end=datetime(2026, 2, 1, tzinfo=UTC))
         await deps["repo"].plans.put(Plan(id="monthly", name="Monthly", interval="month", credits_per_period=100,
-                                          usage_included=0, trial_days=0, prices=[PlanPrice(currency="USD", amount_minor=1000)]))
+                                          usage_included=0, trial_days=0, prices=[PlanPrice(
+                                              currency="USD", amount_minor=1000,
+                                              provider_price_refs={"stripe": "price_currency"},
+                                          )]))
         base_get = provider.get_payment
 
         async def get_payment(ref):

@@ -20,6 +20,48 @@ def run(coro):
     return asyncio.run(coro)
 
 
+def test_sb_07_does_not_expire_grant_before_linked_grace_extension_ends():
+    async def scenario():
+        clock = FixedClock(datetime(2024, 2, 2, tzinfo=UTC))
+        ledger = InMemoryLedger(SequentialIdGen("led_"), clock)
+        grant = (
+            await ledger.append(
+                NewLedgerEntry(
+                    customer_id="cust_1",
+                    pool="paid",
+                    kind="grant",
+                    amount=100,
+                    source="subscription",
+                    reference=LedgerReference(),
+                    idempotency_key="g_sb07",
+                    actor="system",
+                    expires_at=datetime(2024, 2, 1, tzinfo=UTC),
+                )
+            )
+        ).entry
+        await ledger.append(
+            NewLedgerEntry(
+                customer_id="cust_1",
+                pool="paid",
+                kind="adjust",
+                amount=0,
+                source="subscription",
+                reference=LedgerReference(grant_id=grant.id),
+                idempotency_key="extend_sb07",
+                actor="system",
+                expires_at=datetime(2024, 2, 8, tzinfo=UTC),
+                reason="SB-07 grace_expiry_extension",
+            )
+        )
+
+        result = await expire_due(
+            ExpireDueInput(ledger=ledger, clock=clock, customer_id="cust_1")
+        )
+        assert result.entries == []
+
+    run(scenario())
+
+
 def test_expire_due_bookkeeping_neutral_to_balance():
     async def scenario():
         ledger = InMemoryLedger(SequentialIdGen("led_"))

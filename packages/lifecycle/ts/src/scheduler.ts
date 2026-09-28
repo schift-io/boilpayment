@@ -133,7 +133,7 @@ async function renewOne(input: SchedulerTickInput, dueSub: Subscription, notifie
       // EC:A31 — a missing plan or price is a configuration fault: no charge, dunning, a person is told.
       await notifier.send({ type: 'cs.needs_human', customerId: sub.customerId, payload: {
         kind: 'plan_price_missing', subscriptionId: sub.id, planId: renewalPlanId(sub), currency: sub.currency ?? null } });
-      const result = await onPaymentFailed({ sub, policy, repo, notifier, clock });
+      const result = await onPaymentFailed({ sub, policy, ledger, repo, notifier, clock }); // SB-07
       return { kind: 'failed' as const, sub: result.sub };
     }
     let chargedPeriod = nextPeriod(sub.currentPeriod, plan.interval ?? 'month', sub.anchorDay, policy.period.timezone, policy.period.monthEndAnchor);
@@ -203,10 +203,10 @@ async function renewOne(input: SchedulerTickInput, dueSub: Subscription, notifie
           // EC:A36 A41 — the scheduler's own attempt, unresolved until now, turned out declined: dunning
           // takes over (grace restarts from today, smart retries are scheduled), exactly once.
           if (!charge.fresh || attemptKeyOf(charge.payment) !== renewalAttemptKey(renewing, chargedPeriod)) return { kind: 'failed' as const, sub: renewing };
-          const result = await onPaymentFailed({ sub: renewing, policy, repo, notifier, clock });
+          const result = await onPaymentFailed({ sub: renewing, policy, ledger, repo, notifier, clock }); // SB-07
           return { kind: 'failed' as const, sub: result.sub };
         }
-        const result = await onPaymentFailed({ sub: renewing, policy, repo, notifier, clock });
+        const result = await onPaymentFailed({ sub: renewing, policy, ledger, repo, notifier, clock }); // SB-07
         return { kind: 'failed' as const, sub: result.sub };
       }
       case 'unresolved': {

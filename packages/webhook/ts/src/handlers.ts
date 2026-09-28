@@ -23,10 +23,11 @@ import {
   isUnderReview,
   lookupMismatch,
   recordPaymentRefAliases,
+  runIdempotent,
 } from 'boilpayment-core';
 import { localizePaymentEvent } from './payment-ref.js';
 import type {
-  CashReceiptType, Clock, IdGen, LedgerStore, Notifier, Payment, PaymentProvider, Policy, Repo, Subscription,
+  CashReceiptType, Clock, CsCase, IdGen, LedgerStore, Notifier, Payment, PaymentProvider, Policy, Repo, Subscription,
 } from 'boilpayment-core';
 import type { Handler, HandlerCtx, HandlerMap } from './process.js';
 import { withCorrelationId } from './correlation.js';
@@ -53,10 +54,50 @@ async function retryOnVersionConflict<T>(fn: () => Promise<T>, attempts = 3): Pr
   throw lastErr;
 }
 
+type CheckoutSubscriptionIdentity = {
+  readonly customerId: string;
+  readonly planId: string;
+  readonly provider: Subscription['provider'];
+  readonly currency: string;
+};
+
+function record(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function stripeCheckoutSessionId(raw: unknown): string | null {
+  const event = record(raw);
+  const data = record(event?.['data']);
+  const session = record(data?.['object']);
+  return event?.['type'] === 'checkout.session.completed'
+    && session?.['mode'] === 'subscription'
+    && typeof session['id'] === 'string'
+    ? session['id']
+    : null;
+}
+
+function checkoutSubscriptionIdentity(value: unknown): CheckoutSubscriptionIdentity | null {
+  const snapshot = record(value);
+  const plan = record(snapshot?.['plan']);
+  const price = record(snapshot?.['price']);
+  const customerId = snapshot?.['customerId'] ?? snapshot?.['customer_id'];
+  const planId = plan?.['id'];
+  const provider = snapshot?.['provider'];
+  const currency = price?.['currency'];
+  return typeof customerId === 'string'
+    && typeof planId === 'string'
+    && provider === 'stripe'
+    && typeof currency === 'string'
+    ? { customerId, planId, provider, currency }
+    : null;
+}
+
 export interface LifecycleDeps {
   onRenewalPaid(input: { sub: Subscription; payment: Payment; policy: Policy; ledger: LedgerStore; repo: Repo; clock: Clock }): Promise<unknown>;
   dunning: {
-    onPaymentFailed(input: { sub: Subscription; policy: Policy; repo: Repo; notifier: Notifier; clock: Clock }): Promise<unknown>;
+    onPaymentFailed(input: { sub: Subscription; policy: Policy; ledger: LedgerStore; repo: Repo; notifier: Notifier; clock: Clock }): Promise<unknown>;
   };
 }
 export interface CreditsDeps {
@@ -121,7 +162,7 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
     throw new Error('unknown_provider_ref');
   }
 
-  async function resolveLocalSubscription(ctx: HandlerCtx, providerRef: string): Promise<Subscription> {
+  async function resolveLocalSubscription(ctx: HandlerCtx, providerRef: string, preserveCurrentPeriod = false): Promise<Subscription> {
     const subs = await repo.subscriptions.list({ providerRef } as Partial<Subscription>);
     if (subs.length === 0) return markUnknownProviderRef('subscription', providerRef, ctx.provider.name);
     let sub = subs[0];
@@ -129,7 +170,7 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
     // getSubscription() throws PaymentKitError('unsupported') there, so only re-fetch when supported.
     if (ctx.provider.capabilities().nativeSubscriptions) {
       const providerSub = await ctx.provider.getSubscription(providerRef); // re-fetch for verification (EC:E3)
-      sub = { ...sub, status: providerSub.status, currentPeriod: providerSub.currentPeriod, cancelAtPeriodEnd: providerSub.cancelAtPeriodEnd, graceUntil: providerSub.graceUntil };
+      sub = { ...sub, status: providerSub.status, currentPeriod: preserveCurrentPeriod ? sub.currentPeriod : providerSub.currentPeriod, cancelAtPeriodEnd: providerSub.cancelAtPeriodEnd, graceUntil: providerSub.graceUntil };
     }
     return sub;
   }
@@ -161,10 +202,55 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
     const recorded = await repo.payments.put({
       id: ids.newId(), customerId: sub.customerId, provider: ctx.provider.name, providerRef: paymentRef, subscriptionId: sub.id,
       amount: remote.amount, status: remote.status, kind: 'subscription', period: remote.period, occurredAt: remote.occurredAt,
-      failure: remote.failure, cashReceipt: null,
+      failure: remote.failure, cashReceipt: null, raw: remote.raw,
     });
     await recordPaymentRefAliases(repo, recorded, remote.providerRefAliases ?? [], clock.now()); // EC:E24
     return recorded;
+  }
+
+  async function parkLateRenewal(sub: Subscription, payment: Payment): Promise<void> {
+    // SB-10 — money arriving after local expiry/cancellation is evidence to reconcile, never a
+    // reason to revive access or grant credits. Operation claiming makes both the case and notice
+    // exactly-once across distinct provider event IDs for the same payment.
+    await runIdempotent({
+      repo,
+      key: `webhook.late-renewal:${payment.id}`,
+      kind: 'webhook.late_renewal',
+      payload: { paymentId: payment.id, subscriptionId: sub.id },
+      clock,
+      fn: async () => {
+        const existing = await repo.csCases.list({
+          customerId: sub.customerId,
+          kind: 'reconcile_mismatch',
+          referenceId: payment.id,
+        } as Partial<CsCase>);
+        const active = existing.find((csCase) => csCase.status === 'open' || csCase.status === 'needs_human');
+        if (active) return { caseId: active.id };
+
+        const now = clock.now();
+        const csCase: CsCase = {
+          id: `late-renewal:${payment.id}`,
+          customerId: sub.customerId,
+          kind: 'reconcile_mismatch',
+          status: 'needs_human',
+          referenceId: payment.id,
+          policySnapshot: structuredClone(policy),
+          decision: { reason: 'late renewal payment for closed subscription', paymentId: payment.id },
+          churnReason: null,
+          churnText: null,
+          openedAt: now,
+          resolvedAt: null,
+          escalatedAt: now,
+        };
+        await repo.csCases.put(csCase);
+        await notifier.send({
+          type: 'cs.needs_human',
+          customerId: sub.customerId,
+          payload: { caseId: csCase.id, kind: csCase.kind, reason: 'late renewal payment for closed subscription', paymentId: payment.id },
+        });
+        return { caseId: csCase.id };
+      },
+    });
   }
 
   // EC:K2 K4 K6 K7 — issue a cash receipt for a succeeded payment when policy.cashReceipt.mode ===
@@ -218,6 +304,16 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
       ? await resolveRenewalPayment(ctx, ctx.event.paymentRef!, ctx.event.subscriptionRef)
       : await resolveLocalPayment(ctx, ctx.event.paymentRef!);
     if (ctx.event.subscriptionRef) {
+      // SB-10 — inspect the stored status before resolveLocalSubscription overlays provider state.
+      // A provider-side active status after local expiry/cancellation must not resurrect entitlement.
+      const [storedSub] = await repo.subscriptions.list({
+        provider: ctx.provider.name,
+        providerRef: ctx.event.subscriptionRef,
+      } as Partial<Subscription>);
+      if (storedSub && (storedSub.status === 'expired' || storedSub.status === 'canceled')) {
+        await parkLateRenewal(storedSub, payment);
+        return;
+      }
       if (lifecycle) {
         // EC:K1 call-site audit — resolveLocalSubscription reads the row, then lifecycle.onRenewalPaid
         // does real work (rollover, grantForPeriod, ledger appends) before its own
@@ -278,9 +374,38 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
     if (!ctx.event.subscriptionRef) return;
     if (!lifecycle) return;
     // EC:K1 call-site audit — same reasoning as onPaymentSucceeded above.
+    const scopedLedger = withCorrelationId(ledger, ctx.correlationId);
     await retryOnVersionConflict(async () => {
-      const sub = await resolveLocalSubscription(ctx, ctx.event.subscriptionRef!);
-      await lifecycle.dunning.onPaymentFailed({ sub, policy, repo, notifier, clock });
+      // SB-07 — the provider may already expose the new unpaid period; dunning extends the stored
+      // previous paid-period grant, while the provider read still verifies status/identity.
+      const sub = await resolveLocalSubscription(ctx, ctx.event.subscriptionRef!, true);
+      // SB-07 — dunning needs the scoped ledger to extend the prior period's grant expiry to grace.
+      await lifecycle.dunning.onPaymentFailed({ sub, policy, ledger: scopedLedger, repo, notifier, clock });
+    });
+  };
+
+  const onSubscriptionCreated: Handler = async (ctx) => {
+    if (ctx.provider.name !== 'stripe' || !ctx.event.subscriptionRef) return;
+    const checkoutId = stripeCheckoutSessionId(ctx.event.raw);
+    if (!checkoutId) return;
+    const operation = await repo.operations.get(`checkout-entitlement-by-id:${checkoutId}`);
+    const snapshot = operation?.kind === 'checkout.entitlement' && operation.status === 'done'
+      ? checkoutSubscriptionIdentity(operation.result)
+      : null;
+    // SB-03 — only a locally captured checkout snapshot may establish provider identity. A direct
+    // dashboard subscription.created event remains a no-op rather than inventing customer/plan IDs.
+    if (!snapshot || snapshot.provider !== ctx.provider.name) return;
+    const subscriptionId = `subscription:${snapshot.provider}:${ctx.event.subscriptionRef}`;
+    if (await repo.subscriptions.get(subscriptionId)) return;
+    const remote = await ctx.provider.getSubscription(ctx.event.subscriptionRef);
+    await repo.subscriptions.put({
+      ...remote,
+      id: subscriptionId,
+      customerId: snapshot.customerId,
+      planId: snapshot.planId,
+      provider: snapshot.provider,
+      providerRef: ctx.event.subscriptionRef,
+      currency: snapshot.currency,
     });
   };
 
@@ -332,6 +457,7 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
 
   return {
     'payment.succeeded': onPaymentSucceeded,
+    'subscription.created': onSubscriptionCreated,
     'subscription.payment_failed': onSubscriptionPaymentFailed,
     'subscription.canceled': onSubscriptionCanceled,
     'subscription.updated': onSubscriptionUpdated,

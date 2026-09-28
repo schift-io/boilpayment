@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Protocol, assert_never
+from typing import Any, Protocol, assert_never
 
 from boilpayment_core import (
     Clock,
@@ -19,6 +20,7 @@ from boilpayment_core import (
     Subscription,
     deserialize_cs_case,
     key_matches_instant,
+    next_period,
     run_idempotent,
     serialize_cs_case,
 )
@@ -76,6 +78,70 @@ class RecoverMissingGrantsInput(SupportDeps):
     grants: SupportGrants
     customer_id: str | None = None
     since: datetime | None = None
+
+
+def _raw_contains(value: Any, expected: str) -> bool:
+    if value == expected:
+        return True
+    if isinstance(value, list):
+        return any(_raw_contains(item, expected) for item in value)
+    if isinstance(value, dict):
+        return any(_raw_contains(item, expected) for item in value.values())
+    return False
+
+
+async def _open_reconcile_mismatch(
+    sub: Subscription, payment: Payment, input: RecoverMissingGrantsInput,
+    actual_plan_id: str | None, reason: str | None = None,
+) -> CsCase:
+    case_id = f"reconcile_mismatch:{payment.id}"
+    existing = await input.repo.cs_cases.get(case_id)
+    if existing is not None:
+        return existing
+    now = input.clock.now()
+    mismatch_case = CsCase(
+        id=case_id, customer_id=sub.customer_id, kind="reconcile_mismatch", status="needs_human",
+        reference_id=payment.id, policy_snapshot=deepcopy(input.policy), decision={
+            "subscriptionId": sub.id, "expectedPlanId": sub.scheduled_plan_id or sub.plan_id,
+            "actualPlanId": actual_plan_id,
+            "amountMinor": payment.amount.amount_minor, "currency": payment.amount.currency,
+            **({"reason": reason} if reason else {}),
+        }, churn_reason=None, churn_text=None, opened_at=now, resolved_at=None, escalated_at=now,
+    )
+    await input.repo.cs_cases.put(mismatch_case)
+    return mismatch_case
+
+
+async def _resolve_reconciled_plan(
+    sub: Subscription, payment: Payment, input: RecoverMissingGrantsInput,
+) -> tuple[Plan | None, CsCase | None]:
+    plans = [plan for plan in await input.repo.plans.list() if plan.interval is not None]
+    by_provider_ref = [
+        plan for plan in plans
+        if any(
+            (price.provider_price_refs or {}).get(payment.provider) is not None
+            and _raw_contains(payment.raw, (price.provider_price_refs or {})[payment.provider])
+            for price in plan.prices
+        )
+    ]
+    currency = payment.amount.currency.upper()
+    by_amount = [
+        plan for plan in plans
+        if any(price.currency.upper() == currency and price.amount_minor == payment.amount.amount_minor
+               for price in plan.prices)
+    ]
+    candidates = by_provider_ref if by_provider_ref else by_amount
+    actual = candidates[0] if len(candidates) == 1 else None
+    expected_plan_id = sub.scheduled_plan_id or sub.plan_id
+    if actual is not None and actual.id == expected_plan_id:
+        return actual, None
+
+    # SB-14 -- a renewal charged at another (or ambiguous) price must never receive the scheduled
+    # plan's credits. The deterministic case deduplicates late-webhook mismatch handling.
+    mismatch_case = await _open_reconcile_mismatch(
+        sub, payment, input, actual.id if actual else None,
+    )
+    return actual, mismatch_case
 
 
 async def recover_missing_grant(input: RecoverMissingGrantInput) -> CsCase:
@@ -218,13 +284,90 @@ async def recover_missing_grant(input: RecoverMissingGrantInput) -> CsCase:
 
 
 async def recover_missing_grants(input: RecoverMissingGrantsInput) -> list[CsCase]:
-    """Only locally recorded payments are recoverable; provider-only orphans need reconciliation."""
+    """Reconcile native renewals, then scan local payments that still lack their grant."""
+    # SB-06 -- Stripe/Polar can charge a native renewal even when its webhook is lost. Pull those
+    # payments from each eligible local subscription and use the webhook's canonical grant key.
+    reconciled_cases: list[CsCase] = []
+    if input.since is not None:
+        subscriptions = await input.repo.subscriptions.list(
+            **({"customer_id": input.customer_id} if input.customer_id else {})
+        )
+        for listed in subscriptions:
+            if listed.provider not in ("stripe", "polar") or listed.status not in ("active", "past_due"):
+                continue
+            if not listed.provider_ref:
+                continue
+            provider = input.providers.get(listed.provider)
+            if provider is None or not provider.capabilities().native_subscriptions:
+                continue
+            customer = await input.repo.customers.get(listed.customer_id)
+            customer_ref = next((ref.ref for ref in customer.provider_refs if ref.provider == listed.provider), None) if customer else None
+            if customer_ref is None:
+                continue
+            remote_payments = await provider.list_payments(customer_ref=customer_ref, since=input.since)
+            remote_payments.sort(key=lambda payment: payment.occurred_at)
+            for remote in remote_payments:
+                if (remote.provider != listed.provider or remote.kind != "subscription" or remote.status != "succeeded"
+                        or remote.subscription_id != listed.provider_ref or remote.occurred_at < input.since):
+                    continue
+                current = await input.repo.subscriptions.get(listed.id)
+                if current is None or current.status not in ("active", "past_due"):
+                    continue
+                matches = await input.repo.payments.list(provider=current.provider, provider_ref=remote.provider_ref)
+                existing = matches[0] if matches else None
+                if existing is not None and (existing.customer_id != current.customer_id or existing.subscription_id != current.id):
+                    continue
+                payment = Payment(
+                    id=existing.id if existing else input.ids.new_id(), customer_id=current.customer_id,
+                    provider=current.provider, provider_ref=remote.provider_ref, subscription_id=current.id,
+                    amount=remote.amount, status=remote.status, kind="subscription",
+                    period=remote.period or (existing.period if existing else None),
+                    occurred_at=remote.occurred_at, failure=remote.failure,
+                    cash_receipt=existing.cash_receipt if existing else None,
+                    raw=remote.raw, provider_ref_aliases=remote.provider_ref_aliases,
+                )
+                await input.repo.payments.put(payment)
+                plan, mismatch_case = await _resolve_reconciled_plan(current, payment, input)
+                if mismatch_case is not None and all(case.id != mismatch_case.id for case in reconciled_cases):
+                    reconciled_cases.append(mismatch_case)
+                if plan is None:
+                    continue
+                if payment.period is None:
+                    derived = (
+                        next_period(
+                            current.current_period, plan.interval, current.anchor_day,
+                            input.policy.period.timezone, input.policy.period.month_end_anchor,
+                        )
+                        if payment.provider == "polar" and plan.interval is not None else None
+                    )
+                    safely_mapped = (
+                        derived is not None and derived.start <= payment.occurred_at < derived.end
+                    )
+                    if derived is None or not safely_mapped:
+                        period_case = await _open_reconcile_mismatch(
+                            current, payment, input, plan.id, "renewal_period_unresolved",
+                        )
+                        if all(case.id != period_case.id for case in reconciled_cases):
+                            reconciled_cases.append(period_case)
+                        continue
+                    payment = replace(payment, period=derived)
+                    await input.repo.payments.put(payment)
+                await input.grants.grant_for_period(
+                    sub=replace(current, plan_id=plan.id, status="active"), plan=plan, period=payment.period,
+                    payment=payment, policy=input.policy, ledger=input.ledger, clock=input.clock,
+                )
+                fresh = await input.repo.subscriptions.get(current.id)
+                if fresh is not None and fresh.status in ("active", "past_due") and payment.period.end > fresh.current_period.end:
+                    await input.repo.subscriptions.put(replace(
+                        fresh, plan_id=plan.id, scheduled_plan_id=None, current_period=payment.period,
+                        status="active", grace_until=None,
+                    ))
     payments = (
         await input.repo.payments.list(customer_id=input.customer_id)
         if input.customer_id
         else await input.repo.payments.list()
     )
-    results: list[CsCase] = []
+    results: list[CsCase] = [*reconciled_cases]
     for payment in payments:
         if (
             input.since and payment.occurred_at < input.since
@@ -238,6 +381,8 @@ async def recover_missing_grants(input: RecoverMissingGrantsInput) -> list[CsCas
             continue
         entries = await input.ledger.entries(payment.customer_id, kind="grant")
         if any(entry.reference.payment_id == payment.id for entry in entries):
+            continue
+        if await input.repo.cs_cases.get(f"reconcile_mismatch:{payment.id}") is not None:
             continue
         # EC:A46 -- already handed to a person: report the open case again, do not re-notify.
         recorded = await input.repo.operations.get(f"support-case:regrant:{payment.customer_id}:{payment.id}:")

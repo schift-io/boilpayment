@@ -14,14 +14,20 @@ from boilpayment_core import (
     InMemoryLedger,
     InMemoryRepo,
     Money,
+    Operation,
     Payment,
+    PaymentFailure,
     PaymentKitError,
+    Period,
     Plan,
     PlanPrice,
     ProviderCapabilities,
+    ProviderError,
     ProviderRef,
     Refund,
     SequentialIdGen,
+    Subscription,
+    hash_payload,
     resolve_policy,
 )
 from boilpayment_credits import (
@@ -33,11 +39,13 @@ from boilpayment_credits import (
 from boilpayment_cs import (
     FinishRefundCasesInput,
     RecoverMissingGrantInput,
+    RecoverMissingGrantsInput,
     RegisterCompletedCheckoutInput,
     RequestRefundInput,
     StartCheckoutInput,
     finish_refund_cases,
     recover_missing_grant,
+    recover_missing_grants,
     register_completed_checkout,
     request_refund,
     resolve_topup_credits,
@@ -137,7 +145,10 @@ async def setup(mode="auto", reasons=None):
             credits_per_period=100,
             usage_included=0,
             trial_days=0,
-            prices=[PlanPrice(currency="USD", amount_minor=1000)],
+            prices=[PlanPrice(
+                currency="USD", amount_minor=1000,
+                provider_price_refs={"stripe": "price_credits100"},
+            )],
         )
     )
     provider = Provider(payment)
@@ -282,6 +293,478 @@ def test_checkout_retry_does_not_create_another_provider_checkout():
             )
         )
         assert provider.checkout_calls == 1
+
+    anyio.run(go)
+
+
+@pytest.mark.parametrize("provider_name", ["stripe", "polar"])
+def test_ot_03_missing_provider_price_propagates_without_poisoning_retry(provider_name):
+    async def go():
+        clock = FixedClock(datetime(2026, 1, 1, tzinfo=UTC))
+        ids = SequentialIdGen("ot03_")
+        repo, ledger = InMemoryRepo(), InMemoryLedger(ids)
+        policy = resolve_policy()
+        await repo.customers.put(
+            Customer(
+                id="ot03-customer",
+                email=None,
+                provider_refs=[ProviderRef(provider=provider_name, ref="cus_ot03")],
+                status="active",
+                created_at=clock.now(),
+            )
+        )
+        await repo.plans.put(
+            Plan(
+                id="ot03-plan",
+                name="OT-03",
+                interval=None,
+                credits_per_period=100,
+                usage_included=0,
+                trial_days=0,
+                prices=[PlanPrice(currency="USD", amount_minor=1999)],
+            )
+        )
+        placeholder = Payment(
+            id="unused",
+            customer_id="ot03-customer",
+            provider=provider_name,
+            provider_ref="unused",
+            subscription_id=None,
+            amount=Money(amount_minor=1999, currency="USD"),
+            status="succeeded",
+            kind="topup",
+            period=None,
+            occurred_at=clock.now(),
+            failure=None,
+        )
+        provider = Provider(placeholder)
+        provider.name = provider_name
+        provider.capabilities = lambda: ProviderCapabilities(
+            native_subscriptions=True, partial_refund=True, meters=False,
+            scheduling="provider", webhook_signature=True, checkout="hosted",
+        )
+        calls = 0
+
+        async def create_checkout(request):
+            nonlocal calls
+            calls += 1
+            refs = request.price.provider_price_refs or {}
+            if provider_name not in refs:
+                raise PaymentKitError(
+                    "set plan_prices.provider_price_refs for OT-03",
+                    "missing_provider_price_ref",
+                )
+            return Checkout(
+                id="cs_ot03",
+                provider_ref="cs_ot03",
+                url="https://example.test/checkout",
+            )
+
+        provider.create_checkout = create_checkout
+        deps = {
+            "clock": clock,
+            "ids": ids,
+            "repo": repo,
+            "ledger": ledger,
+            "policy": policy,
+            "providers": {provider_name: provider},
+        }
+        request = StartCheckoutInput(
+            **deps,
+            customer_id="ot03-customer",
+            plan_id="ot03-plan",
+            provider=provider_name,
+            currency="USD",
+            request_id="ot-03",
+            success_url="https://example.test/ok",
+            cancel_url="https://example.test/cancel",
+        )
+
+        with pytest.raises(PaymentKitError) as excinfo:
+            await start_checkout(request)
+        assert excinfo.value.code == "missing_provider_price_ref"
+        assert "plan_prices" in str(excinfo.value)
+        assert calls == 0
+        assert await repo.operations.get("checkout-result:ot03-customer:ot-03") is None
+
+        legacy_key = "checkout-result:ot03-customer:ot-03"
+        await repo.operations.put(Operation(
+            id=legacy_key, key=legacy_key, kind="checkout.entitlement",
+            payload_hash=hash_payload({
+                "key": "checkout-entitlement:ot03-customer:ot-03",
+                "success_url": request.success_url, "cancel_url": request.cancel_url,
+            }),
+            status="done", result={"checkout": None}, error=None,
+            created_at=clock.now(), completed_at=clock.now(), attempts=1,
+        ))
+        with pytest.raises(PaymentKitError) as legacy_error:
+            await start_checkout(request)
+        assert legacy_error.value.code == "missing_provider_price_ref"
+        assert (await repo.operations.get(legacy_key)).status == "failed"
+        assert calls == 0
+
+        await repo.plans.put(
+            Plan(
+                id="ot03-plan",
+                name="OT-03",
+                interval=None,
+                credits_per_period=100,
+                usage_included=0,
+                trial_days=0,
+                prices=[
+                    PlanPrice(
+                        currency="USD",
+                        amount_minor=1999,
+                        provider_price_refs={provider_name: "price_ot03"},
+                    )
+                ],
+            )
+        )
+        assert (await start_checkout(request)).id == "cs_ot03"
+        assert calls == 1
+
+    anyio.run(go)
+
+
+@pytest.mark.parametrize(
+    ("status", "expected_code"),
+    [(400, "provider"), (500, "checkout_outcome_unknown"), (None, "checkout_outcome_unknown")],
+)
+def test_ot_03_only_uncertain_provider_http_outcomes_become_unknown(status, expected_code):
+    async def go():
+        deps, provider, _payment = await setup()
+
+        async def create_checkout(_request):
+            raise ProviderError(
+                f"provider {status if status is not None else 'transport'}",
+                PaymentFailure(
+                    code="unknown", provider_code=str(status) if status is not None else None,
+                    retryable=status is None or status >= 500,
+                    user_message="failed",
+                ),
+                {"status": status} if status is not None else None,
+                http_status=status,
+            )
+
+        provider.create_checkout = create_checkout
+        request = StartCheckoutInput(
+            **deps, customer_id="customer", plan_id="credits100", provider="stripe",
+            currency="USD", request_id=f"provider-{status if status is not None else 'transport'}",
+            success_url="https://example.test/ok", cancel_url="https://example.test/cancel",
+        )
+        with pytest.raises(PaymentKitError) as excinfo:
+            await start_checkout(request)
+        assert excinfo.value.code == expected_code
+
+    anyio.run(go)
+
+
+@pytest.mark.parametrize(
+    ("provider_name", "status"),
+    [
+        ("stripe", "active"),
+        ("stripe", "past_due"),
+        ("polar", "active"),
+        ("polar", "past_due"),
+    ],
+)
+def test_sb_06_provider_only_renewal_is_persisted_and_granted_once(
+    provider_name, status
+):
+    async def go():
+        deps, provider, initial_payment = await setup()
+        await recover_missing_grant(
+            RecoverMissingGrantInput(
+                **deps,
+                customer_id="customer",
+                payment_id=initial_payment.id,
+                grants=Grants(),
+            )
+        )
+        provider.name = provider_name
+        since = datetime(2025, 12, 31, tzinfo=UTC)
+        previous_period = Period(
+            start=datetime(2025, 12, 1, tzinfo=UTC),
+            end=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+        renewal_period = Period(
+            start=datetime(2026, 1, 1, tzinfo=UTC),
+            end=datetime(2026, 2, 1, tzinfo=UTC),
+        )
+        plan = Plan(
+            id="sb06-plan",
+            name="SB-06",
+            interval="month",
+            credits_per_period=100,
+            usage_included=0,
+            trial_days=0,
+            prices=[
+                PlanPrice(
+                    currency="USD",
+                    amount_minor=1000,
+                    provider_price_refs={provider_name: "price_sb06"},
+                )
+            ],
+        )
+        subscription_id = f"subscription:{provider_name}:sub_sb06"
+        sub = Subscription(
+            id=subscription_id,
+            customer_id="customer",
+            plan_id=plan.id,
+            provider=provider_name,
+            provider_ref="sub_sb06",
+            status=status,
+            current_period=previous_period,
+            anchor_day=1,
+            cancel_at_period_end=False,
+            grace_until=None,
+            billing_key=None,
+            scheduled_plan_id=None,
+            currency="USD",
+            version=0,
+            created_at=deps["clock"].now(),
+        )
+        renewal = Payment(
+            id="provider-payment-sb06",
+            customer_id="cus_sb06",
+            provider=provider_name,
+            provider_ref="pay_sb06",
+            subscription_id="sub_sb06",
+            amount=Money(amount_minor=1000, currency="USD"),
+            status="succeeded",
+            kind="subscription",
+            period=None if provider_name == "polar" else renewal_period,
+            occurred_at=renewal_period.start,
+            failure=None,
+        )
+        await deps["repo"].customers.put(
+            Customer(
+                id="customer",
+                email=None,
+                provider_refs=[ProviderRef(provider=provider_name, ref="cus_sb06")],
+                status="active",
+                created_at=deps["clock"].now(),
+            )
+        )
+        await deps["repo"].plans.put(plan)
+        await deps["repo"].subscriptions.put(sub)
+        list_calls = []
+
+        async def list_payments(**kwargs):
+            list_calls.append(kwargs)
+            return [renewal]
+
+        async def get_subscription(_provider_ref):
+            return replace(sub, current_period=renewal_period)
+
+        provider.list_payments = list_payments
+        provider.get_subscription = get_subscription
+        scan_deps = {**deps, "providers": {provider_name: provider}}
+        scan = RecoverMissingGrantsInput(
+            **scan_deps,
+            grants=Grants(),
+            since=since,
+        )
+
+        await recover_missing_grants(scan)
+        recorded = next(
+            (
+                payment
+                for payment in await deps["repo"].payments.list()
+                if payment.provider_ref == renewal.provider_ref
+            ),
+            None,
+        )
+        assert recorded is not None
+        assert recorded.customer_id == "customer"
+        assert recorded.subscription_id == subscription_id
+        grants = await deps["ledger"].entries(
+            "customer", kind="grant", source="subscription"
+        )
+        assert len(grants) == 1
+        assert grants[0].amount == 100
+        assert grants[0].idempotency_key == (
+            f"grant:{subscription_id}:2026-01-01T00:00:00.000Z"
+        )
+        assert grants[0].reference.payment_id == recorded.id
+
+        await recover_missing_grants(scan)
+        await grant_for_period(
+            GrantForPeriodInput(
+                sub=replace(sub, status="active"),
+                plan=plan,
+                period=renewal_period,
+                payment=recorded,
+                policy=deps["policy"],
+                ledger=deps["ledger"],
+                clock=deps["clock"],
+            )
+        )
+        grants = await deps["ledger"].entries(
+            "customer", kind="grant", source="subscription"
+        )
+        assert len(grants) == 1
+        assert list_calls == [
+            {"customer_ref": "cus_sb06", "since": since},
+            {"customer_ref": "cus_sb06", "since": since},
+        ]
+
+    anyio.run(go)
+
+
+def test_sb_06_polar_maps_two_periodless_renewals_to_sequential_periods_once():
+    async def go():
+        deps, provider, initial_payment = await setup()
+        await recover_missing_grant(RecoverMissingGrantInput(
+            **deps, customer_id="customer", payment_id=initial_payment.id, grants=Grants(),
+        ))
+        provider.name = "polar"
+        since = datetime(2025, 12, 31, tzinfo=UTC)
+        p0 = Period(start=datetime(2025, 12, 1, tzinfo=UTC), end=datetime(2026, 1, 1, tzinfo=UTC))
+        p1 = Period(start=datetime(2026, 1, 1, tzinfo=UTC), end=datetime(2026, 2, 1, tzinfo=UTC))
+        p2 = Period(start=datetime(2026, 2, 1, tzinfo=UTC), end=datetime(2026, 3, 1, tzinfo=UTC))
+        plan = Plan(
+            id="sb06-polar-plan", name="Polar monthly", interval="month", credits_per_period=100,
+            usage_included=0, trial_days=0, prices=[PlanPrice(
+                currency="USD", amount_minor=1000, provider_price_refs={"polar": "product_sb06"},
+            )],
+        )
+        sub = Subscription(
+            id="subscription:polar:sub_multi", customer_id="customer", plan_id=plan.id,
+            provider="polar", provider_ref="sub_multi", status="active", current_period=p0,
+            anchor_day=1, cancel_at_period_end=False, grace_until=None, billing_key=None,
+            scheduled_plan_id=None, currency="USD", version=0, created_at=deps["clock"].now(),
+        )
+
+        def payment(ref: str, occurred_at: datetime) -> Payment:
+            return Payment(
+                id=f"remote-{ref}", customer_id="cus_multi", provider="polar", provider_ref=ref,
+                subscription_id="sub_multi", amount=Money(amount_minor=1000, currency="USD"),
+                status="succeeded", kind="subscription", period=None, occurred_at=occurred_at,
+                failure=None, raw={"product_id": "product_sb06"},
+            )
+
+        await deps["repo"].customers.put(Customer(
+            id="customer", email=None, provider_refs=[ProviderRef(provider="polar", ref="cus_multi")],
+            status="active", created_at=deps["clock"].now(),
+        ))
+        await deps["repo"].plans.put(plan)
+        await deps["repo"].subscriptions.put(sub)
+
+        async def list_payments(**_kwargs):
+            return [payment("order_2", p2.start), payment("order_1", p1.start)]
+
+        provider.list_payments = list_payments
+        scan = RecoverMissingGrantsInput(
+            **{**deps, "providers": {"polar": provider}}, grants=Grants(), since=since,
+        )
+        await recover_missing_grants(scan)
+        grants = await deps["ledger"].entries("customer", kind="grant", source="subscription")
+        assert sorted(entry.idempotency_key for entry in grants) == [
+            f"grant:{sub.id}:2026-01-01T00:00:00.000Z",
+            f"grant:{sub.id}:2026-02-01T00:00:00.000Z",
+        ]
+        recorded = await deps["repo"].payments.list(subscription_id=sub.id)
+        assert sorted(item.period.start for item in recorded) == [p1.start, p2.start]
+
+        await recover_missing_grants(scan)
+        assert len(await deps["ledger"].entries("customer", kind="grant", source="subscription")) == 2
+
+    anyio.run(go)
+
+
+@pytest.mark.parametrize("provider_name", ["stripe", "polar"])
+def test_sb_14_lost_renewal_webhook_grants_actual_charged_plan_and_opens_mismatch(
+    provider_name,
+):
+    async def go():
+        deps, provider, initial_payment = await setup()
+        await recover_missing_grant(RecoverMissingGrantInput(
+            **deps, customer_id="customer", payment_id=initial_payment.id, grants=Grants(),
+        ))
+        provider.name = provider_name
+        since = datetime(2025, 12, 31, tzinfo=UTC)
+        previous_period = Period(
+            start=datetime(2025, 12, 1, tzinfo=UTC), end=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+        renewal_period = Period(
+            start=datetime(2026, 1, 1, tzinfo=UTC), end=datetime(2026, 2, 1, tzinfo=UTC),
+        )
+        high = Plan(
+            id="sb14-high", name="High", interval="month", credits_per_period=3000,
+            usage_included=0, trial_days=0, prices=[PlanPrice(
+                currency="USD", amount_minor=3000,
+                provider_price_refs={provider_name: "price_sb14_high"},
+            )],
+        )
+        low = Plan(
+            id="sb14-low", name="Low", interval="month", credits_per_period=1000,
+            usage_included=0, trial_days=0, prices=[PlanPrice(
+                currency="USD", amount_minor=1000,
+                provider_price_refs={provider_name: "price_sb14_low"},
+            )],
+        )
+        subscription_id = f"subscription:{provider_name}:sub_sb14"
+        sub = Subscription(
+            id=subscription_id, customer_id="customer", plan_id=high.id,
+            provider=provider_name, provider_ref="sub_sb14", status="active",
+            current_period=previous_period, anchor_day=1, cancel_at_period_end=False,
+            grace_until=None, billing_key=None, scheduled_plan_id=low.id, currency="USD",
+            version=0, created_at=deps["clock"].now(),
+        )
+        remote = Payment(
+            id="provider-payment-sb14", customer_id="cus_sb14", provider=provider_name,
+            provider_ref="pay_sb14", subscription_id="sub_sb14",
+            amount=Money(amount_minor=3000, currency="USD"), status="succeeded",
+            kind="subscription", period=None if provider_name == "polar" else renewal_period,
+            occurred_at=renewal_period.start,
+            failure=None, raw={"line": {"price": "price_sb14_high"}},
+        )
+        await deps["repo"].customers.put(Customer(
+            id="customer", email=None,
+            provider_refs=[ProviderRef(provider=provider_name, ref="cus_sb14")],
+            status="active", created_at=deps["clock"].now(),
+        ))
+        await deps["repo"].plans.put(high)
+        await deps["repo"].plans.put(low)
+        await deps["repo"].subscriptions.put(sub)
+
+        async def list_payments(**_kwargs):
+            return [remote]
+
+        provider.list_payments = list_payments
+        async def get_subscription(_provider_ref):
+            return replace(sub, current_period=renewal_period)
+        provider.get_subscription = get_subscription
+        scan = RecoverMissingGrantsInput(
+            **{**deps, "providers": {provider_name: provider}}, grants=Grants(), since=since,
+        )
+
+        cases = await recover_missing_grants(scan)
+        recorded = next(
+            (payment for payment in await deps["repo"].payments.list()
+             if payment.provider_ref == remote.provider_ref),
+            None,
+        )
+        assert recorded is not None
+        assert recorded.raw == remote.raw
+        grants = await deps["ledger"].entries("customer", kind="grant", source="subscription")
+        assert len(grants) == 1
+        assert grants[0].amount == 3000
+        assert grants[0].reference.payment_id == recorded.id
+        assert len(cases) == 1
+        assert cases[0].id == f"reconcile_mismatch:{recorded.id}"
+        assert cases[0].status == "needs_human"
+        assert cases[0].decision["expectedPlanId"] == low.id
+        assert cases[0].decision["actualPlanId"] == high.id
+        updated = await deps["repo"].subscriptions.get(subscription_id)
+        assert updated.plan_id == high.id
+        assert updated.scheduled_plan_id is None
+        assert updated.current_period == renewal_period
+
+        await recover_missing_grants(scan)
+        assert len(await deps["ledger"].entries("customer", kind="grant", source="subscription")) == 1
+        assert len(await deps["repo"].cs_cases.list(reference_id=recorded.id)) == 1
 
     anyio.run(go)
 

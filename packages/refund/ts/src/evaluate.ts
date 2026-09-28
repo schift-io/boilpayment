@@ -2,8 +2,11 @@
 import type {
   Clock, LedgerEntry, LedgerStore, Payment, Policy, RefundDecision, Repo, Subscription,
 } from 'boilpayment-core';
-import { prorationFraction, roundHalfAwayFromZero, scaleMinor } from 'boilpayment-core';
-import { applyRounding, daysBetween, prorationRatio, weightedAvgUnitPrice } from './util.js';
+import { prorationFraction, scaleMinor } from 'boilpayment-core';
+import {
+  applyRounding, daysBetween, prorationRatio, totalGrantValueMinor,
+  upgradeInvoiceAttributedGrantIds, weightedAvgUnitPrice,
+} from './util.js';
 import { ruleForReason } from './reason.js';
 import type { RefundReasonInput } from './reason.js';
 
@@ -36,9 +39,27 @@ function ineligible(payment: Payment, subId: string | null, ruleId: string, reas
   };
 }
 
-async function grantedByPayment(ledger: LedgerStore, customerId: string, paymentId: string): Promise<LedgerEntry[]> {
-  const entries = await ledger.entries(customerId, { kind: 'grant' });
-  return entries.filter((e) => e.reference.paymentId === paymentId && (e.source === 'subscription' || e.source === 'topup'));
+async function grantedByPayment(ledger: LedgerStore, customerId: string, paymentId: string): Promise<{
+  grants: LedgerEntry[];
+  hasAttributedUpgradeDelta: boolean;
+}> {
+  const grants = await ledger.entries(customerId, { kind: 'grant' });
+  // SB-11 — an anchor-reset invoice owns the already-issued upgrade delta through an append-only
+  // attribution entry. Follow only the exact lifecycle marker and dedupe grants by ledger ID.
+  const attributedGrantIds = upgradeInvoiceAttributedGrantIds(
+    await ledger.entries(customerId, { kind: 'adjust' }), paymentId,
+  );
+  const found = new Map<string, LedgerEntry>();
+  for (const grant of grants) {
+    const directlyPaid = grant.reference.paymentId === paymentId
+      && (grant.source === 'subscription' || grant.source === 'topup');
+    const attributedUpgradeDelta = grant.source === 'subscription' && attributedGrantIds.has(grant.id);
+    if (directlyPaid || attributedUpgradeDelta) found.set(grant.id, grant);
+  }
+  return {
+    grants: [...found.values()],
+    hasAttributedUpgradeDelta: grants.some((grant) => grant.source === 'subscription' && attributedGrantIds.has(grant.id)),
+  };
 }
 
 async function consumedFromGrants(ledger: LedgerStore, customerId: string, grants: LedgerEntry[], totalGranted: number, now: Date): Promise<number> {
@@ -88,7 +109,8 @@ export async function evaluate(input: EvaluateInput): Promise<RefundDecision> {
     .filter((r) => r.status === 'succeeded')
     .reduce((sum, r) => sum + r.amount.amountMinor, 0);
 
-  const grants = await grantedByPayment(ledger, customerId, payment.id);
+  const paymentGrants = await grantedByPayment(ledger, customerId, payment.id);
+  const grants = paymentGrants.grants;
   const totalGranted = grants.reduce((sum, g) => sum + g.amount, 0);
   const revokeEntries = await ledger.entries(customerId, { kind: 'revoke' });
   const alreadyRevoked = revokeEntries
@@ -115,11 +137,20 @@ export async function evaluate(input: EvaluateInput): Promise<RefundDecision> {
       return ineligible(payment, subId, 'D2', 'refund.method=deny');
     }
     const consumed = await consumedFromGrants(ledger, customerId, grants, totalGranted, clock.now());
-    const unitPrice = weightedAvgUnitPrice(grants);
+    // SB-11 — upgrade delta grants deliberately have no stored price; the attributed invoice is
+    // their payment evidence and supplies the exact value used for proportional refunds.
+    const totalGrantValue = paymentGrants.hasAttributedUpgradeDelta
+      ? payment.amount.amountMinor
+      : totalGrantValueMinor(grants);
+    const unitPrice = paymentGrants.hasAttributedUpgradeDelta && totalGranted > 0
+      ? payment.amount.amountMinor / totalGranted
+      : weightedAvgUnitPrice(grants);
 
     const computeUnused = (): { amount: number; credits: number } => {
       const unused = Math.max(0, totalGranted - consumed);
-      return { amount: roundHalfAwayFromZero(unused * unitPrice), credits: unused }; // EC:J7 same .5 rule as Python
+      // OT-17 — preserve the stored grant remainder: floor(paid grant value * unused / granted), in integer math.
+      const amount = totalGranted > 0 ? scaleMinor(totalGrantValue, unused, totalGranted, 'floor') : 0;
+      return { amount, credits: unused };
     };
     const computeTimeProrated = (): { amount: number; credits: number; denied: string | null } => {
       if (!payment.period) throw new Error('refund.evaluate: time_prorated requires payment.period');
@@ -132,14 +163,17 @@ export async function evaluate(input: EvaluateInput): Promise<RefundDecision> {
       if (consumedRatio > elapsedRatio && policy.refund.overuseBehavior === 'deny') {
         return { amount: 0, credits: 0, denied: `overuse: consumed ${(consumedRatio * 100).toFixed(1)}% > elapsed ${(elapsedRatio * 100).toFixed(1)}%` };
       }
-      const rawCredits = unitPrice > 0 ? amount / unitPrice : 0;
-      return { amount, credits: applyRounding(rawCredits, policy.refund.rounding), denied: null };
+      const credits = paymentGrants.hasAttributedUpgradeDelta && payment.amount.amountMinor > 0
+        ? scaleMinor(amount, totalGranted, payment.amount.amountMinor,
+          policy.refund.rounding === 'ceil_credits' ? 'ceil' : policy.refund.rounding === 'round_credits' ? 'round' : 'floor')
+        : applyRounding(unitPrice > 0 ? amount / unitPrice : 0, policy.refund.rounding);
+      return { amount, credits, denied: null };
     };
 
     if (method === 'unused_credits') {
       const r = computeUnused();
       amountMinor = r.amount; creditsToRevoke = r.credits; ruleId = 'D2';
-      reason = `D2: unused_credits ${r.credits} credits x ${unitPrice} minor/credit -> ${r.amount} minor`;
+      reason = `D2: unused_credits ${r.credits}/${totalGranted} of ${totalGrantValue} minor -> ${r.amount} minor`;
     } else if (method === 'time_prorated') {
       const r = computeTimeProrated();
       if (r.denied) return ineligible(payment, subId, 'D3', r.denied);

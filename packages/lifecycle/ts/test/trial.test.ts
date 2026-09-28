@@ -83,3 +83,21 @@ describe("EC:A9 trial.creditsOnConvert='no_grant_until_next_period' — no grant
     expect(trialBal.available).toBe(50); // untouched
   });
 });
+
+describe('[SB-03] paid credits begin with the first successful invoice after trial', () => {
+  it('keeps a trialing subscription at zero paid credits on day one and grants the first invoice once', async () => {
+    const { clock, ledger, repo } = await setup(0);
+    const trialPlan: Plan = { ...plan, trialDays: 14 };
+    const sub = { ...mkSub(), planId: trialPlan.id };
+
+    expect(sub.status).toBe('trialing');
+    expect((await ledger.balance(sub.customerId, 'paid', clock.now())).available).toBe(0);
+
+    const first = await convertTrial({ sub, plan: trialPlan, payment: mkPayment(), policy: resolvePolicy(), ledger, repo, clock });
+    const replay = await convertTrial({ sub, plan: trialPlan, payment: mkPayment(), policy: resolvePolicy(), ledger, repo, clock });
+
+    expect(first.grant?.amount).toBe(trialPlan.creditsPerPeriod);
+    expect(replay.grant?.id).toBe(first.grant?.id);
+    expect((await ledger.balance(sub.customerId, 'paid', clock.now())).available).toBe(trialPlan.creditsPerPeriod);
+  });
+});

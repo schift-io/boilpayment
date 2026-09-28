@@ -47,7 +47,11 @@ class MigrationFile:
 
 # Follow-up migrations of a module, applied with it (EC:B20: per-customer idempotency keys).
 MODULE_UPDATES: dict[str, tuple[str, ...]] = {
-    "credits": ("0009_ledger_idempotency_per_customer.sql", "0013_ledger_consume_key.sql"),  # EC:B20 B21
+    "credits": (
+        "0009_ledger_idempotency_per_customer.sql",
+        "0013_ledger_consume_key.sql",
+        "0015_grace_credit_expiry.sql",  # SB-07
+    ),
     "usage": ("0010_usage_idempotency_per_customer.sql",),
     "core": (
         "0011_subscription_status_paused_incomplete.sql",  # EC:A27

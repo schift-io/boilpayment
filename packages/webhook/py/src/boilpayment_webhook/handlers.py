@@ -16,12 +16,14 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Awaitable, Callable
+from copy import deepcopy
 from typing import Any, Protocol
 
 from boilpayment_core import (
     INACTIVE_SUBSCRIPTION_STATUSES,
     CashReceiptRef,
     Clock,
+    CsCase,
     IdGen,
     LedgerStore,
     Notification,
@@ -33,6 +35,7 @@ from boilpayment_core import (
     Repo,
     Subscription,
     record_payment_ref_aliases,
+    run_idempotent,
 )
 
 from .attempt_row import complete_attempt_row
@@ -63,12 +66,57 @@ async def _retry_on_version_conflict(fn, attempts: int = 3):
     raise last_err
 
 
+def _record(value: Any) -> dict[str, Any] | None:
+    return value if isinstance(value, dict) else None
+
+
+def _field(value: Any, key: str) -> Any:
+    return value.get(key) if isinstance(value, dict) else getattr(value, key, None)
+
+
+def _stripe_checkout_session_id(raw: Any) -> str | None:
+    data = _field(raw, "data")
+    session = _field(data, "object")
+    session_id = _field(session, "id")
+    if (
+        _field(raw, "type") == "checkout.session.completed"
+        and session is not None
+        and _field(session, "mode") == "subscription"
+        and isinstance(session_id, str)
+    ):
+        return session_id
+    return None
+
+
+def _checkout_subscription_identity(value: Any) -> tuple[str, str, str, str] | None:
+    snapshot = _record(value)
+    plan = _record(snapshot.get("plan")) if snapshot is not None else None
+    price = _record(snapshot.get("price")) if snapshot is not None else None
+    customer_id = (
+        snapshot.get("customerId", snapshot.get("customer_id"))
+        if snapshot is not None
+        else None
+    )
+    plan_id = plan.get("id") if plan is not None else None
+    provider = snapshot.get("provider") if snapshot is not None else None
+    currency = price.get("currency") if price is not None else None
+    if (
+        isinstance(customer_id, str)
+        and isinstance(plan_id, str)
+        and provider == "stripe"
+        and isinstance(currency, str)
+    ):
+        return customer_id, plan_id, provider, currency
+    return None
+
+
 class LifecycleDunningDeps(Protocol):
     async def on_payment_failed(
         self,
         *,
         sub: Subscription,
         policy: Policy,
+        ledger: LedgerStore,
         repo: Repo,
         notifier: Notifier,
         clock: Clock,
@@ -170,7 +218,7 @@ def default_handlers(
         raise UnknownProviderRefError()
 
     async def resolve_local_subscription(
-        ctx: HandlerCtx, provider_ref: str
+        ctx: HandlerCtx, provider_ref: str, preserve_current_period: bool = False
     ) -> Subscription:
         subs = await repo.subscriptions.list(provider_ref=provider_ref)
         if not subs:
@@ -187,7 +235,11 @@ def default_handlers(
             sub = dataclasses.replace(
                 sub,
                 status=provider_sub.status,
-                current_period=provider_sub.current_period,
+                current_period=(
+                    sub.current_period
+                    if preserve_current_period
+                    else provider_sub.current_period
+                ),
                 cancel_at_period_end=provider_sub.cancel_at_period_end,
                 grace_until=provider_sub.grace_until,
             )
@@ -234,10 +286,68 @@ def default_handlers(
         recorded = await repo.payments.put(Payment(
             id=ids.new_id(), customer_id=sub.customer_id, provider=ctx.provider.name, provider_ref=payment_ref,
             subscription_id=sub.id, amount=remote.amount, status=remote.status, kind="subscription",
-            period=remote.period, occurred_at=remote.occurred_at, failure=remote.failure, cash_receipt=None,
+            period=remote.period, occurred_at=remote.occurred_at, failure=remote.failure,
+            cash_receipt=None, raw=remote.raw,
         ))
         await record_payment_ref_aliases(repo, recorded, remote.provider_ref_aliases or [], clock.now())  # EC:E24
         return recorded
+
+    async def park_late_renewal(sub: Subscription, payment: Payment) -> None:
+        # SB-10 -- money arriving after local expiry/cancellation is evidence to reconcile, never a
+        # reason to revive access or grant credits. Operation claiming makes both the case and notice
+        # exactly-once across distinct provider event IDs for the same payment.
+        async def park_once() -> dict[str, str]:
+            existing = await repo.cs_cases.list(
+                customer_id=sub.customer_id,
+                kind="reconcile_mismatch",
+                reference_id=payment.id,
+            )
+            active = next(
+                (case for case in existing if case.status in ("open", "needs_human")),
+                None,
+            )
+            if active is not None:
+                return {"caseId": active.id}
+
+            now = clock.now()
+            case = CsCase(
+                id=f"late-renewal:{payment.id}",
+                customer_id=sub.customer_id,
+                kind="reconcile_mismatch",
+                status="needs_human",
+                reference_id=payment.id,
+                policy_snapshot=deepcopy(policy),
+                decision={
+                    "reason": "late renewal payment for closed subscription",
+                    "paymentId": payment.id,
+                },
+                churn_reason=None,
+                churn_text=None,
+                opened_at=now,
+                resolved_at=None,
+                escalated_at=now,
+            )
+            await repo.cs_cases.put(case)
+            await notifier.send(Notification(
+                type="cs.needs_human",
+                customer_id=sub.customer_id,
+                payload={
+                    "caseId": case.id,
+                    "kind": case.kind,
+                    "reason": "late renewal payment for closed subscription",
+                    "paymentId": payment.id,
+                },
+            ))
+            return {"caseId": case.id}
+
+        await run_idempotent(
+            repo=repo,
+            key=f"webhook.late-renewal:{payment.id}",
+            kind="webhook.late_renewal",
+            payload={"paymentId": payment.id, "subscriptionId": sub.id},
+            clock=clock,
+            fn=park_once,
+        )
 
     async def maybe_issue_cash_receipt(payment: Payment, provider: Any) -> None:
         """EC:K2 K4 K6 K7 -- auto-issue a cash receipt. Never rolls back a payment that succeeded.
@@ -320,6 +430,16 @@ def default_handlers(
             else await resolve_local_payment(ctx, ctx.event.payment_ref)
         )
         if ctx.event.subscription_ref:
+            # SB-10 -- inspect stored status before resolve_local_subscription overlays provider
+            # state. Provider-side active must not resurrect a locally expired/canceled subscription.
+            stored_subs = await repo.subscriptions.list(
+                provider=ctx.provider.name,
+                provider_ref=ctx.event.subscription_ref,
+            )
+            stored_sub = stored_subs[0] if stored_subs else None
+            if stored_sub is not None and stored_sub.status in ("expired", "canceled"):
+                await park_late_renewal(stored_sub, payment)
+                return
             if lifecycle is not None:
                 # EC:K1 call-site audit -- resolve_local_subscription reads the row, then
                 # lifecycle.on_renewal_paid does real work (rollover, grant_for_period, ledger
@@ -399,13 +519,57 @@ def default_handlers(
             return
 
         # EC:K1 call-site audit -- same reasoning as on_payment_succeeded above.
+        scoped_ledger = with_correlation_id(ledger, ctx.correlation_id)
         async def _attempt(subscription_ref: str = ctx.event.subscription_ref) -> None:
-            sub = await resolve_local_subscription(ctx, subscription_ref)
+            # SB-07 -- provider state may already name the new unpaid period. Dunning must extend
+            # the stored previous paid period while still verifying provider status/identity.
+            sub = await resolve_local_subscription(
+                ctx, subscription_ref, preserve_current_period=True
+            )
             await lifecycle.dunning.on_payment_failed(
-                sub=sub, policy=policy, repo=repo, notifier=notifier, clock=clock
+                # SB-07 -- dunning extends the previous grant to grace using this scoped ledger.
+                sub=sub, policy=policy, ledger=scoped_ledger,
+                repo=repo, notifier=notifier, clock=clock
             )
 
         await _retry_on_version_conflict(_attempt)
+
+    async def on_subscription_created(ctx: HandlerCtx) -> None:
+        if ctx.provider.name != "stripe" or not ctx.event.subscription_ref:
+            return
+        checkout_id = _stripe_checkout_session_id(ctx.event.raw)
+        if checkout_id is None:
+            return
+        operation = await repo.operations.get(
+            f"checkout-entitlement-by-id:{checkout_id}"
+        )
+        identity = (
+            _checkout_subscription_identity(operation.result)
+            if operation is not None
+            and operation.kind == "checkout.entitlement"
+            and operation.status == "done"
+            else None
+        )
+        # SB-03 -- only a locally captured checkout snapshot may establish provider identity. A
+        # direct dashboard subscription.created remains a no-op instead of inventing customer/plan.
+        if identity is None:
+            return
+        customer_id, plan_id, provider_name, currency = identity
+        if provider_name != ctx.provider.name:
+            return
+        subscription_id = f"subscription:{provider_name}:{ctx.event.subscription_ref}"
+        if await repo.subscriptions.get(subscription_id) is not None:
+            return
+        remote = await ctx.provider.get_subscription(ctx.event.subscription_ref)
+        await repo.subscriptions.put(dataclasses.replace(
+            remote,
+            id=subscription_id,
+            customer_id=customer_id,
+            plan_id=plan_id,
+            provider=provider_name,
+            provider_ref=ctx.event.subscription_ref,
+            currency=currency,
+        ))
 
     async def on_subscription_canceled(ctx: HandlerCtx) -> None:
         if not ctx.event.subscription_ref:
@@ -480,6 +644,7 @@ def default_handlers(
 
     handlers: dict[str, Handler] = {
         "payment.succeeded": on_payment_succeeded,
+        "subscription.created": on_subscription_created,
         "subscription.payment_failed": on_subscription_payment_failed,
         "subscription.canceled": on_subscription_canceled,
         "subscription.updated": on_subscription_updated,

@@ -117,7 +117,7 @@ async function resolveHeld(input: ResolveHeldAttemptInput): Promise<ResolveHeldA
   // The renewal it stood for is unpaid: dunning takes over, as for a decline (a still-renewing
   // subscription only; an ended one stays ended).
   if (sub && (sub.status === 'active' || sub.status === 'past_due')) {
-    const result = await onPaymentFailed({ sub, policy, repo, notifier, clock });
+    const result = await onPaymentFailed({ sub, policy, ledger, repo, notifier, clock }); // SB-07
     return { payment: voided, sub: result.sub };
   }
   return { payment: voided, sub };

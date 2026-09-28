@@ -1,8 +1,8 @@
 import { expect, it } from 'vitest';
-import { FixedClock, InMemoryLedger, InMemoryRepo, SequentialIdGen, resolvePolicy } from 'boilpayment-core';
-import type { Payment, PaymentProvider, Refund } from 'boilpayment-core';
+import { FixedClock, InMemoryLedger, InMemoryRepo, PaymentKitError, ProviderError, SequentialIdGen, hashPayload, resolvePolicy } from 'boilpayment-core';
+import type { Payment, PaymentProvider, ProviderName, Refund } from 'boilpayment-core';
 import { topup, grantForPeriod } from '../../../credits/ts/src/index.js';
-import { requestRefund, recoverMissingGrant, resolveTopupCredits, startCheckout, registerCompletedCheckout, finishRefundCases } from '../src/index.js';
+import { requestRefund, recoverMissingGrant, recoverMissingGrants, resolveTopupCredits, startCheckout, registerCompletedCheckout, finishRefundCases } from '../src/index.js';
 
 async function setup(mode: 'auto' | 'manual_approve' | 'off' = 'auto', reasons?: { userError?: 'rules' | 'deny'; dissatisfied?: 'rules' | 'evidence_required' | 'needs_human' }) {
   const clock = new FixedClock(new Date('2026-01-01T00:00:00Z')); const ids = new SequentialIdGen('support_');
@@ -13,7 +13,7 @@ async function setup(mode: 'auto' | 'manual_approve' | 'off' = 'auto', reasons?:
     period: null, occurredAt: clock.now(), failure: null, cashReceipt: null };
   await repo.customers.put({ id: 'customer', email: null, providerRefs: [{ provider: 'stripe', ref: 'cus_1' }], status: 'active', createdAt: clock.now() });
 
-  await repo.plans.put({ id: 'credits100', name: '100 credits', interval: null, creditsPerPeriod: 100, usageIncluded: 0, trialDays: 0, prices: [{ currency: 'USD', amountMinor: 1000 }] });
+  await repo.plans.put({ id: 'credits100', name: '100 credits', interval: null, creditsPerPeriod: 100, usageIncluded: 0, trialDays: 0, prices: [{ currency: 'USD', amountMinor: 1000, providerPriceRefs: { stripe: 'price_credits100' } }] });
   let refunds = 0; let checkoutKey = ""; let checkouts = 0;
   const unused = async (): Promise<never> => { throw new Error('unused'); };
   const provider: PaymentProvider = { name: 'stripe', capabilities: () => ({ nativeSubscriptions: true, partialRefund: true, meters: false, scheduling: 'provider', webhookSignature: true }),
@@ -73,10 +73,233 @@ it('replays checkout creation without another provider request', async () => {
   await startCheckout({ ...input, customerId: 'customer', planId: 'credits100', provider: 'stripe', currency: 'USD', requestId: 'sale', successUrl: 'https://example.test/ok', cancelUrl: 'https://example.test/cancel' });
   expect(input.checkoutCalls()).toBe(1);
 });
+
+it.each(['stripe', 'polar'] as const)('[OT-03] %s missing provider price propagates without poisoning the retry', async (providerName) => {
+  const clock = new FixedClock(new Date('2026-01-01T00:00:00Z'));
+  const ids = new SequentialIdGen('ot03_');
+  const repo = new InMemoryRepo();
+  const ledger = new InMemoryLedger(ids);
+  const policy = resolvePolicy();
+  await repo.customers.put({
+    id: 'ot03-customer', email: null, providerRefs: [{ provider: providerName, ref: 'cus_ot03' }],
+    status: 'active', createdAt: clock.now(),
+  });
+  await repo.plans.put({
+    id: 'ot03-plan', name: 'OT-03', interval: null, creditsPerPeriod: 100, usageIncluded: 0,
+    trialDays: 0, prices: [{ currency: 'USD', amountMinor: 1999 }],
+  });
+  let calls = 0;
+  const unused = async (): Promise<never> => { throw new Error('unused'); };
+  const provider: PaymentProvider = {
+    name: providerName,
+    capabilities: () => ({ nativeSubscriptions: true, partialRefund: true, meters: false, scheduling: 'provider', webhookSignature: true, checkout: 'hosted' }),
+    createCustomer: unused,
+    createCheckout: async (args) => {
+      calls += 1;
+      if (!args.price.providerPriceRefs?.[providerName]) {
+        throw new PaymentKitError('set plan_prices.provider_price_refs for OT-03', 'missing_provider_price_ref');
+      }
+      return { id: 'cs_ot03', url: 'https://example.test/checkout', providerRef: 'cs_ot03' };
+    },
+    getPayment: unused, listPayments: unused, getSubscription: unused, changeSubscription: unused,
+    cancelSubscription: unused, chargeBillingKey: unused, reportUsage: unused, verifyWebhook: unused, refund: unused,
+  };
+  const request = {
+    clock, ids, repo, ledger, policy, providers: { [providerName]: provider }, customerId: 'ot03-customer',
+    planId: 'ot03-plan', provider: providerName, currency: 'USD', requestId: 'ot-03',
+    successUrl: 'https://example.test/ok', cancelUrl: 'https://example.test/cancel',
+  };
+
+  await expect(startCheckout(request)).rejects.toMatchObject({
+    code: 'missing_provider_price_ref', message: expect.stringContaining('plan_prices'),
+  });
+  expect(calls).toBe(0);
+  expect(await repo.operations.get('checkout-result:ot03-customer:ot-03')).toBeNull();
+
+  const legacyKey = 'checkout-result:ot03-customer:ot-03';
+  await repo.operations.put({
+    id: legacyKey, key: legacyKey, kind: 'checkout.entitlement',
+    payloadHash: hashPayload({ key: 'checkout-entitlement:ot03-customer:ot-03', successUrl: request.successUrl, cancelUrl: request.cancelUrl }),
+    status: 'done', result: { kind: 'unknown' }, error: null, createdAt: clock.now(), completedAt: clock.now(), attempts: 1,
+  });
+  await expect(startCheckout(request)).rejects.toMatchObject({ code: 'missing_provider_price_ref' });
+  expect(await repo.operations.get(legacyKey)).toMatchObject({ status: 'failed' });
+  expect(calls).toBe(0);
+
+  await repo.plans.put({
+    id: 'ot03-plan', name: 'OT-03', interval: null, creditsPerPeriod: 100, usageIncluded: 0,
+    trialDays: 0, prices: [{ currency: 'USD', amountMinor: 1999, providerPriceRefs: { [providerName]: 'price_ot03' } }],
+  });
+  await expect(startCheckout(request)).resolves.toMatchObject({ id: 'cs_ot03' });
+  expect(calls).toBe(1);
+});
+
+it.each([[400, 'provider'], [500, 'checkout_outcome_unknown'], [null, 'checkout_outcome_unknown']] as const)('[OT-03] provider HTTP %s maps only uncertain outcomes to unknown', async (status, expectedCode) => {
+  const input = await setup();
+  const provider = input.providers.stripe;
+  provider.createCheckout = async () => {
+    throw new ProviderError(`provider ${status ?? 'transport'}`, {
+      code: 'unknown', providerCode: status === null ? null : String(status), retryable: status === null || status >= 500, userMessage: 'failed',
+    }, status === null ? undefined : { status }, status ?? undefined);
+  };
+  const call = startCheckout({ ...input, customerId: 'customer', planId: 'credits100', provider: 'stripe',
+    currency: 'USD', requestId: `provider-${status ?? 'transport'}`, successUrl: 'https://example.test/ok', cancelUrl: 'https://example.test/cancel' });
+  await expect(call).rejects.toMatchObject({ code: expectedCode });
+});
+
+it.each([
+  ['stripe', 'active'], ['stripe', 'past_due'], ['polar', 'active'], ['polar', 'past_due'],
+] as const)('[SB-06] %s %s provider-only renewal is persisted and granted exactly once', async (providerName, status) => {
+  const input = await setup();
+  await recoverMissingGrant(input);
+  const provider = input.providers.stripe;
+  const since = new Date('2025-12-31T00:00:00Z');
+  const previousPeriod = { start: new Date('2025-12-01T00:00:00Z'), end: new Date('2026-01-01T00:00:00Z') };
+  const renewalPeriod = { start: new Date('2026-01-01T00:00:00Z'), end: new Date('2026-02-01T00:00:00Z') };
+  const plan = {
+    id: 'sb06-plan', name: 'SB-06', interval: 'month' as const, creditsPerPeriod: 100,
+    usageIncluded: 0, trialDays: 0, prices: [{ currency: 'USD', amountMinor: 1000, providerPriceRefs: { [providerName]: 'price_sb06' } }],
+  };
+  const subscriptionId = `subscription:${providerName}:sub_sb06`;
+  const sub = {
+    id: subscriptionId, customerId: 'customer', planId: plan.id, provider: providerName, providerRef: 'sub_sb06',
+    status, currentPeriod: previousPeriod, anchorDay: 1, cancelAtPeriodEnd: false, graceUntil: null,
+    billingKey: null, scheduledPlanId: null, currency: 'USD', version: 0, createdAt: input.clock.now(),
+  };
+  const renewal: Payment = {
+    id: 'provider-payment-sb06', customerId: 'cus_sb06', provider: providerName, providerRef: 'pay_sb06',
+    subscriptionId: 'sub_sb06', amount: { amountMinor: 1000, currency: 'USD' }, status: 'succeeded',
+    kind: 'subscription', period: providerName === 'polar' ? null : renewalPeriod,
+    occurredAt: renewalPeriod.start, failure: null, cashReceipt: null,
+  };
+  await input.repo.customers.put({
+    id: 'customer', email: null, providerRefs: [{ provider: providerName, ref: 'cus_sb06' }],
+    status: 'active', createdAt: input.clock.now(),
+  });
+  await input.repo.plans.put(plan);
+  await input.repo.subscriptions.put(sub);
+  const listCalls: Array<{ readonly customerRef: string; readonly since: Date }> = [];
+  provider.listPayments = async (args) => { listCalls.push(args); return [renewal]; };
+  provider.getSubscription = async () => ({ ...sub, currentPeriod: renewalPeriod });
+  const deps = { ...input, providers: { [providerName]: provider } as Partial<Record<ProviderName, PaymentProvider>> };
+
+  await recoverMissingGrants({ ...deps, grants: input.grants, since });
+  const recorded = (await input.repo.payments.list()).find((payment) => payment.providerRef === renewal.providerRef);
+  expect(recorded).toMatchObject({ customerId: 'customer', subscriptionId, kind: 'subscription', status: 'succeeded' });
+  let grants = await input.ledger.entries('customer', { kind: 'grant', source: 'subscription' });
+  expect(grants).toHaveLength(1);
+  expect(grants[0]).toMatchObject({
+    amount: 100, idempotencyKey: `grant:${subscriptionId}:${renewalPeriod.start.toISOString()}`,
+    reference: { paymentId: recorded?.id, subscriptionId },
+  });
+
+  await recoverMissingGrants({ ...deps, grants: input.grants, since });
+  if (!recorded) throw new Error('SB-06 renewal was not persisted');
+  await grantForPeriod({ ...deps, sub: { ...sub, status: 'active' }, plan, period: renewalPeriod, payment: recorded });
+  grants = await input.ledger.entries('customer', { kind: 'grant', source: 'subscription' });
+  expect(grants).toHaveLength(1);
+  expect(listCalls).toEqual([
+    { customerRef: 'cus_sb06', since }, { customerRef: 'cus_sb06', since },
+  ]);
+});
+
+it('[SB-06] Polar maps two periodless missed renewals to two sequential periods exactly once', async () => {
+  const input = await setup(); await recoverMissingGrant(input);
+  const provider = input.providers.stripe;
+  const since = new Date('2025-12-31T00:00:00Z');
+  const p0 = { start: new Date('2025-12-01T00:00:00Z'), end: new Date('2026-01-01T00:00:00Z') };
+  const p1 = { start: new Date('2026-01-01T00:00:00Z'), end: new Date('2026-02-01T00:00:00Z') };
+  const p2 = { start: new Date('2026-02-01T00:00:00Z'), end: new Date('2026-03-01T00:00:00Z') };
+  const plan = { id: 'sb06-polar-plan', name: 'Polar monthly', interval: 'month' as const, creditsPerPeriod: 100,
+    usageIncluded: 0, trialDays: 0, prices: [{ currency: 'USD', amountMinor: 1000, providerPriceRefs: { polar: 'product_sb06' } }] };
+  const sub = { id: 'subscription:polar:sub_multi', customerId: 'customer', planId: plan.id, provider: 'polar' as const,
+    providerRef: 'sub_multi', status: 'active' as const, currentPeriod: p0, anchorDay: 1, cancelAtPeriodEnd: false,
+    graceUntil: null, billingKey: null, scheduledPlanId: null, currency: 'USD', version: 0, createdAt: input.clock.now() };
+  const payment = (ref: string, occurredAt: Date): Payment => ({
+    id: `remote-${ref}`, customerId: 'cus_multi', provider: 'polar', providerRef: ref, subscriptionId: 'sub_multi',
+    amount: { amountMinor: 1000, currency: 'USD' }, status: 'succeeded', kind: 'subscription', period: null,
+    occurredAt, failure: null, cashReceipt: null, raw: { product_id: 'product_sb06' },
+  });
+  await input.repo.customers.put({ id: 'customer', email: null, providerRefs: [{ provider: 'polar', ref: 'cus_multi' }],
+    status: 'active', createdAt: input.clock.now() });
+  await input.repo.plans.put(plan); await input.repo.subscriptions.put(sub);
+  provider.listPayments = async () => [payment('order_2', p2.start), payment('order_1', p1.start)];
+  const deps = { ...input, providers: { polar: provider } as Partial<Record<ProviderName, PaymentProvider>> };
+
+  await recoverMissingGrants({ ...deps, grants: input.grants, since });
+  let grants = await input.ledger.entries('customer', { kind: 'grant', source: 'subscription' });
+  expect(grants.map((entry) => entry.idempotencyKey).sort()).toEqual([
+    `grant:${sub.id}:${p1.start.toISOString()}`, `grant:${sub.id}:${p2.start.toISOString()}`,
+  ]);
+  expect((await input.repo.payments.list({ subscriptionId: sub.id })).map((item) => item.period?.start.toISOString()).sort())
+    .toEqual([p1.start.toISOString(), p2.start.toISOString()]);
+
+  await recoverMissingGrants({ ...deps, grants: input.grants, since });
+  grants = await input.ledger.entries('customer', { kind: 'grant', source: 'subscription' });
+  expect(grants).toHaveLength(2);
+});
+
+it.each(['stripe', 'polar'] as const)('[SB-14] %s lost renewal webhook grants the plan actually charged and opens one mismatch case', async (providerName) => {
+  const input = await setup();
+  await recoverMissingGrant(input);
+  const provider = input.providers.stripe;
+  const since = new Date('2025-12-31T00:00:00Z');
+  const previousPeriod = { start: new Date('2025-12-01T00:00:00Z'), end: new Date('2026-01-01T00:00:00Z') };
+  const renewalPeriod = { start: new Date('2026-01-01T00:00:00Z'), end: new Date('2026-02-01T00:00:00Z') };
+  const high = {
+    id: 'sb14-high', name: 'High', interval: 'month' as const, creditsPerPeriod: 3000,
+    usageIncluded: 0, trialDays: 0, prices: [{ currency: 'USD', amountMinor: 3000, providerPriceRefs: { [providerName]: 'price_sb14_high' } }],
+  };
+  const low = {
+    id: 'sb14-low', name: 'Low', interval: 'month' as const, creditsPerPeriod: 1000,
+    usageIncluded: 0, trialDays: 0, prices: [{ currency: 'USD', amountMinor: 1000, providerPriceRefs: { [providerName]: 'price_sb14_low' } }],
+  };
+  const subscriptionId = `subscription:${providerName}:sub_sb14`;
+  const sub = {
+    id: subscriptionId, customerId: 'customer', planId: high.id, provider: providerName, providerRef: 'sub_sb14',
+    status: 'active' as const, currentPeriod: previousPeriod, anchorDay: 1, cancelAtPeriodEnd: false,
+    graceUntil: null, billingKey: null, scheduledPlanId: low.id, currency: 'USD', version: 0, createdAt: input.clock.now(),
+  };
+  const remote: Payment = {
+    id: 'provider-payment-sb14', customerId: 'cus_sb14', provider: providerName, providerRef: 'pay_sb14',
+    subscriptionId: 'sub_sb14', amount: { amountMinor: 3000, currency: 'USD' }, status: 'succeeded',
+    kind: 'subscription', period: providerName === 'polar' ? null : renewalPeriod,
+    occurredAt: renewalPeriod.start, failure: null, cashReceipt: null,
+    raw: { line: { price: 'price_sb14_high' } },
+  };
+  await input.repo.customers.put({
+    id: 'customer', email: null, providerRefs: [{ provider: providerName, ref: 'cus_sb14' }],
+    status: 'active', createdAt: input.clock.now(),
+  });
+  await input.repo.plans.put(high); await input.repo.plans.put(low); await input.repo.subscriptions.put(sub);
+  provider.listPayments = async () => [remote];
+  provider.getSubscription = async () => ({ ...sub, currentPeriod: renewalPeriod });
+  const deps = { ...input, providers: { [providerName]: provider } as Partial<Record<ProviderName, PaymentProvider>> };
+
+  const cases = await recoverMissingGrants({ ...deps, grants: input.grants, since });
+  const recorded = (await input.repo.payments.list()).find((payment) => payment.providerRef === remote.providerRef);
+  if (!recorded) throw new Error('SB-14 renewal was not persisted');
+  expect(recorded.raw).toEqual(remote.raw);
+  const grants = await input.ledger.entries('customer', { kind: 'grant', source: 'subscription' });
+  expect(grants).toHaveLength(1);
+  expect(grants[0]).toMatchObject({ amount: 3000, reference: { paymentId: recorded.id, subscriptionId } });
+  expect(cases).toHaveLength(1);
+  expect(cases[0]).toMatchObject({
+    id: `reconcile_mismatch:${recorded.id}`, status: 'needs_human', referenceId: recorded.id,
+    decision: { expectedPlanId: low.id, actualPlanId: high.id },
+  });
+  expect(await input.repo.subscriptions.get(subscriptionId)).toMatchObject({
+    planId: high.id, scheduledPlanId: null, currentPeriod: renewalPeriod,
+  });
+
+  await recoverMissingGrants({ ...deps, grants: input.grants, since });
+  expect(await input.ledger.entries('customer', { kind: 'grant', source: 'subscription' })).toHaveLength(1);
+  expect((await input.repo.csCases.list({ referenceId: recorded.id }))).toHaveLength(1);
+});
 it('keeps native subscription entitlement from sale after catalog credits change', async () => {
   const input = await setup(); const provider = input.providers.stripe;
   const period = { start: input.clock.now(), end: new Date('2026-02-01T00:00:00Z') };
-  const plan = { id: 'monthly', name: 'Monthly', interval: 'month' as const, creditsPerPeriod: 100, usageIncluded: 0, trialDays: 0, prices: [{ currency: 'USD', amountMinor: 1000 }] };
+  const plan = { id: 'monthly', name: 'Monthly', interval: 'month' as const, creditsPerPeriod: 100, usageIncluded: 0, trialDays: 0, prices: [{ currency: 'USD', amountMinor: 1000, providerPriceRefs: { stripe: 'price_monthly' } }] };
   await input.repo.plans.put(plan);
   provider.createCheckout = async () => ({ id: 'cs_sub', url: 'https://example.test/sub', providerRef: 'cs_sub' });
   provider.getPayment = async () => ({ ...input.payment, providerRef: 'pi_sub', kind: 'subscription', subscriptionId: 'sub_remote', period, customerId: 'cus_1', raw: { metadata: { checkoutEntitlementKey: 'checkout-entitlement:customer:sub-sale' } } });

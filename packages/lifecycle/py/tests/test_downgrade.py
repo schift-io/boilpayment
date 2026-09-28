@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from datetime import UTC, datetime
+from typing import TypedDict, Unpack
 
+import pytest
 from boilpayment_core import (
     FixedClock,
     InMemoryLedger,
     InMemoryRepo,
     LedgerReference,
+    Money,
     NewLedgerEntry,
+    Payment,
     Period,
     Plan,
     PlanPrice,
@@ -18,7 +23,12 @@ from boilpayment_core import (
     Subscription,
     resolve_policy,
 )
-from boilpayment_lifecycle import DowngradeInput, downgrade
+from boilpayment_lifecycle import (
+    DowngradeInput,
+    OnRenewalPaidInput,
+    downgrade,
+    on_renewal_paid,
+)
 from helpers import FakeNativeProvider, FakeSelfSchedulingProvider
 
 PLAN_A = Plan(
@@ -28,7 +38,13 @@ PLAN_A = Plan(
     credits_per_period=100,
     usage_included=0,
     trial_days=0,
-    prices=[PlanPrice(currency="USD", amount_minor=1000)],
+    prices=[
+        PlanPrice(
+            currency="USD",
+            amount_minor=1000,
+            provider_price_refs={"stripe": "price_stripe_a", "polar": "price_polar_a"},
+        )
+    ],
 )
 PLAN_B = Plan(
     id="plan_b",
@@ -90,12 +106,97 @@ async def setup(paid_balance: int, customer_id: str = "cust_1"):
     return clock, ledger, repo, ids
 
 
-def test_end_of_period_keeps_grants_only_schedules():
+class ScheduledChange(TypedDict):
+    new_price_ref: str
+    proration: str
+    reset_anchor: bool
+
+
+class SchedulingNativeProvider(FakeNativeProvider):
+    def __init__(self) -> None:
+        super().__init__()
+        self.last_change: ScheduledChange | None = None
+
+    async def change_subscription(
+        self, provider_ref: str, **kwargs: Unpack[ScheduledChange]
+    ) -> Subscription:
+        self.last_change = kwargs
+        return await super().change_subscription(provider_ref, **kwargs)
+
+
+@pytest.mark.parametrize("provider_name", ["stripe", "polar"])
+def test_sb_14_end_of_period_schedules_lower_provider_price_and_renews_lower_plan(
+    provider_name: str,
+):
+    async def scenario():
+        clock, ledger, repo, ids = await setup(300)
+        sub = mk_sub(
+            provider=provider_name, provider_ref=f"{provider_name}_sub_1"
+        )
+        await repo.subscriptions.put(sub)
+        provider = SchedulingNativeProvider()
+        provider.set_dummy_sub(dataclasses.replace(sub, plan_id=PLAN_A.id))
+
+        downgraded = await downgrade(
+            DowngradeInput(
+                sub=sub,
+                new_plan=PLAN_A,
+                policy=resolve_policy(),
+                provider=provider,
+                ledger=ledger,
+                repo=repo,
+                clock=clock,
+                ids=ids,
+            )
+        )
+
+        assert provider.last_change is not None
+        assert provider.last_change["new_price_ref"] == f"price_{provider_name}_a"
+        assert provider.last_change["proration"] == "none"
+        assert provider.last_change["reset_anchor"] is False
+        assert downgraded.sub.plan_id == PLAN_B.id
+        assert downgraded.sub.scheduled_plan_id == PLAN_A.id
+        assert (await ledger.balance(sub.customer_id, "paid", clock.now())).available == 300
+
+        next_period = Period(
+            start=sub.current_period.end, end=datetime(2024, 3, 1, tzinfo=UTC)
+        )
+        renewal = Payment(
+            id=f"pay_{provider_name}_renewal",
+            customer_id=sub.customer_id,
+            provider=provider_name,
+            provider_ref=f"{provider_name}_renewal",
+            subscription_id=sub.id,
+            amount=Money(amount_minor=1000, currency="USD"),
+            status="succeeded",
+            kind="subscription",
+            period=next_period,
+            occurred_at=next_period.start,
+            failure=None,
+        )
+        renewed = await on_renewal_paid(
+            OnRenewalPaidInput(
+                sub=downgraded.sub,
+                payment=renewal,
+                policy=resolve_policy(),
+                ledger=ledger,
+                repo=repo,
+                clock=clock,
+            )
+        )
+        assert renewed.sub.plan_id == PLAN_A.id
+        assert renewed.grant.entry.amount == PLAN_A.credits_per_period
+
+    run(scenario())
+
+
+def test_end_of_period_keeps_grants_and_schedules_native_provider():
     async def scenario():
         clock, ledger, repo, ids = await setup(300)
         sub = mk_sub()
         await repo.subscriptions.put(sub)
-        provider = FakeNativeProvider()  # must not be called
+        provider = FakeNativeProvider()
+        provider.set_dummy_sub(dataclasses.replace(sub, plan_id=PLAN_A.id))
         policy = resolve_policy()
 
         res = await downgrade(
@@ -113,9 +214,104 @@ def test_end_of_period_keeps_grants_only_schedules():
         assert res.sub.scheduled_plan_id == PLAN_A.id
         assert res.sub.plan_id == PLAN_B.id
         assert res.clawback is None
-        assert provider.change_subscription_called == 0
+        assert provider.change_subscription_called == 1
         bal = await ledger.balance("cust_1", None, clock.now())
         assert bal.available == 300
+
+    run(scenario())
+
+
+def test_end_of_period_self_scheduled_provider_stays_local_only():
+    async def scenario():
+        clock, ledger, repo, ids = await setup(300, "cust_toss_schedule")
+        sub = mk_sub(
+            id="sub_toss_schedule",
+            customer_id="cust_toss_schedule",
+            provider="toss",
+            provider_ref=None,
+        )
+        await repo.subscriptions.put(sub)
+        result = await downgrade(DowngradeInput(
+            sub=sub,
+            new_plan=PLAN_A,
+            policy=resolve_policy(),
+            provider=FakeSelfSchedulingProvider(),
+            ledger=ledger,
+            repo=repo,
+            clock=clock,
+            ids=ids,
+        ))
+        assert result.sub.plan_id == PLAN_B.id
+        assert result.sub.scheduled_plan_id == PLAN_A.id
+
+    run(scenario())
+
+
+def test_sb_14_unsupported_apple_native_provider_stays_local_only():
+    async def scenario():
+        clock, ledger, repo, ids = await setup(0, "cust_apple_schedule")
+        sub = mk_sub(
+            id="sub_apple_schedule",
+            customer_id="cust_apple_schedule",
+            provider="apple",
+            provider_ref="apple_sub",
+        )
+        await repo.subscriptions.put(sub)
+        provider = FakeNativeProvider()
+
+        result = await downgrade(DowngradeInput(
+            sub=sub,
+            new_plan=PLAN_A,
+            policy=resolve_policy(),
+            provider=provider,
+            ledger=ledger,
+            repo=repo,
+            clock=clock,
+            ids=ids,
+        ))
+
+        assert provider.change_subscription_called == 0
+        assert result.sub.scheduled_plan_id == PLAN_A.id
+
+    run(scenario())
+
+
+def test_sb_14_mismatch_grants_charged_plan_and_opens_needs_human_case():
+    async def scenario():
+        clock, ledger, repo, _ids = await setup(0)
+        sub = mk_sub(scheduled_plan_id=PLAN_A.id)
+        await repo.subscriptions.put(sub)
+        next_period = Period(
+            start=sub.current_period.end, end=datetime(2024, 3, 1, tzinfo=UTC)
+        )
+        payment = Payment(
+            id="pay_wrong_price",
+            customer_id=sub.customer_id,
+            provider="stripe",
+            provider_ref="in_wrong_price",
+            subscription_id=sub.id,
+            amount=Money(amount_minor=3000, currency="USD"),
+            status="succeeded",
+            kind="subscription",
+            period=next_period,
+            occurred_at=next_period.start,
+            failure=None,
+        )
+
+        renewed = await on_renewal_paid(OnRenewalPaidInput(
+            sub=sub,
+            payment=payment,
+            policy=resolve_policy(),
+            ledger=ledger,
+            repo=repo,
+            clock=clock,
+        ))
+
+        assert renewed.grant.entry.amount == PLAN_B.credits_per_period
+        assert renewed.sub.plan_id == PLAN_B.id
+        assert renewed.sub.scheduled_plan_id is None
+        case = await repo.cs_cases.get(f"reconcile_mismatch:{payment.id}")
+        assert case.status == "needs_human"
 
     run(scenario())
 

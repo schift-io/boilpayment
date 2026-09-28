@@ -35,6 +35,7 @@ import {
   PaymentKitError,
 } from './types.js';
 import { SystemClock, UuidIdGen } from './clock.js';
+import { effectiveGrantExpiry } from './expiry.js';
 
 // ── Per-customer mutex (serializes consume()/transaction() calls for one customer) ──────────
 
@@ -223,7 +224,7 @@ export class InMemoryLedger implements LedgerStore {
     const all = this.entriesByCustomer.get(customerId) ?? [];
     const buckets = new Map<string, Bucket>();
     for (const e of all) {
-      if (e.kind === 'grant') buckets.set(e.id, { pool: e.pool, expiresAt: e.expiresAt, remaining: e.amount });
+      if (e.kind === 'grant') buckets.set(e.id, { pool: e.pool, expiresAt: effectiveGrantExpiry(e, all), remaining: e.amount });
     }
     for (const e of all) {
       if (e.kind === 'grant') continue;

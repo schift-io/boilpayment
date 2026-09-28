@@ -1,7 +1,7 @@
 import { roundHalfAwayFromZero } from 'boilpayment-core';
 // spec/refund.pseudo.md — EC:D8 D18
-import { Clock, IdGen, LedgerStore, NormalizedEvent, PaymentKitError, Refund, Repo } from 'boilpayment-core';
-import { revertRefundedUpgrade, weightedAvgUnitPrice } from './util.js';
+import { Clock, effectiveGrantExpiry, IdGen, LedgerStore, NormalizedEvent, PaymentKitError, Refund, Repo } from 'boilpayment-core';
+import { revertRefundedUpgrade, upgradeInvoiceAttributedGrantIds, weightedAvgUnitPrice } from './util.js';
 
 /** Injected instead of importing `boilpayment-cs` directly (EC:D8). */
 export interface ReconcileMismatchCaseOpener {
@@ -117,8 +117,17 @@ export async function onExternalRefund(input: OnExternalRefundInput): Promise<Re
     const amountMinor = settlementAmount.amountMinor;
     const currency = settlementAmount.currency;
 
-    const grants = (await ledger.entries(payment.customerId, { kind: 'grant' }))
-      .filter((e) => e.reference.paymentId === payment.id && (e.source === 'subscription' || e.source === 'topup'));
+    // SB-11 — the anchor invoice owns its null-priced upgrade delta through exact append-only markers.
+    const attributedGrantIds = upgradeInvoiceAttributedGrantIds(
+      await ledger.entries(payment.customerId, { kind: 'adjust' }), payment.id,
+    );
+    const grantsById = new Map<string, Awaited<ReturnType<LedgerStore['entries']>>[number]>();
+    for (const grant of await ledger.entries(payment.customerId, { kind: 'grant' })) {
+      const direct = grant.reference.paymentId === payment.id && (grant.source === 'subscription' || grant.source === 'topup');
+      const attributed = grant.source === 'subscription' && attributedGrantIds.has(grant.id);
+      if (direct || attributed) grantsById.set(grant.id, grant);
+    }
+    const grants = [...grantsById.values()];
     const totalGranted = grants.reduce((sum, g) => sum + g.amount, 0);
     const alreadyRevoked = (await ledger.entries(payment.customerId, { kind: 'revoke' }))
       .filter((e) => e.reference.paymentId === payment.id && e.source === 'refund')
@@ -187,13 +196,16 @@ export async function onExternalRefund(input: OnExternalRefundInput): Promise<Re
  */
 async function revokeBuckets(ledger: LedgerStore, customerId: string, paymentId: string, amount: number, now: Date) {
   const all = await ledger.entries(customerId, { pool: 'paid' });
+  const attributedGrantIds = upgradeInvoiceAttributedGrantIds(all, paymentId);
   const drawn = new Map<string, number>();
   for (const e of all) if (e.kind !== 'grant' && e.reference.grantId) drawn.set(e.reference.grantId, (drawn.get(e.reference.grantId) ?? 0) + e.amount);
-  const live = all.filter((g) => g.kind === 'grant' && (g.expiresAt === null || g.expiresAt > now))
-    .map((g) => ({ g, remaining: g.amount + (drawn.get(g.id) ?? 0) }))
+  const live = all.filter((g) => g.kind === 'grant')
+    .map((g) => ({ g, expiresAt: effectiveGrantExpiry(g, all), remaining: g.amount + (drawn.get(g.id) ?? 0) }))
+    .filter((b) => b.expiresAt === null || b.expiresAt > now)
     .filter((b) => b.remaining > 0)
-    .sort((a, b) => Number(b.g.reference.paymentId === paymentId) - Number(a.g.reference.paymentId === paymentId)
-      || (a.g.expiresAt?.getTime() ?? Infinity) - (b.g.expiresAt?.getTime() ?? Infinity)
+    .sort((a, b) => Number(b.g.reference.paymentId === paymentId || attributedGrantIds.has(b.g.id))
+      - Number(a.g.reference.paymentId === paymentId || attributedGrantIds.has(a.g.id))
+      || (a.expiresAt?.getTime() ?? Infinity) - (b.expiresAt?.getTime() ?? Infinity)
       || a.g.createdAt.getTime() - b.g.createdAt.getTime());
   const parts: Array<{ grantId: string; amount: number }> = [];
   let left = amount;

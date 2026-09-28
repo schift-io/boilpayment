@@ -44,17 +44,41 @@ def apply_rounding(raw: float, rounding: RefundRounding) -> int:
     return math.floor(raw)
 
 
-def weighted_avg_unit_price(grants: list[LedgerEntry]) -> int | float:
-    """EC:B8 — grant-weighted average unit price across a set of grant ledger entries."""
-    total_amount = 0
-    total_value = 0.0
+def _total_grant_value_minor(grants: list[LedgerEntry]) -> int:
+    """OT-17 -- reconstruct the paid value stored by credits without a schema change."""
+    total_value = 0
     for g in grants:
-        total_amount += g.amount
-        total_value += g.amount * (g.unit_price_minor or 0)
+        remainder = 0
+        if g.reason is not None and g.reason.startswith("remainder_minor:"):
+            raw_remainder = g.reason.removeprefix("remainder_minor:")
+            if raw_remainder.isdigit():
+                remainder = int(raw_remainder)
+        total_value += g.amount * (g.unit_price_minor or 0) + remainder
+    return total_value
+
+
+def weighted_avg_unit_price(grants: list[LedgerEntry]) -> int | float:
+    """EC:B8 OT-17 — grant-weighted price including the stored minor-unit remainder."""
+    total_amount = sum(g.amount for g in grants)
+    total_value = _total_grant_value_minor(grants)
     if total_amount <= 0:
         return 0
     v = total_value / total_amount
     return int(v) if float(v).is_integer() else v  # integral -> int, mirrors JS number semantics
+
+
+def _upgrade_invoice_attributed_grant_ids(
+    entries: list[LedgerEntry], payment_id: str
+) -> set[str]:
+    """SB-11 -- resolve exact append-only markers assigning delta grants to an invoice."""
+    return {
+        entry.reference.grant_id
+        for entry in entries
+        if entry.kind == "adjust"
+        and entry.reason == "SB-11 upgrade_invoice_attribution"
+        and entry.reference.payment_id == payment_id
+        and entry.reference.grant_id is not None
+    }
 
 
 async def revert_refunded_upgrade(repo: Repo, payment: Payment) -> None:

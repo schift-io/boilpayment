@@ -19,15 +19,29 @@ export function applyRounding(raw: number, rounding: RefundRounding): number {
   return Math.floor(raw);
 }
 
-/** EC:B8 — grant-weighted average unit price across a set of grant ledger entries. */
-export function weightedAvgUnitPrice(grants: LedgerEntry[]): number {
-  let totalAmount = 0;
+/** OT-17 — reconstruct the paid value that priceCredits stored without requiring a schema change. */
+export function totalGrantValueMinor(grants: LedgerEntry[]): number {
   let totalValue = 0;
   for (const g of grants) {
-    totalAmount += g.amount;
-    totalValue += g.amount * (g.unitPriceMinor ?? 0);
+    const remainder = g.reason?.match(/^remainder_minor:(\d+)$/)?.[1];
+    totalValue += g.amount * (g.unitPriceMinor ?? 0) + (remainder === undefined ? 0 : Number(remainder));
   }
+  return totalValue;
+}
+
+/** EC:B8 OT-17 — grant-weighted average unit price, including the minor-unit remainder recorded at grant time. */
+export function weightedAvgUnitPrice(grants: LedgerEntry[]): number {
+  const totalAmount = grants.reduce((sum, grant) => sum + grant.amount, 0);
+  const totalValue = totalGrantValueMinor(grants);
   return totalAmount > 0 ? totalValue / totalAmount : 0;
+}
+
+/** SB-11 — resolve only the append-only markers that assign upgrade delta grants to an anchor invoice. */
+export function upgradeInvoiceAttributedGrantIds(entries: LedgerEntry[], paymentId: string): Set<string> {
+  return new Set(entries
+    .filter((entry) => entry.kind === 'adjust' && entry.reason === 'SB-11 upgrade_invoice_attribution'
+      && entry.reference.paymentId === paymentId)
+    .flatMap((entry) => entry.reference.grantId === undefined ? [] : [entry.reference.grantId]));
 }
 
 /**

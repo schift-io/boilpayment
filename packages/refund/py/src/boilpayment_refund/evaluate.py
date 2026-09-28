@@ -15,12 +15,18 @@ from boilpayment_core import (
     Repo,
     Subscription,
     proration_fraction,
-    round_half_away_from_zero,
     scale_minor,
 )
 
 from .reason import RefundReasonInput, rule_for_reason
-from .util import apply_rounding, days_between, proration_ratio, weighted_avg_unit_price
+from .util import (
+    _total_grant_value_minor,
+    _upgrade_invoice_attributed_grant_ids,
+    apply_rounding,
+    days_between,
+    proration_ratio,
+    weighted_avg_unit_price,
+)
 
 
 @dataclass(kw_only=True, slots=True)
@@ -57,14 +63,28 @@ def _ineligible(
 
 async def _granted_by_payment(
     ledger: LedgerStore, customer_id: str, payment_id: str
-) -> list[LedgerEntry]:
-    entries = await ledger.entries(customer_id, kind="grant")
-    return [
-        e
-        for e in entries
-        if e.reference.payment_id == payment_id
-        and e.source in ("subscription", "topup")
-    ]
+) -> tuple[list[LedgerEntry], bool]:
+    grants = await ledger.entries(customer_id, kind="grant")
+    # SB-11 -- an anchor-reset invoice owns the already-issued upgrade delta through an append-only
+    # attribution entry. Follow only the exact lifecycle marker and dedupe grants by ledger ID.
+    attributed_grant_ids = _upgrade_invoice_attributed_grant_ids(
+        await ledger.entries(customer_id, kind="adjust"), payment_id
+    )
+    found: dict[str, LedgerEntry] = {}
+    for grant in grants:
+        directly_paid = (
+            grant.reference.payment_id == payment_id
+            and grant.source in ("subscription", "topup")
+        )
+        attributed_upgrade_delta = (
+            grant.source == "subscription" and grant.id in attributed_grant_ids
+        )
+        if directly_paid or attributed_upgrade_delta:
+            found[grant.id] = grant
+    return list(found.values()), any(
+        grant.source == "subscription" and grant.id in attributed_grant_ids
+        for grant in grants
+    )
 
 
 async def _consumed_from_grants(
@@ -145,7 +165,9 @@ async def evaluate(input: EvaluateInput) -> RefundDecision:
         if r.status == "succeeded"
     )
 
-    grants = await _granted_by_payment(ledger, customer_id, payment.id)
+    grants, has_attributed_upgrade_delta = await _granted_by_payment(
+        ledger, customer_id, payment.id
+    )
     total_granted = sum(g.amount for g in grants)
     revoke_entries = await ledger.entries(customer_id, kind="revoke")
     already_revoked = sum(
@@ -172,11 +194,29 @@ async def evaluate(input: EvaluateInput) -> RefundDecision:
         consumed = await _consumed_from_grants(
             ledger, customer_id, grants, total_granted, clock.now()
         )
-        unit_price = weighted_avg_unit_price(grants)
+        # SB-11 -- upgrade delta grants intentionally have no price; the attributed invoice is
+        # their payment evidence and supplies the exact value used for proportional refunds.
+        total_grant_value = (
+            payment.amount.amount_minor
+            if has_attributed_upgrade_delta
+            else _total_grant_value_minor(grants)
+        )
+        unit_price = (
+            payment.amount.amount_minor / total_granted
+            if has_attributed_upgrade_delta and total_granted > 0
+            else weighted_avg_unit_price(grants)
+        )
 
         def compute_unused() -> tuple[int, int]:
             unused = max(0, total_granted - consumed)
-            return round_half_away_from_zero(unused * unit_price), unused  # EC:J7 same .5 rule as TS
+            # OT-17 -- preserve the stored remainder: floor(paid grant value * unused / granted),
+            # entirely in integer math.
+            amount = (
+                scale_minor(total_grant_value, unused, total_granted, "floor")
+                if total_granted > 0
+                else 0
+            )
+            return amount, unused
 
         def compute_time_prorated() -> tuple[int, int, str | None]:
             if payment.period is None:
@@ -198,13 +238,27 @@ async def evaluate(input: EvaluateInput) -> RefundDecision:
                     0,
                     f"overuse: consumed {consumed_ratio * 100:.1f}% > elapsed {elapsed_ratio * 100:.1f}%",
                 )
-            raw_credits = (amount / unit_price) if unit_price > 0 else 0
-            return amount, apply_rounding(raw_credits, policy.refund.rounding), None
+            if has_attributed_upgrade_delta and payment.amount.amount_minor > 0:
+                rounding = {
+                    "ceil_credits": "ceil",
+                    "round_credits": "round",
+                    "floor_credits": "floor",
+                }[policy.refund.rounding]
+                credits = scale_minor(
+                    amount,
+                    total_granted,
+                    payment.amount.amount_minor,
+                    rounding,
+                )
+            else:
+                raw_credits = (amount / unit_price) if unit_price > 0 else 0
+                credits = apply_rounding(raw_credits, policy.refund.rounding)
+            return amount, credits, None
 
         rule_id = "D2"
         if method == "unused_credits":
             amount_minor, credits_to_revoke = compute_unused()
-            reason = f"D2: unused_credits {credits_to_revoke} credits x {unit_price} minor/credit -> {amount_minor} minor"
+            reason = f"D2: unused_credits {credits_to_revoke}/{total_granted} of {total_grant_value} minor -> {amount_minor} minor"
         elif method == "time_prorated":
             amount_minor, credits_to_revoke, denied = compute_time_prorated()
             if denied:

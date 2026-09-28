@@ -240,6 +240,76 @@ def test_consume_fifo_by_expiry_skips_already_expired_grants():
     asyncio.run(run())
 
 
+def test_sb_07_balance_and_consume_honor_append_only_grace_expiry_extension():
+    async def run():
+        from boilpayment_core import ConsumeInput
+
+        db = await create_test_db("py_ledger_sb07")
+        try:
+            ledger = PostgresLedgerStore(db.dsn)
+            repo = PostgresRepo(db.dsn)
+            customer_id = await _make_customer(repo)
+            now = datetime.now(UTC)
+            original_expiry = now + timedelta(minutes=1)
+            grace_until = now + timedelta(days=7)
+            grant = (
+                await ledger.append(
+                    NewLedgerEntry(
+                        customer_id=customer_id,
+                        pool="paid",
+                        kind="grant",
+                        amount=100,
+                        unit_price_minor=10,
+                        currency="USD",
+                        expires_at=original_expiry,
+                        source="subscription",
+                        reference=LedgerReference(),
+                        idempotency_key=f"grant:{uuid.uuid4()}",
+                        actor="system",
+                    )
+                )
+            ).entry
+            await ledger.append(
+                NewLedgerEntry(
+                    customer_id=customer_id,
+                    pool="paid",
+                    kind="adjust",
+                    amount=0,
+                    unit_price_minor=None,
+                    currency="USD",
+                    expires_at=grace_until,
+                    source="subscription",
+                    reference=LedgerReference(grant_id=grant.id),
+                    idempotency_key=f"adjust:{uuid.uuid4()}",
+                    actor="system",
+                    reason="SB-07 grace_expiry_extension",
+                )
+            )
+            during_grace = original_expiry + timedelta(minutes=1)
+
+            balance = await ledger.balance(customer_id, "paid", during_grace)
+            assert [(item.expires_at, item.amount) for item in balance.expiring] == [
+                (grace_until, 100)
+            ]
+            result = await ledger.consume(
+                ConsumeInput(
+                    customer_id=customer_id,
+                    pool_order=["paid"],
+                    amount=10,
+                    idempotency_key=f"consume:{uuid.uuid4()}",
+                    meta=LedgerReference(),
+                    now=during_grace,
+                    negative_balance="block",
+                    negative_floor=0,
+                )
+            )
+            assert result.ok is True
+        finally:
+            await drop_test_db(db)
+
+    asyncio.run(run())
+
+
 def test_negative_balance_block_rejects_atomically():
     async def run():
         db = await create_test_db("py_ledger_block")

@@ -51,4 +51,9 @@ from .trial import (  # noqa: F401
     convert_trial,
     is_trial_eligible,
 )
-from .upgrade import UpgradeInput, UpgradeResult, upgrade  # noqa: F401
+from .upgrade import (  # noqa: F401
+    UpgradeInput,
+    UpgradeResult,
+    fail_pending_upgrade,
+    upgrade,
+)

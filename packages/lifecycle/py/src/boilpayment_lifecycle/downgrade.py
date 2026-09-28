@@ -136,6 +136,17 @@ async def _do_downgrade(input: DowngradeInput) -> DowngradeResult:
         raise PaymentKitError(f"plan not found: {sub.plan_id}", "plan_not_found")
 
     if policy.downgrade.mode == "end_of_period":
+        # SB-14 -- schedule the provider's lower renewal price before recording the local intent.
+        if sub.provider in ("stripe", "polar") and provider.capabilities().native_subscriptions:
+            if sub.provider_ref is None:
+                raise PaymentKitError("native subscription mutation requires its provider reference", "subscription_provider_ref_required")
+            price_ref = resolve_price_ref(new_plan, sub.provider, sub.currency)
+            await scope_provider(provider, input.correlation_id).change_subscription(
+                sub.provider_ref,
+                new_price_ref=price_ref,
+                proration="none",
+                reset_anchor=False,
+            )
         updated = replace_sub(sub, scheduled_plan_id=new_plan.id)
         await repo.subscriptions.put(updated)
         return DowngradeResult(sub=updated, clawback=None)

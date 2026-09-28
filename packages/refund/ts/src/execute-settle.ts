@@ -1,6 +1,6 @@
 import type { Payment, Refund } from 'boilpayment-core';
 import type { ExecuteInput } from './execute.js';
-import { revertRefundedUpgrade } from './util.js';
+import { revertRefundedUpgrade, upgradeInvoiceAttributedGrantIds } from './util.js';
 
 export async function settleRefund(input: ExecuteInput, providerResult: Refund, payment: Payment): Promise<Refund> {
   const { decision, provider, ledger, repo, clock, extra, cs, policy, correlationId } = input;
@@ -13,7 +13,15 @@ export async function settleRefund(input: ExecuteInput, providerResult: Refund, 
     // dunning (A16) and expiry (B14) all see those grants as consumed; an unattributed revoke would be
     // double-counted later (found by examples/e2e). Any remainder beyond the buckets stays unattributed.
     const all = await ledger.entries(decision.customerId, { pool: 'paid' });
-    const grants = all.filter((e) => e.kind === 'grant' && e.reference.paymentId === decision.paymentId);
+    // SB-11 — requested refunds follow the same exact invoice attribution as evaluate and external
+    // settlement, so the revoke lands on the original delta bucket instead of floating.
+    const attributedGrantIds = upgradeInvoiceAttributedGrantIds(all, decision.paymentId);
+    const grantsById = new Map(all
+      .filter((entry) => entry.kind === 'grant' && (
+        entry.reference.paymentId === decision.paymentId
+        || (entry.source === 'subscription' && attributedGrantIds.has(entry.id))))
+      .map((grant) => [grant.id, grant]));
+    const grants = [...grantsById.values()];
     // Retry-safe: subtract what this refundId already revoked (a retried execute must not revoke twice).
     const alreadyRevoked = all
       .filter((e) => e.kind === 'revoke' && e.reference.refundId === refundId)

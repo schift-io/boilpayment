@@ -1,4 +1,4 @@
-import { runIdempotent, serializeCsCase, deserializeCsCase, keyMatchesInstant } from 'boilpayment-core';
+import { runIdempotent, serializeCsCase, deserializeCsCase, keyMatchesInstant, nextPeriod } from 'boilpayment-core';
 import type { CsCase, LedgerEntry, Payment, Period, Plan, Subscription } from 'boilpayment-core';
 import { escalate, reject, resolve } from './cases.js';
 import { getPurchaseSnapshot } from './purchaseSnapshot.js';
@@ -16,6 +16,56 @@ export interface RecoverMissingGrantsInput extends SupportDeps {
   readonly grants: SupportGrants;
   readonly customerId?: string;
   readonly since?: Date;
+}
+
+function rawContains(value: unknown, expected: string): boolean {
+  if (value === expected) return true;
+  if (Array.isArray(value)) return value.some((item) => rawContains(item, expected));
+  if (value !== null && typeof value === 'object') return Object.values(value).some((item) => rawContains(item, expected));
+  return false;
+}
+
+async function openReconcileMismatch(input: {
+  readonly sub: Subscription; readonly payment: Payment; readonly deps: RecoverMissingGrantsInput;
+  readonly actualPlanId: string | null; readonly reason?: string;
+}): Promise<CsCase> {
+  const { sub, payment, deps, actualPlanId, reason } = input;
+  const id = `reconcile_mismatch:${payment.id}`;
+  const existing = await deps.repo.csCases.get(id);
+  if (existing) return existing;
+  const now = deps.clock.now();
+  const mismatchCase: CsCase = {
+    id, customerId: sub.customerId, kind: 'reconcile_mismatch', status: 'needs_human', referenceId: payment.id,
+    policySnapshot: structuredClone(deps.policy), decision: {
+      subscriptionId: sub.id, expectedPlanId: sub.scheduledPlanId ?? sub.planId, actualPlanId,
+      amountMinor: payment.amount.amountMinor, currency: payment.amount.currency, ...(reason ? { reason } : {}),
+    }, churnReason: null, churnText: null, openedAt: now, resolvedAt: null, escalatedAt: now,
+  };
+  await deps.repo.csCases.put(mismatchCase);
+  return mismatchCase;
+}
+
+async function resolveReconciledPlan(input: {
+  readonly sub: Subscription; readonly payment: Payment; readonly deps: RecoverMissingGrantsInput;
+}): Promise<{ readonly plan: Plan | null; readonly mismatchCase: CsCase | null }> {
+  const { sub, payment, deps } = input;
+  const plans = (await deps.repo.plans.list()).filter((plan) => plan.interval !== null);
+  const byProviderRef = plans.filter((plan) => plan.prices.some((price) => {
+    const ref = price.providerPriceRefs?.[payment.provider];
+    return ref !== undefined && rawContains(payment.raw, ref);
+  }));
+  const currency = payment.amount.currency.toUpperCase();
+  const byAmount = plans.filter((plan) => plan.prices.some((price) =>
+    price.currency.toUpperCase() === currency && price.amountMinor === payment.amount.amountMinor));
+  const candidates = byProviderRef.length > 0 ? byProviderRef : byAmount;
+  const actual = candidates.length === 1 ? candidates[0] ?? null : null;
+  const expectedPlanId = sub.scheduledPlanId ?? sub.planId;
+  if (actual?.id === expectedPlanId) return { plan: actual, mismatchCase: null };
+
+  // SB-14 — a renewal charged at another (or ambiguous) price must never receive the scheduled
+  // plan's credits. The deterministic case also deduplicates a late webhook's mismatch handling.
+  const mismatchCase = await openReconcileMismatch({ sub, payment, deps, actualPlanId: actual?.id ?? null });
+  return { plan: actual, mismatchCase };
 }
 
 /** Replays the original credit primitive using persisted entitlement and verified payment facts. */
@@ -57,10 +107,74 @@ export async function recoverMissingGrant(input: RecoverMissingGrantInput): Prom
 
 }
 
-/** Scans only locally recorded payments; provider-only orphans require explicit reconciliation. */
+/** Reconciles native renewals, then scans all local payments that still lack their grant. */
 export async function recoverMissingGrants(input: RecoverMissingGrantsInput): Promise<CsCase[]> {
+  // SB-06 — Stripe/Polar can charge a native renewal even when its webhook is lost. Pull those
+  // payments from each eligible local subscription and use the webhook's canonical grant key.
+  const since = input.since;
+  const reconciledCases: CsCase[] = [];
+  if (since) {
+    const subscriptions = await input.repo.subscriptions.list(input.customerId ? { customerId: input.customerId } : undefined);
+    for (const listed of subscriptions) {
+      if ((listed.provider !== 'stripe' && listed.provider !== 'polar') || (listed.status !== 'active' && listed.status !== 'past_due')) continue;
+      if (!listed.providerRef) continue;
+      const provider = input.providers[listed.provider];
+      if (!provider?.capabilities().nativeSubscriptions) continue;
+      const customer = await input.repo.customers.get(listed.customerId);
+      const customerRef = customer?.providerRefs.find((ref) => ref.provider === listed.provider)?.ref;
+      if (!customerRef) continue;
+      const remotePayments = (await provider.listPayments({ customerRef, since }))
+        .filter((payment) => payment.provider === listed.provider && payment.kind === 'subscription'
+          && payment.status === 'succeeded' && payment.subscriptionId === listed.providerRef
+          && payment.occurredAt >= since)
+        .sort((left, right) => left.occurredAt.getTime() - right.occurredAt.getTime());
+      for (const remote of remotePayments) {
+        const current = await input.repo.subscriptions.get(listed.id);
+        if (!current || (current.status !== 'active' && current.status !== 'past_due')) continue;
+        const existing = (await input.repo.payments.list({ provider: current.provider, providerRef: remote.providerRef }))[0];
+        if (existing && (existing.customerId !== current.customerId || existing.subscriptionId !== current.id)) continue;
+        let payment: Payment = {
+          id: existing?.id ?? input.ids.newId(), customerId: current.customerId, provider: current.provider,
+          providerRef: remote.providerRef, subscriptionId: current.id, amount: remote.amount, status: remote.status,
+          kind: 'subscription', period: remote.period ?? existing?.period ?? null, occurredAt: remote.occurredAt, failure: remote.failure,
+          cashReceipt: existing?.cashReceipt ?? null, raw: remote.raw, providerRefAliases: remote.providerRefAliases,
+        };
+        await input.repo.payments.put(payment);
+        const resolved = await resolveReconciledPlan({ sub: current, payment, deps: input });
+        if (resolved.mismatchCase && !reconciledCases.some((item) => item.id === resolved.mismatchCase?.id)) {
+          reconciledCases.push(resolved.mismatchCase);
+        }
+        const plan = resolved.plan;
+        if (!plan) continue;
+        if (!payment.period) {
+          const derived = payment.provider === 'polar' && plan.interval
+            ? nextPeriod(current.currentPeriod, plan.interval, current.anchorDay,
+              input.policy.period.timezone, input.policy.period.monthEndAnchor)
+            : null;
+          const safelyMapped = derived && payment.occurredAt >= derived.start && payment.occurredAt < derived.end;
+          if (!derived || !safelyMapped) {
+            const periodCase = await openReconcileMismatch({ sub: current, payment, deps: input,
+              actualPlanId: plan.id, reason: 'renewal_period_unresolved' });
+            if (!reconciledCases.some((item) => item.id === periodCase.id)) reconciledCases.push(periodCase);
+            continue;
+          }
+          payment = { ...payment, period: derived };
+          await input.repo.payments.put(payment);
+        }
+        const paidPeriod = payment.period;
+        if (!paidPeriod) continue;
+        await input.grants.grantForPeriod({ sub: { ...current, planId: plan.id, status: 'active' }, plan,
+          period: paidPeriod, payment, policy: input.policy, ledger: input.ledger, clock: input.clock });
+        const fresh = await input.repo.subscriptions.get(current.id);
+        if (fresh && (fresh.status === 'active' || fresh.status === 'past_due') && paidPeriod.end > fresh.currentPeriod.end) {
+          await input.repo.subscriptions.put({ ...fresh, planId: plan.id, scheduledPlanId: null,
+            currentPeriod: paidPeriod, status: 'active', graceUntil: null });
+        }
+      }
+    }
+  }
   const payments = await input.repo.payments.list(input.customerId ? { customerId: input.customerId } : undefined);
-  const results: CsCase[] = [];
+  const results: CsCase[] = [...reconciledCases];
   for (const payment of payments) {
     if ((input.since && payment.occurredAt < input.since) || payment.kind === 'overage') continue;
     // EC:A46 — a declined charge bought nothing, and a self-scheduled attempt still pending belongs to
@@ -69,6 +183,7 @@ export async function recoverMissingGrants(input: RecoverMissingGrantsInput): Pr
     if (payment.status === 'pending' && (payment.raw as { boilpaymentAttemptKey?: unknown } | undefined)?.boilpaymentAttemptKey) continue;
     const entries = await input.ledger.entries(payment.customerId, { kind: 'grant' });
     if (entries.some((entry) => entry.reference.paymentId === payment.id)) continue;
+    if (await input.repo.csCases.get(`reconcile_mismatch:${payment.id}`)) continue;
     // EC:A46 — already handed to a person: the scan reports the open case again, it does not re-notify.
     const recorded = await input.repo.operations.get(`support-case:regrant:${payment.customerId}:${payment.id}:`);
     if (recorded?.status === 'done') {

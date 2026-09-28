@@ -13,6 +13,10 @@ import {
   Repo,
   Subscription,
   keyMatchesInstant,
+  effectiveGrantExpiry,
+  GRACE_EXPIRY_EXTENSION_REASON,
+  GRACE_EXPIRY_RESTORE_REASON,
+  PAID_PERIOD_PRESERVED_REASON,
 } from 'boilpayment-core';
 import { grantForPeriod, GrantResult } from 'boilpayment-credits';
 import { retryOnVersionConflict } from './retry.js';
@@ -22,6 +26,7 @@ import { nextPeriod } from './period.js';
 import { onRenewalPaid } from './renewal.js';
 import { checkLegacyDunning } from './legacy-attempts.js';
 import { applyMissedPeriods, settleOpenAttemptIfBehind } from './missed-periods.js';
+import { failPendingUpgrade } from './upgrade.js';
 
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
@@ -64,6 +69,8 @@ export interface OnPaymentFailedInput {
   repo: Repo;
   notifier: Notifier;
   clock: Clock;
+  /** SB-07/SB-13 — optional for source compatibility; production failure paths pass it. */
+  ledger?: LedgerStore;
 }
 export interface OnPaymentFailedResult {
   sub: Subscription;
@@ -71,13 +78,69 @@ export interface OnPaymentFailedResult {
 
 // EC:A13 — start grace period.
 export async function onPaymentFailed(input: OnPaymentFailedInput): Promise<OnPaymentFailedResult> {
-  const { sub, policy, repo, notifier, clock } = input;
+  const { policy, repo, notifier, clock } = input;
+  let sub = input.sub;
   // EC:A27 — an incomplete subscription never paid: a failed first payment has no access to keep,
   // so no grace period, retries or notices.
   if (sub.status === 'incomplete') return { sub };
   const now = clock.now();
   const graceDays = policy.dunning.graceDays;
   const graceUntil = graceDays > 0 ? new Date(now.getTime() + graceDays * DAY_MS) : now;
+
+  if (input.ledger) {
+    const ledger = input.ledger;
+    // SB-13 — a failed Polar difference order rolls its pending upgrade back before dunning.
+    sub = await failPendingUpgrade({ sub, ledger, repo, clock });
+    if (sub.provider === 'stripe' || sub.provider === 'polar') {
+      await ledger.transaction(sub.customerId, async () => {
+        const all = await ledger.entries(sub.customerId);
+        const grants = all.filter((entry) => entry.kind === 'grant'
+          && entry.pool === 'paid'
+          && entry.source === 'subscription'
+          && entry.reference.subscriptionId === sub.id
+          && entry.reference.periodStart?.getTime() === sub.currentPeriod.start.getTime());
+        for (const grant of grants) {
+          // SB-09 — this grant bought the paid period that dunning preserves. The zero audit row
+          // distinguishes it from a legacy/unpaid-period grant without changing null expiry.
+          await ledger.append({
+            customerId: sub.customerId, pool: grant.pool, kind: 'adjust', amount: 0,
+            unitPriceMinor: null, currency: grant.currency, expiresAt: null,
+            source: 'subscription', reference: { ...grant.reference, grantId: grant.id },
+            idempotencyKey: `adjust:paid-period-preserved:${sub.id}:${grant.id}`,
+            actor: 'system', reason: PAID_PERIOD_PRESERVED_REASON,
+          });
+          if (graceUntil.getTime() <= now.getTime()) continue;
+          const linked = all.filter((entry) => entry.kind !== 'grant' && entry.reference.grantId === grant.id);
+          const remainingBeforeExpiry = grant.amount + linked
+            .filter((entry) => entry.kind !== 'expire' && entry.reason !== GRACE_EXPIRY_RESTORE_REASON)
+            .reduce((sum, entry) => sum + entry.amount, 0);
+          const expiresAt = effectiveGrantExpiry(grant, all);
+          if (expiresAt === null || expiresAt.getTime() >= graceUntil.getTime() || remainingBeforeExpiry <= 0) continue;
+
+          const expiredDebit = -linked
+            .filter((entry) => entry.kind === 'expire' && entry.amount < 0)
+            .reduce((sum, entry) => sum + entry.amount, 0);
+          const restoreAmount = Math.min(expiredDebit, remainingBeforeExpiry);
+          if (restoreAmount > 0) {
+            await ledger.append({
+              customerId: sub.customerId, pool: grant.pool, kind: 'adjust', amount: restoreAmount,
+              unitPriceMinor: null, currency: grant.currency, expiresAt: null,
+              source: 'subscription', reference: { ...grant.reference, grantId: grant.id },
+              idempotencyKey: `adjust:grace-expiry-restore:${sub.id}:${grant.id}`,
+              actor: 'system', reason: GRACE_EXPIRY_RESTORE_REASON,
+            });
+          }
+          await ledger.append({
+            customerId: sub.customerId, pool: grant.pool, kind: 'adjust', amount: 0,
+            unitPriceMinor: null, currency: grant.currency, expiresAt: graceUntil,
+            source: 'subscription', reference: { ...grant.reference, grantId: grant.id },
+            idempotencyKey: `adjust:grace-expiry:${sub.id}:${grant.id}:${graceUntil.toISOString()}`,
+            actor: 'system', reason: GRACE_EXPIRY_EXTENSION_REASON,
+          });
+        }
+      });
+    }
+  }
 
   const updated: Subscription = { ...sub, status: 'past_due', graceUntil };
   await repo.subscriptions.put(updated);
@@ -127,7 +190,10 @@ export async function onGraceExpired(input: OnGraceExpiredInput): Promise<OnGrac
     const periodKey = `grant:${sub.id}:${sub.currentPeriod.start.toISOString()}`;
     const all = await ledger.entries(sub.customerId);
     const grant = all.find((e) => e.kind === 'grant' && (e.idempotencyKey === periodKey || keyMatchesInstant(e.idempotencyKey, `grant:${sub.id}:`, sub.currentPeriod.start)));
-    if (grant) {
+    const preserved = grant && all.some((e) => e.kind === 'adjust'
+      && e.amount === 0 && e.reason === PAID_PERIOD_PRESERVED_REASON
+      && e.reference.grantId === grant.id);
+    if (grant && !preserved) {
       const used = all
         .filter((e) => (e.kind === 'consume' || e.kind === 'revoke') && e.reference.grantId === grant.id)
         .reduce((sum, e) => sum + e.amount, 0);

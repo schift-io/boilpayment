@@ -9,6 +9,7 @@ from boilpayment_core import (
     Checkout,
     CreateCheckoutInput,
     PaymentKitError,
+    ProviderError,
     ProviderName,
     run_idempotent,
 )
@@ -104,6 +105,33 @@ async def start_checkout(input: StartCheckoutInput) -> Checkout:
         raise PaymentKitError(
             "checkout provider unavailable", "checkout_evidence_missing"
         )
+    # OT-03 -- Stripe/Polar require a provider-side price reference. Validate the captured sale
+    # before invoking create_checkout and release the unsold snapshot for a repaired retry.
+    price_refs = snapshot.price.provider_price_refs or {}
+    if snapshot.provider in ("stripe", "polar") and snapshot.provider not in price_refs:
+        recorded = await input.repo.operations.get(key)
+        if recorded is not None and recorded.status == "done":
+            await input.repo.operations.put(replace(
+                recorded, status="failed", result=None, error="missing_provider_price_ref",
+                completed_at=input.clock.now(),
+            ))
+        legacy_key = f"checkout-result:{input.customer_id}:{input.request_id}"
+        legacy = await input.repo.operations.get(legacy_key)
+        legacy_result = legacy.result if legacy is not None else None
+        legacy_unknown = (
+            isinstance(legacy_result, dict)
+            and (legacy_result.get("kind") == "unknown" or legacy_result.get("checkout", False) is None)
+        )
+        if legacy is not None and legacy.status == "done" and legacy_unknown:
+            await input.repo.operations.put(replace(
+                legacy, status="failed", result=None, error="missing_provider_price_ref",
+                completed_at=input.clock.now(),
+            ))
+        raise PaymentKitError(
+            f"set plan_prices.provider_price_refs for plan {snapshot.plan.id} / {snapshot.price.currency}",
+            "missing_provider_price_ref",
+            {"plan_id": snapshot.plan.id},
+        )
 
     async def create() -> CheckoutAttempt:
         try:
@@ -127,7 +155,23 @@ async def start_checkout(input: StartCheckoutInput) -> Checkout:
             )
 
             return CheckoutAttempt(checkout=checkout)
-        except (PaymentKitError, OSError, TimeoutError, RuntimeError):
+        # OT-03 -- pre-request price validation is definitive. Discard the unsold snapshot so a
+        # catalog repair is recaptured on retry; provider/transport outcomes remain unknown here.
+        except PaymentKitError as error:
+            if isinstance(error, ProviderError):
+                detail_status = error.details.get("status") if isinstance(error.details, dict) else None
+                status = error.http_status if error.http_status is not None else detail_status
+                if isinstance(status, int) and 400 <= status < 500 and status not in (408, 409, 429):
+                    raise
+                return CheckoutAttempt(checkout=None)
+            if error.code == "missing_provider_price_ref":
+                recorded = await input.repo.operations.get(key)
+                if recorded is not None and recorded.status == "done":
+                    await input.repo.operations.put(replace(
+                        recorded, status="failed", result=None, error=str(error), completed_at=input.clock.now()
+                    ))
+            raise
+        except (OSError, TimeoutError, RuntimeError):
             return CheckoutAttempt(checkout=None)
 
     attempt = await run_idempotent(

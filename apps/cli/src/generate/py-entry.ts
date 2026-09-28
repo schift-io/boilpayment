@@ -161,8 +161,8 @@ export function generateIndexPy(config: PaykitConfig): string {
 
   if (hasSubscription) {
     l.push(`    class _LifecycleDunningDeps:`);
-    l.push(`        async def on_payment_failed(self, *, sub: Any, policy: Any, repo: Any, notifier: Any, clock: Any) -> Any:`);
-    l.push(`            return await dunning.on_payment_failed(dunning.OnPaymentFailedInput(sub=sub, policy=policy, repo=repo, notifier=notifier, clock=clock))`);
+    l.push(`        async def on_payment_failed(self, *, sub: Any, policy: Any, ledger: Any, repo: Any, notifier: Any, clock: Any) -> Any:`);
+    l.push(`            return await dunning.on_payment_failed(dunning.OnPaymentFailedInput(sub=sub, policy=policy, ledger=ledger, repo=repo, notifier=notifier, clock=clock))  # SB-07`);
     l.push('');
     l.push(`    class _LifecycleDeps:`);
     l.push(`        dunning = _LifecycleDunningDeps()`);

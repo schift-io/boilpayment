@@ -17,10 +17,15 @@ from boilpayment_core import (
     PaymentKitError,
     Refund,
     Repo,
+    effective_grant_expiry,
 )
 from boilpayment_core.money import round_half_away_from_zero
 
-from .util import revert_refunded_upgrade, weighted_avg_unit_price
+from .util import (
+    _upgrade_invoice_attributed_grant_ids,
+    revert_refunded_upgrade,
+    weighted_avg_unit_price,
+)
 
 
 def payment_share_credits(amount_minor: int, currency: str, paid: Any, total_granted: int) -> int | None:
@@ -210,12 +215,23 @@ async def on_external_refund(input: OnExternalRefundInput) -> Refund:
         amount_minor = settlement_amount.amount_minor
         currency = settlement_amount.currency
 
-        grants = [
-            e
-            for e in await ledger.entries(payment.customer_id, kind="grant")
-            if e.reference.payment_id == payment.id
-            and e.source in ("subscription", "topup")
-        ]
+        # SB-11 -- the anchor invoice owns its null-priced upgrade delta through exact append-only markers.
+        attributed_grant_ids = _upgrade_invoice_attributed_grant_ids(
+            await ledger.entries(payment.customer_id, kind="adjust"), payment.id
+        )
+        grants_by_id = {
+            grant.id: grant
+            for grant in await ledger.entries(payment.customer_id, kind="grant")
+            if (
+                grant.reference.payment_id == payment.id
+                and grant.source in ("subscription", "topup")
+            )
+            or (
+                grant.source == "subscription"
+                and grant.id in attributed_grant_ids
+            )
+        }
+        grants = list(grants_by_id.values())
         total_granted = sum(g.amount for g in grants)
         already_revoked = sum(
             -e.amount
@@ -335,25 +351,30 @@ async def _revoke_buckets(
     then the rest earliest-expiry first. Remaining per bucket = grant + every entry that names it.
     The caller clamps `amount` to the available balance, which never exceeds the buckets' total."""
     entries = await ledger.entries(customer_id, pool="paid")
+    attributed_grant_ids = _upgrade_invoice_attributed_grant_ids(entries, payment_id)
     drawn: dict[str, int] = {}
     for e in entries:
         if e.kind != "grant" and e.reference.grant_id:
             drawn[e.reference.grant_id] = drawn.get(e.reference.grant_id, 0) + e.amount
-    live = [
-        (g, g.amount + drawn.get(g.id, 0))
+    buckets = [
+        (g, effective_grant_expiry(g, entries), g.amount + drawn.get(g.id, 0))
         for g in entries
-        if g.kind == "grant" and (g.expires_at is None or g.expires_at > now)
+        if g.kind == "grant"
     ]
-    live = [(g, rem) for g, rem in live if rem > 0]
+    live = [
+        (g, expiry, rem)
+        for g, expiry, rem in buckets
+        if (expiry is None or expiry > now) and rem > 0
+    ]
     live.sort(key=lambda b: (
-        b[0].reference.payment_id != payment_id,
-        b[0].expires_at is None,
-        b[0].expires_at or now,
+        b[0].reference.payment_id != payment_id and b[0].id not in attributed_grant_ids,
+        b[1] is None,
+        b[1] or now,
         b[0].created_at,
     ))
     parts: list[tuple[str, int]] = []
     left = amount
-    for g, rem in live:
+    for g, _, rem in live:
         if left <= 0:
             break
         take = min(left, rem)

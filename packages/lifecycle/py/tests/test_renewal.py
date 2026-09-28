@@ -241,3 +241,38 @@ def test_ec_a25_same_period_grants_once_payment_succeeded():
         assert ok.grant.entry.amount == 100
 
     run(scenario())
+
+
+def test_sb_10_terminal_native_subscription_rejects_late_success_without_grant():
+    import pytest
+    from boilpayment_core import PaymentKitError
+
+    async def scenario(provider: str, status: str):
+        clock, ledger, repo = await setup()
+        sub = mk_sub(
+            provider=provider,
+            provider_ref=f"{provider}_sub_1",
+            status=status,
+        )
+        await repo.subscriptions.put(sub)
+
+        with pytest.raises(PaymentKitError) as exc:
+            await on_renewal_paid(OnRenewalPaidInput(
+                sub=sub,
+                payment=mk_payment(
+                    provider=provider,
+                    provider_ref=f"{provider}_late_payment",
+                ),
+                policy=resolve_policy(),
+                ledger=ledger,
+                repo=repo,
+                clock=clock,
+            ))
+
+        assert exc.value.code == "subscription_terminal_payment"
+        assert await ledger.entries(sub.customer_id) == []
+        assert (await repo.subscriptions.get(sub.id)).status == status
+
+    for provider in ("stripe", "polar"):
+        for status in ("canceled", "expired"):
+            run(scenario(provider, status))

@@ -196,6 +196,58 @@ def test_ec_b3_within_pool_drains_soonest_expiry_first_null_last():
 # ── EC:B14 expiry filter ─────────────────────────────────────────────────────
 
 
+def test_sb_07_linked_grace_expiry_extends_dated_grant_but_null_stays_null():
+    async def scenario():
+        clock = FixedClock(NOW)
+        ledger = InMemoryLedger(SequentialIdGen("led_"), clock)
+        dated = (
+            await ledger.append(
+                mk_grant(
+                    customer_id="c1",
+                    pool="paid",
+                    amount=10,
+                    idempotency_key="g_dated",
+                    expires_at=datetime(2025, 12, 31, tzinfo=UTC),
+                )
+            )
+        ).entry
+        unbounded = (
+            await ledger.append(
+                mk_grant(
+                    customer_id="c1",
+                    pool="paid",
+                    amount=5,
+                    idempotency_key="g_unbounded",
+                    expires_at=None,
+                )
+            )
+        ).entry
+        grace_until = datetime(2026, 1, 8, tzinfo=UTC)
+        for grant in (dated, unbounded):
+            await ledger.append(
+                NewLedgerEntry(
+                    customer_id="c1",
+                    pool="paid",
+                    kind="adjust",
+                    amount=0,
+                    source="subscription",
+                    reference=LedgerReference(grant_id=grant.id),
+                    idempotency_key=f"extend:{grant.id}",
+                    actor="system",
+                    expires_at=grace_until,
+                    reason="SB-07 grace_expiry_extension",
+                )
+            )
+
+        balance = await ledger.balance("c1", "paid", NOW)
+        assert balance.available == 15
+        assert [(item.expires_at, item.amount) for item in balance.expiring] == [
+            (grace_until, 10)
+        ]
+
+    run(scenario())
+
+
 def test_ec_b14_expired_grant_excluded_from_consume():
     async def scenario():
         ledger = InMemoryLedger(SequentialIdGen("led_"))

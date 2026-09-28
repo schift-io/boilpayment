@@ -4,6 +4,7 @@ import {
   IdGen,
   LedgerEntry,
   LedgerStore,
+  Operation,
   Payment,
   PaymentKitError,
   PaymentProvider,
@@ -81,12 +82,60 @@ export function pendingUpgradeGrantKey(subId: string, periodStart: Date): string
   return `upgrade-grant:${subId}:${periodStart.toISOString()}`;
 }
 
+export interface UpgradeAnchorIntent {
+  subId: string;
+  fromPlanId: string;
+  toPlanId: string;
+  delta: number;
+  sourcePeriodStart: string;
+  sourcePeriodEnd: string;
+}
+
+/** SB-11 — durable handoff between Stripe's synchronous reset call and its invoice webhook. */
+export function upgradeAnchorIntentKey(subId: string, sourcePeriodStart: Date): string {
+  return `upgrade-anchor:${subId}:${sourcePeriodStart.toISOString()}`;
+}
+
+async function putUpgradeAnchorIntent(
+  repo: Repo, sub: Subscription, fromPlanId: string, toPlanId: string, delta: number, now: Date,
+): Promise<string> {
+  const key = upgradeAnchorIntentKey(sub.id, sub.currentPeriod.start);
+  const existing = await repo.operations.get(key);
+  const intent: UpgradeAnchorIntent = {
+    subId: sub.id, fromPlanId, toPlanId, delta,
+    sourcePeriodStart: sub.currentPeriod.start.toISOString(),
+    sourcePeriodEnd: sub.currentPeriod.end.toISOString(),
+  };
+  if (existing && existing.status !== 'failed') {
+    const saved = existing.result as UpgradeAnchorIntent;
+    const sameTransition = existing.kind === 'lifecycle.upgrade_anchor' &&
+      saved.subId === intent.subId && saved.fromPlanId === intent.fromPlanId &&
+      saved.toPlanId === intent.toPlanId && saved.delta === intent.delta &&
+      saved.sourcePeriodStart === intent.sourcePeriodStart && saved.sourcePeriodEnd === intent.sourcePeriodEnd;
+    if (sameTransition) return key;
+    throw new PaymentKitError(
+      'another reset-anchor upgrade intent already owns this source period',
+      'upgrade_payment_pending',
+      { subscriptionId: sub.id, sourcePeriodStart: intent.sourcePeriodStart },
+    );
+  }
+  const op: Operation = {
+    id: key, key, kind: 'lifecycle.upgrade_anchor', payloadHash: '', status: 'in_progress',
+    result: intent, error: null, createdAt: now, completedAt: null, attempts: 0,
+  };
+  await repo.operations.put(op);
+  return key;
+}
+
 /**
  * EC:A84 — writes the waiting delta for this upgrade (reason = from->to) without reopening one already paid:
  * a retry of the same upgrade leaves an in-progress or done operation alone, and a different upgrade while
  * another one's order is still unpaid in this period is refused (the key has no plan, EC:A82).
  */
-async function putPendingGrant(repo: Repo, key: string, amount: number, periodEnd: Date, reason: string, policy: Policy, now: Date): Promise<void> {
+async function putPendingGrant(
+  repo: Repo, key: string, amount: number, periodEnd: Date, reason: string,
+  fromPlanId: string, toPlanId: string, policy: Policy, now: Date,
+): Promise<void> {
   const op = await repo.operations.get(key);
   const sameUpgrade = (op?.result as { reason?: string } | null | undefined)?.reason === reason;
   if (op && sameUpgrade && op.status !== 'failed') return;
@@ -95,8 +144,59 @@ async function putPendingGrant(repo: Repo, key: string, amount: number, periodEn
   }
   await repo.operations.put({
     id: key, key, kind: 'lifecycle.upgrade_grant', payloadHash: '', status: 'in_progress', error: null, createdAt: now, completedAt: null, attempts: 0,
-    result: { amount, expiresAt: policy.credits.rollover === 'full' ? null : periodEnd.toISOString(), reason },
+    result: {
+      amount, expiresAt: policy.credits.rollover === 'full' ? null : periodEnd.toISOString(), reason,
+      fromPlanId, toPlanId, grantKey: `grant:${key}:${reason}`,
+    },
   });
+}
+
+interface PendingUpgradeGrant {
+  amount: number;
+  expiresAt: string | null;
+  reason: string;
+  fromPlanId?: string;
+  toPlanId?: string;
+  grantKey?: string;
+}
+
+/** SB-13 — fail a provider-billed upgrade without leaving its target plan or raced credit grant behind. */
+export async function failPendingUpgrade(input: {
+  sub: Subscription;
+  ledger: LedgerStore;
+  repo: Repo;
+  clock: Clock;
+}): Promise<Subscription> {
+  const { sub, ledger, repo, clock } = input;
+  const key = pendingUpgradeGrantKey(sub.id, sub.currentPeriod.start);
+  const op = await repo.operations.get(key);
+  if (!op || op.kind !== 'lifecycle.upgrade_grant' || op.status !== 'in_progress') {
+    return (await repo.subscriptions.get(sub.id)) ?? sub;
+  }
+  const pending = op.result as PendingUpgradeGrant;
+  const transition = pending.reason.startsWith('upgrade:') ? pending.reason.slice('upgrade:'.length).split('->') : [];
+  const fromPlanId = pending.fromPlanId ?? transition[0];
+  const toPlanId = pending.toPlanId ?? transition[1];
+  const grantKey = pending.grantKey ?? `grant:${key}:${pending.reason}`;
+  if (!fromPlanId || !toPlanId) return (await repo.subscriptions.get(sub.id)) ?? sub;
+  const grant = (await ledger.entries(sub.customerId, { kind: 'grant', source: 'subscription' }))
+    .find((entry) => entry.idempotencyKey === grantKey);
+  if (grant) {
+    await ledger.append({
+      customerId: sub.customerId, pool: grant.pool, kind: 'revoke', amount: -grant.amount,
+      unitPriceMinor: null, currency: null, expiresAt: null, source: 'subscription',
+      reference: { subscriptionId: sub.id, periodStart: sub.currentPeriod.start, grantId: grant.id },
+      idempotencyKey: `revoke:${grantKey}`, actor: 'system', reason: `failed:${pending.reason}`,
+    });
+  }
+  const stored = await repo.subscriptions.get(sub.id);
+  let reverted = stored ?? sub;
+  if (stored?.planId === toPlanId) {
+    reverted = { ...stored, planId: fromPlanId, scheduledPlanId: null };
+    await repo.subscriptions.put(reverted);
+  }
+  await repo.operations.put({ ...op, status: 'failed', error: 'upgrade_payment_failed', completedAt: clock.now() });
+  return reverted;
 }
 
 /** EC:A61 C11 — the states an upgrade applies to; anything else is refused before any charge. */
@@ -156,11 +256,10 @@ async function upgradeHeld(input: UpgradeInput): Promise<UpgradeResult> {
   // EC:A59 — a self-scheduled reset_anchor upgrade bought a whole new period less the old period's unused
   // share, so it grants the new plan's credits less the old plan's unused share (either creditDelta).
   const fullDelta = newPlan.creditsPerPeriod - oldPlan.creditsPerPeriod;
-  // EC:A77 — a native reset_anchor change is billed by the provider as a new period, whose paid invoice
-  // grants that period's credits: the kit grants no delta on top. A provider that bills the change as a
-  // later order (Polar) gets its delta granted when that order's paid webhook arrives.
+  // SB-11 — a synchronous native reset-anchor change grants the full plan difference immediately; its
+  // anchor invoice is deduplicated by the canonical period grant key below. Polar remains on-payment.
   const grantOnPayment = native && provider.capabilities().upgradeGrant === 'on_payment';
-  const delta = native && resetAnchor && !grantOnPayment ? 0 : resetAnchor && !native
+  const delta = native && resetAnchor && !grantOnPayment ? fullDelta : resetAnchor && !native
     ? newPlan.creditsPerPeriod - scaleMinor(oldPlan.creditsPerPeriod, frac.num, frac.den, 'floor')
     : policy.upgrade.creditDelta === 'full_delta'
       ? fullDelta
@@ -168,18 +267,31 @@ async function upgradeHeld(input: UpgradeInput): Promise<UpgradeResult> {
 
   const scopedProvider = scopeProvider(provider, input.correlationId);
   let changed: Subscription | null = null;
+  let anchorIntentKey: string | null = null;
   if (native) {
     if (sub.providerRef === null) throw new PaymentKitError('native subscription mutation requires its provider reference', 'subscription_provider_ref_required');
     const priceRef = resolvePriceRef(newPlan, sub.provider, sub.currency);
     // EC:A82 — the delta waiting for the change order is stored before the provider is asked: the order's
     // paid webhook can arrive before this call returns, and must find it.
     const pendingKey = pendingUpgradeGrantKey(sub.id, sub.currentPeriod.start);
-    if (delta > 0 && grantOnPayment) await putPendingGrant(repo, pendingKey, delta, sub.currentPeriod.end, `upgrade:${oldPlan.id}->${newPlan.id}`, policy, now);
+    if (delta > 0 && grantOnPayment) {
+      const reason = `upgrade:${oldPlan.id}->${newPlan.id}`;
+      await putPendingGrant(repo, pendingKey, delta, sub.currentPeriod.end, reason, oldPlan.id, newPlan.id, policy, now);
+    }
+    if (sub.provider === 'stripe' && resetAnchor && !grantOnPayment) {
+      anchorIntentKey = await putUpgradeAnchorIntent(repo, sub, oldPlan.id, newPlan.id, delta, now);
+    }
     try {
       changed = await scopedProvider.changeSubscription(sub.providerRef, { newPriceRef: priceRef, proration: 'immediate', resetAnchor });
     } catch (err) {
       const op = delta > 0 && grantOnPayment ? await repo.operations.get(pendingKey) : null;
       if (op?.status === 'in_progress') await repo.operations.put({ ...op, status: 'failed', error: 'change_failed', completedAt: clock.now() });
+      if (anchorIntentKey) {
+        const intent = await repo.operations.get(anchorIntentKey);
+        if (intent?.status === 'in_progress') {
+          await repo.operations.put({ ...intent, status: 'failed', error: 'change_failed', completedAt: clock.now() });
+        }
+      }
       throw err;
     }
   } else {
@@ -228,11 +340,15 @@ async function upgradeHeld(input: UpgradeInput): Promise<UpgradeResult> {
   if (delta > 0 && grantOnPayment) {
     // EC:A82 — written before the change; a different period from the provider moves it (unless already paid).
     const key = pendingUpgradeGrantKey(sub.id, currentPeriod.start);
-    if (key !== pendingUpgradeGrantKey(sub.id, sub.currentPeriod.start)) await putPendingGrant(repo, key, delta, currentPeriod.end, `upgrade:${oldPlan.id}->${newPlan.id}`, policy, now);
+    if (key !== pendingUpgradeGrantKey(sub.id, sub.currentPeriod.start)) {
+      await putPendingGrant(repo, key, delta, currentPeriod.end, `upgrade:${oldPlan.id}->${newPlan.id}`, oldPlan.id, newPlan.id, policy, now);
+    }
   } else if (delta > 0) {
     // EC:J5 — deterministic ledger idempotency key (sub + target plan + *original* period start,
     // not clock.now()); see docs/EDGE_CASES.md §J J5.
-    const idempotencyKey = `grant:upgrade:${sub.id}:${newPlan.id}:${sub.currentPeriod.start.toISOString()}`;
+    const idempotencyKey = native && resetAnchor
+      ? `grant:${sub.id}:${currentPeriod.start.toISOString()}` // SB-11 — suppress the reset-anchor invoice grant.
+      : `grant:upgrade:${sub.id}:${newPlan.id}:${sub.currentPeriod.start.toISOString()}`;
     const expiresAt = policy.credits.rollover === 'full' ? null : currentPeriod.end;
     const { entry } = await ledger.append({
       customerId: sub.customerId,

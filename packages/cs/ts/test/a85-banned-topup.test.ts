@@ -35,7 +35,7 @@ async function setup(statusAfterCheckout: 'banned' | 'frozen') {
     creditsPerPeriod: 100,
     usageIncluded: 0,
     trialDays: 0,
-    prices: [{ currency: 'USD', amountMinor: 1_000 }],
+    prices: [{ currency: 'USD', amountMinor: 1_000, providerPriceRefs: { stripe: 'price_a85' } }],
   });
 
   let checkoutEntitlementKey = '';

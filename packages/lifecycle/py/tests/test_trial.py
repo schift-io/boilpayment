@@ -179,3 +179,55 @@ def test_no_grant_until_next_period_grants_nothing_now():
         assert trial_bal.available == 50
 
     run(scenario())
+
+
+def test_sb_03_first_paid_invoice_after_trial_grants_once():
+    async def scenario():
+        clock, ledger, repo = await setup(0)
+        trial_plan = Plan(
+            id=PLAN.id,
+            name=PLAN.name,
+            interval=PLAN.interval,
+            credits_per_period=PLAN.credits_per_period,
+            usage_included=PLAN.usage_included,
+            trial_days=14,
+            prices=PLAN.prices,
+        )
+        sub = Subscription(
+            id="sub_1",
+            customer_id="cust_1",
+            plan_id=trial_plan.id,
+            provider="stripe",
+            provider_ref="stripe_sub_1",
+            status="trialing",
+            current_period=PERIOD,
+            anchor_day=1,
+            cancel_at_period_end=False,
+            grace_until=None,
+            billing_key=None,
+            scheduled_plan_id=None,
+            created_at=PERIOD.start,
+        )
+
+        assert sub.status == "trialing"
+        assert (await ledger.balance(sub.customer_id, "paid", clock.now())).available == 0
+
+        input = ConvertTrialInput(
+            sub=sub,
+            plan=trial_plan,
+            payment=mk_payment(),
+            policy=resolve_policy(),
+            ledger=ledger,
+            repo=repo,
+            clock=clock,
+        )
+        first = await convert_trial(input)
+        replay = await convert_trial(input)
+
+        assert first.grant.amount == trial_plan.credits_per_period
+        assert replay.grant.id == first.grant.id
+        assert (
+            await ledger.balance(sub.customer_id, "paid", clock.now())
+        ).available == trial_plan.credits_per_period
+
+    run(scenario())

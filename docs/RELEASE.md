@@ -14,7 +14,10 @@ The 13 TypeScript module packages are private workspace packages. Do not publish
   `npm deprecate boilpayment-core@"*" "bundled into boilpayment-sdk since 0.2.1"` (one per package).
 - A paid one-time top-up for a banned customer grants no credits and opens one refund review (EC:A85).
 - `@types/pg` ships with the SDK, so `skipLibCheck: false` projects compile without extra installs.
-- 0.2.1 installs over 0.2.0 without a schema change. There is no upgrade path from 0.1.0.
+- Subscription and one-time fixes from `docs/cases.tsv` (OT-03, OT-17, SB-03, SB-06, SB-07, SB-10, SB-11,
+  SB-13, SB-14); each row's `evidence` column names the run that measured it.
+- Migration `0015_grace_credit_expiry.sql` adds two SQL functions (no table or column change). After
+  upgrading from 0.2.0, run `npx boilpayment migrate`. There is no upgrade path from 0.1.0.
 
 ## 1. Pre-flight
 

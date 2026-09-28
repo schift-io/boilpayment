@@ -120,6 +120,7 @@ async def _apply_negative_offset(
     return offset, entries
 
 
+# OT-17 -- retain the indivisible minor-unit remainder so refunds can reconstruct exact grant value.
 def _price_credits(amount_minor: int, credits: int) -> tuple[int, int]:
     if credits <= 0:
         return 0, amount_minor

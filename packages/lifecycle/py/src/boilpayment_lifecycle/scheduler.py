@@ -172,7 +172,7 @@ async def tick(input: SchedulerTickInput) -> SchedulerTickResult:
                     "kind": "plan_price_missing", "subscription_id": sub.id,
                     "plan_id": renewal_plan_id(sub), "currency": sub.currency}))
                 missing = await on_payment_failed(OnPaymentFailedInput(
-                    sub=sub, policy=policy, repo=repo, notifier=notifier, clock=clock,
+                    sub=sub, policy=policy, ledger=ledger, repo=repo, notifier=notifier, clock=clock,  # SB-07
                 ))
                 return ("failed", missing.sub)
             charged_period = next_period(
@@ -256,11 +256,11 @@ async def tick(input: SchedulerTickInput) -> SchedulerTickResult:
                     if not charge.fresh or attempt_key_of(charge.payment) != renewal_attempt_key(sub, charged_period):
                         return ("failed", sub)
                     started = await on_payment_failed(OnPaymentFailedInput(
-                        sub=sub, policy=policy, repo=repo, notifier=notifier, clock=clock,
+                        sub=sub, policy=policy, ledger=ledger, repo=repo, notifier=notifier, clock=clock,  # SB-07
                     ))
                     return ("failed", started.sub)
                 failed_result = await on_payment_failed(OnPaymentFailedInput(
-                    sub=sub, policy=policy, repo=repo, notifier=notifier, clock=clock,
+                    sub=sub, policy=policy, ledger=ledger, repo=repo, notifier=notifier, clock=clock,  # SB-07
                 ))
                 return ("failed", failed_result.sub)
             # EC:A36 -- past the period end with no answer: grace, one notice, reported every tick.

@@ -143,10 +143,11 @@ async function makeTopup(id: string, amountMinor: number, currency = 'USD'): Pro
   return payment;
 }
 
-async function grant(paymentId: string, credits: number, unitPriceMinor: number, currency = 'USD', expiresAt: Date | null = null) {
+async function grant(paymentId: string, credits: number, unitPriceMinor: number, currency = 'USD', expiresAt: Date | null = null, remainderMinor = 0) {
   return (await ledger.append({
     customerId, pool: 'paid', kind: 'grant', amount: credits, unitPriceMinor, currency, expiresAt,
-    source: 'topup', reference: { paymentId }, idempotencyKey: `topup:${paymentId}`, actor: 'system', reason: null,
+    source: 'topup', reference: { paymentId }, idempotencyKey: `topup:${paymentId}`, actor: 'system',
+    reason: remainderMinor > 0 ? `remainder_minor:${remainderMinor}` : null,
   })).entry;
 }
 
@@ -194,6 +195,65 @@ describe('refund.evaluate', () => {
     expect(decision.amount.amountMinor).toBe(700);
     expect(decision.creditsToRevoke).toBe(70);
     expect(decision.reason).toContain('unused_credits');
+  });
+
+  it.each([
+    { amountMinor: 1999, storedUnitPriceMinor: 1, expectedRefundMinor: 1799 },
+    { amountMinor: 999, storedUnitPriceMinor: 0, expectedRefundMinor: 899 },
+  ])('[OT-17] outside seven days values unused credits exactly for a $amountMinor-minor purchase', async ({ amountMinor, storedUnitPriceMinor, expectedRefundMinor }) => {
+    const payment = await makeTopup(`pay_ot17_${amountMinor}`, amountMinor);
+    await grant(payment.id, 1000, storedUnitPriceMinor, 'USD', null, amountMinor - storedUnitPriceMinor * 1000);
+    await consume(100, `consume:ot17:${amountMinor}`);
+    clock.advance(8 * 86_400_000);
+
+    const decision = await evaluate({ payment, policy, ledger, repo, clock });
+
+    expect(decision.ruleId).toBe('D2');
+    expect(decision.amount.amountMinor).toBe(expectedRefundMinor);
+    expect(decision.creditsToRevoke).toBe(900);
+  });
+
+  it('[OT-15] inside seven days keeps the 1,979-minor refund for 10 of 1,000 credits used', async () => {
+    const payment = await makeTopup('pay_ot15_1999', 1999);
+    await grant(payment.id, 1000, 1);
+    await consume(10, 'consume:ot15:1999');
+    clock.advance(7 * 86_400_000);
+
+    const decision = await evaluate({ payment, policy, ledger, repo, clock });
+
+    expect(decision.ruleId).toBe('D1');
+    expect(decision.amount.amountMinor).toBe(1979);
+    expect(decision.creditsToRevoke).toBe(990);
+  });
+
+  it.each([
+    { label: 'full', days: 3, consumed: 0, expectedAmount: 2000, expectedCredits: 2000, expectedRule: 'D1' },
+    { label: 'partial', days: 8, consumed: 500, expectedAmount: 1500, expectedCredits: 1500, expectedRule: 'D2' },
+  ])('[SB-11] anchor invoice attribution includes the upgrade delta for a $label refund', async ({ days, consumed, expectedAmount, expectedCredits, expectedRule }) => {
+    const invoice = await makeTopup('pay_sb11_anchor_invoice', 2000);
+    const deltaGrant = (await ledger.append({
+      customerId, pool: 'paid', kind: 'grant', amount: 2000, unitPriceMinor: null, currency: null, expiresAt: null,
+      source: 'subscription', reference: { paymentId: 'pay_sb11_upgrade_difference' },
+      idempotencyKey: 'grant:sb11:upgrade-delta', actor: 'system', reason: null,
+    })).entry;
+    await ledger.append({
+      customerId, pool: 'paid', kind: 'adjust', amount: 0, unitPriceMinor: null, currency: null, expiresAt: null,
+      source: 'subscription', reference: { paymentId: invoice.id, grantId: deltaGrant.id },
+      idempotencyKey: 'attribute:sb11:anchor-invoice', actor: 'system', reason: 'SB-11 upgrade_invoice_attribution',
+    });
+    await ledger.append({
+      customerId, pool: 'paid', kind: 'adjust', amount: 0, unitPriceMinor: null, currency: null, expiresAt: null,
+      source: 'subscription', reference: { paymentId: invoice.id, grantId: deltaGrant.id },
+      idempotencyKey: 'attribute:sb11:anchor-invoice:duplicate', actor: 'system', reason: 'SB-11 upgrade_invoice_attribution',
+    });
+    if (consumed > 0) await consume(consumed, 'consume:sb11:delta');
+    clock.advance(days * 86_400_000);
+
+    const decision = await evaluate({ payment: invoice, policy, ledger, repo, clock });
+
+    expect(decision.ruleId).toBe(expectedRule);
+    expect(decision.amount.amountMinor).toBe(expectedAmount);
+    expect(decision.creditsToRevoke).toBe(expectedCredits);
   });
 
   it('[EC:D2/time_prorated] + [EC:D3] within elapsed ratio -> no deny, floor rounding', async () => {
@@ -396,6 +456,31 @@ describe('refund.evaluate', () => {
 });
 
 describe('refund.execute', () => {
+  it('[SB-11] requested anchor-invoice refund revokes the linked delta bucket and leaves it unspendable', async () => {
+    const invoice = await makeTopup('pay_sb11_execute_invoice', 2000);
+    const delta = (await ledger.append({
+      customerId, pool: 'paid', kind: 'grant', amount: 2000, unitPriceMinor: null, currency: null, expiresAt: null,
+      source: 'subscription', reference: { paymentId: 'pay_sb11_execute_difference' },
+      idempotencyKey: 'grant:sb11:execute-delta', actor: 'system', reason: null,
+    })).entry;
+    await ledger.append({
+      customerId, pool: 'paid', kind: 'adjust', amount: 0, unitPriceMinor: null, currency: null, expiresAt: null,
+      source: 'subscription', reference: { paymentId: invoice.id, grantId: delta.id },
+      idempotencyKey: 'attribute:sb11:execute-invoice', actor: 'system', reason: 'SB-11 upgrade_invoice_attribution',
+    });
+    clock.advance(3 * 86_400_000);
+    const decision = await evaluate({ payment: invoice, policy, ledger, repo, clock });
+
+    const refund = await execute({ decision, provider: new FakeProvider(), ledger, repo, clock, ids });
+    const revokes = (await ledger.entries(customerId, { kind: 'revoke' }))
+      .filter((entry) => entry.reference.refundId === refund.id);
+    const use = await consume(1, 'consume:sb11:after-refund');
+
+    expect(revokes.map((entry) => entry.reference.grantId)).toEqual([delta.id]);
+    expect((await ledger.balance(customerId, 'paid', clock.now())).available).toBe(0);
+    expect(use.ok).toBe(false);
+  });
+
   it('[EC:D15] hold -> revoke -> release ordering, revoke attributed to the grant (FINDINGS#3 regression)', async () => {
     const p = await makeTopup('pay_exec1', 1000);
     const g = await grant(p.id, 100, 10);

@@ -19,7 +19,7 @@ import type {
   SubscriptionStatus,
   Logger,
 } from 'boilpayment-core';
-import { PaymentKitError, WebhookSignatureError, NoopLogger, money as coreMoney } from 'boilpayment-core';
+import { PaymentKitError, ProviderError, WebhookSignatureError, NoopLogger, money as coreMoney } from 'boilpayment-core';
 
 export interface StripeProviderConfig {
   secretKey: string;
@@ -506,20 +506,44 @@ export class StripeProvider implements PaymentProvider {
     }
     const mode: Stripe.Checkout.SessionCreateParams.Mode = input.mode === 'subscription' ? 'subscription' : 'payment';
     const metadata = { ...(input.metadata ?? {}), planId: input.plan.id };
-    const session = await this.client.checkout.sessions.create(
-      {
-        mode,
-        client_reference_id: input.customerRef,
-        customer: input.customerRef,
-        line_items: [{ price: priceRef, quantity: 1 }],
-        success_url: input.successUrl,
-        cancel_url: input.cancelUrl,
-        metadata,
-        ...(mode === 'subscription' ? { subscription_data: { metadata } } : { payment_intent_data: { metadata } }),
-      },
-      { idempotencyKey: input.idempotencyKey },
-    );
-    return { id: session.id, url: session.url ?? '', providerRef: session.id };
+    try {
+      const session = await this.client.checkout.sessions.create(
+        {
+          mode,
+          client_reference_id: input.customerRef,
+          customer: input.customerRef,
+          line_items: [{ price: priceRef, quantity: 1 }],
+          success_url: input.successUrl,
+          cancel_url: input.cancelUrl,
+          metadata,
+          ...(mode === 'subscription'
+            ? {
+                subscription_data: {
+                  metadata,
+                  // SB-03 — Stripe must own the trial so Checkout does not charge on day one.
+                  ...(input.plan.trialDays > 0 ? { trial_period_days: input.plan.trialDays } : {}),
+                },
+              }
+            : { payment_intent_data: { metadata } }),
+        },
+        { idempotencyKey: input.idempotencyKey },
+      );
+      return { id: session.id, url: session.url ?? '', providerRef: session.id };
+    } catch (error) {
+      if (!(error instanceof Stripe.errors.StripeError)) throw error;
+      const statusCode = error.statusCode;
+      const definitive = statusCode !== undefined && statusCode >= 400 && statusCode < 500
+        && statusCode !== 408 && statusCode !== 409 && statusCode !== 429;
+      const normalized = normalizeFailure({ code: error.code ?? error.rawType, declineCode: error.decline_code, message: error.message });
+      // OT-03 — the CS layer needs a typed status-bearing error to distinguish a definitive
+      // provider rejection from a timeout, connection loss, conflict, rate limit, or 5xx.
+      throw new ProviderError(
+        error.message,
+        { ...normalized, retryable: !definitive },
+        { status: statusCode, providerCode: normalized.providerCode },
+        statusCode,
+      );
+    }
   }
 
   // EC:E7 E12 — accepts pi_... or in_...

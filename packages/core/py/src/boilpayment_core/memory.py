@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from typing import Any, Generic, TypeVar
 
 from .clock import SystemClock, UuidIdGen
+from .expiry import effective_grant_expiry
 from .types import (
     AppendResult,
     Balance,
@@ -236,7 +237,9 @@ class InMemoryLedger:
         for e in all_entries:
             if e.kind == "grant":
                 buckets[e.id] = _Bucket(
-                    pool=e.pool, expires_at=e.expires_at, remaining=e.amount
+                    pool=e.pool,
+                    expires_at=effective_grant_expiry(e, all_entries),
+                    remaining=e.amount,
                 )
         for e in all_entries:
             if e.kind == "grant":

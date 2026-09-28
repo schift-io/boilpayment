@@ -101,7 +101,55 @@ def pending_upgrade_grant_key(sub_id: str, period_start: datetime) -> str:
     return f"upgrade-grant:{sub_id}:{iso_z(period_start)}"
 
 
-async def _put_pending_grant(repo: Repo, key: str, amount: int, period_end: datetime, reason: str, policy: Policy, now: datetime) -> None:
+def upgrade_anchor_intent_key(sub_id: str, source_period_start: datetime) -> str:
+    """SB-11 -- durable handoff between Stripe's reset call and its invoice webhook."""
+    return f"upgrade-anchor:{sub_id}:{iso_z(source_period_start)}"
+
+
+async def _put_upgrade_anchor_intent(
+    repo: Repo, sub: Subscription, from_plan_id: str, to_plan_id: str,
+    delta: int, now: datetime,
+) -> str:
+    key = upgrade_anchor_intent_key(sub.id, sub.current_period.start)
+    existing = await repo.operations.get(key)
+    intent = {
+        "subId": sub.id,
+        "fromPlanId": from_plan_id,
+        "toPlanId": to_plan_id,
+        "delta": delta,
+        "sourcePeriodStart": iso_z(sub.current_period.start),
+        "sourcePeriodEnd": iso_z(sub.current_period.end),
+    }
+    if existing is not None and existing.status != "failed":
+        saved = existing.result if isinstance(existing.result, dict) else {}
+        same_transition = existing.kind == "lifecycle.upgrade_anchor" and all(
+            saved.get(field) == value for field, value in intent.items()
+        )
+        if same_transition:
+            return key
+        raise PaymentKitError(
+            "another reset-anchor upgrade intent already owns this source period",
+            "upgrade_payment_pending",
+            {
+                "subscription_id": sub.id,
+                "source_period_start": intent["sourcePeriodStart"],
+            },
+        )
+    await repo.operations.put(Operation(
+        id=key, key=key, kind="lifecycle.upgrade_anchor", payload_hash="", status="in_progress",
+        result=intent,
+        error=None,
+        created_at=now,
+        completed_at=None,
+        attempts=0,
+    ))
+    return key
+
+
+async def _put_pending_grant(
+    repo: Repo, key: str, amount: int, period_end: datetime, reason: str,
+    from_plan_id: str, to_plan_id: str, policy: Policy, now: datetime,
+) -> None:
     """EC:A84 -- writes the waiting delta without reopening one already paid: a retry of the same upgrade leaves
     an in-progress or done operation alone; a different upgrade while another's order is unpaid is refused."""
     op = await repo.operations.get(key)
@@ -113,8 +161,61 @@ async def _put_pending_grant(repo: Repo, key: str, amount: int, period_end: date
     await repo.operations.put(Operation(
         id=key, key=key, kind="lifecycle.upgrade_grant", payload_hash="", status="in_progress", error=None,
         created_at=now, completed_at=None, attempts=0,
-        result={"amount": amount, "expiresAt": None if policy.credits.rollover == "full" else iso_z(period_end), "reason": reason},
+        result={
+            "amount": amount,
+            "expiresAt": None if policy.credits.rollover == "full" else iso_z(period_end),
+            "reason": reason,
+            "fromPlanId": from_plan_id,
+            "toPlanId": to_plan_id,
+            "grantKey": f"grant:{key}:{reason}",
+        },
     ))
+
+
+async def fail_pending_upgrade(*, sub: Subscription, ledger: LedgerStore, repo: Repo, clock: Clock) -> Subscription:
+    """SB-13 -- revert a failed provider-billed upgrade and revoke a raced delta grant once."""
+    key = pending_upgrade_grant_key(sub.id, sub.current_period.start)
+    op = await repo.operations.get(key)
+    if op is None or op.kind != "lifecycle.upgrade_grant" or op.status != "in_progress":
+        return await repo.subscriptions.get(sub.id) or sub
+    pending = op.result or {}
+    reason = str(pending.get("reason", ""))
+    transition = reason.removeprefix("upgrade:").split("->") if reason.startswith("upgrade:") else []
+    from_plan_id = pending.get("fromPlanId") or (transition[0] if len(transition) == 2 else None)
+    to_plan_id = pending.get("toPlanId") or (transition[1] if len(transition) == 2 else None)
+    grant_key = str(pending.get("grantKey") or f"grant:{key}:{reason}")
+    if not from_plan_id or not to_plan_id:
+        return await repo.subscriptions.get(sub.id) or sub
+    grants = await ledger.entries(sub.customer_id, kind="grant", source="subscription")
+    grant = next((entry for entry in grants if entry.idempotency_key == grant_key), None)
+    if grant is not None:
+        await ledger.append(NewLedgerEntry(
+            customer_id=sub.customer_id,
+            pool=grant.pool,
+            kind="revoke",
+            amount=-grant.amount,
+            unit_price_minor=None,
+            currency=None,
+            expires_at=None,
+            source="subscription",
+            reference=LedgerReference(
+                subscription_id=sub.id,
+                period_start=sub.current_period.start,
+                grant_id=grant.id,
+            ),
+            idempotency_key=f"revoke:{grant_key}",
+            actor="system",
+            reason=f"failed:{reason}",
+        ))
+    stored = await repo.subscriptions.get(sub.id)
+    reverted = stored or sub
+    if stored is not None and stored.plan_id == to_plan_id:
+        reverted = replace_sub(stored, plan_id=from_plan_id, scheduled_plan_id=None)
+        await repo.subscriptions.put(reverted)
+    await repo.operations.put(dataclasses.replace(
+        op, status="failed", error="upgrade_payment_failed", completed_at=clock.now()
+    ))
+    return reverted
 
 
 async def upgrade(input: UpgradeInput) -> UpgradeResult:
@@ -269,12 +370,11 @@ async def _do_upgrade(input: UpgradeInput, stamp: str) -> UpgradeResult:
     # EC:A59 -- a self-scheduled reset_anchor upgrade bought a whole new period less the old period's unused
     # share, so it grants the new plan's credits less the old plan's unused share (either credit_delta).
     full_delta = new_plan.credits_per_period - old_plan.credits_per_period
-    # EC:A77 -- a native reset_anchor change is billed by the provider as a new period whose paid invoice
-    # grants it: no delta on top. A provider that bills the change as a later order (Polar) gets its delta
-    # granted when that order's paid webhook arrives.
+    # SB-11 -- synchronous native reset-anchor changes grant the full plan difference immediately and use
+    # the canonical period key below. Polar remains on-payment and keeps its existing anchor.
     grant_on_payment = native and getattr(provider.capabilities(), "upgrade_grant", "sync") == "on_payment"
     if native and reset_anchor and not grant_on_payment:
-        delta = 0
+        delta = full_delta
     elif reset_anchor and not native:
         delta = new_plan.credits_per_period - scale_minor(old_plan.credits_per_period, num, den, "floor")
     elif policy.upgrade.credit_delta == "full_delta":
@@ -285,6 +385,7 @@ async def _do_upgrade(input: UpgradeInput, stamp: str) -> UpgradeResult:
 
     scoped_provider = scope_provider(provider, input.correlation_id)
     changed: Subscription | None = None
+    anchor_intent_key: str | None = None
     if native:
         if sub.provider_ref is None:
             raise PaymentKitError("native subscription mutation requires its provider reference", "subscription_provider_ref_required")
@@ -294,7 +395,14 @@ async def _do_upgrade(input: UpgradeInput, stamp: str) -> UpgradeResult:
         pending_key = pending_upgrade_grant_key(sub.id, sub.current_period.start)
         reason = f"upgrade:{old_plan.id}->{new_plan.id}"
         if delta > 0 and grant_on_payment:
-            await _put_pending_grant(repo, pending_key, delta, sub.current_period.end, reason, policy, now)
+            await _put_pending_grant(
+                repo, pending_key, delta, sub.current_period.end, reason,
+                old_plan.id, new_plan.id, policy, now,
+            )
+        if sub.provider == "stripe" and reset_anchor and not grant_on_payment:
+            anchor_intent_key = await _put_upgrade_anchor_intent(
+                repo, sub, old_plan.id, new_plan.id, delta, now
+            )
         try:
             changed = await scoped_provider.change_subscription(
                 sub.provider_ref,
@@ -306,6 +414,15 @@ async def _do_upgrade(input: UpgradeInput, stamp: str) -> UpgradeResult:
             op = await repo.operations.get(pending_key) if delta > 0 and grant_on_payment else None
             if op is not None and op.status == "in_progress":
                 await repo.operations.put(dataclasses.replace(op, status="failed", error="change_failed", completed_at=clock.now()))
+            if anchor_intent_key is not None:
+                intent = await repo.operations.get(anchor_intent_key)
+                if intent is not None and intent.status == "in_progress":
+                    await repo.operations.put(dataclasses.replace(
+                        intent,
+                        status="failed",
+                        error="change_failed",
+                        completed_at=clock.now(),
+                    ))
             raise
     else:
         if not sub.billing_key:
@@ -371,13 +488,21 @@ async def _do_upgrade(input: UpgradeInput, stamp: str) -> UpgradeResult:
         # EC:A82 -- written before the change; a different period from the provider moves it (unless paid).
         key = pending_upgrade_grant_key(sub.id, current_period.start)
         if key != pending_upgrade_grant_key(sub.id, sub.current_period.start):
-            await _put_pending_grant(repo, key, delta, current_period.end, f"upgrade:{old_plan.id}->{new_plan.id}", policy, now)
+            await _put_pending_grant(
+                repo, key, delta, current_period.end, f"upgrade:{old_plan.id}->{new_plan.id}",
+                old_plan.id, new_plan.id, policy, now,
+            )
     elif delta > 0:
         # EC:J5 — deterministic ledger idempotency key (sub + target plan + *original* period
         # start, not clock.now()); see docs/EDGE_CASES.md §J J5.
-        idempotency_key = await ledger_instant_key(
-            ledger, sub.customer_id, f"grant:upgrade:{sub.id}:{new_plan.id}:", sub.current_period.start
-        )
+        if native and reset_anchor:
+            idempotency_key = await ledger_instant_key(
+                ledger, sub.customer_id, f"grant:{sub.id}:", current_period.start
+            )  # SB-11 -- suppress the reset-anchor invoice grant.
+        else:
+            idempotency_key = await ledger_instant_key(
+                ledger, sub.customer_id, f"grant:upgrade:{sub.id}:{new_plan.id}:", sub.current_period.start
+            )
         expires_at = None if policy.credits.rollover == "full" else current_period.end
         result = await ledger.append(
             NewLedgerEntry(

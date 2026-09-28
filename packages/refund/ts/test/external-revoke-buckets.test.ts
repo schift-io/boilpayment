@@ -46,4 +46,30 @@ describe('[EC:D18] external refund revoke is attributed to grants', () => {
     expect(cases).toEqual([]);
     expect((await ledger.balance('c', undefined, clock.now())).available).toBe(0);
   });
+
+  it('[SB-11] external anchor-invoice refund revokes the linked null-priced upgrade delta bucket', async () => {
+    const clock = new FixedClock(new Date('2026-01-01T00:00:00Z'));
+    const ledger = new InMemoryLedger(new SequentialIdGen('l_'), clock);
+    const repo = new InMemoryRepo();
+    const invoice: Payment = { id: 'pay_sb11_invoice', customerId: 'c', provider: 'stripe', providerRef: 'in_sb11', subscriptionId: 'sub_1',
+      amount: { amountMinor: 2000, currency: 'USD' }, status: 'succeeded', kind: 'subscription', period: null, occurredAt: clock.now(), failure: null };
+    await repo.payments.put(invoice);
+    await ledger.append({ customerId: 'c', pool: 'paid', kind: 'grant', amount: 1000, unitPriceMinor: 1, currency: 'USD', expiresAt: null,
+      source: 'topup', reference: { paymentId: 'pay_unrelated' }, idempotencyKey: 'topup:unrelated', actor: 't', reason: null });
+    const delta = (await ledger.append({ customerId: 'c', pool: 'paid', kind: 'grant', amount: 2000, unitPriceMinor: null, currency: null, expiresAt: null,
+      source: 'subscription', reference: { paymentId: 'pay_sb11_difference' }, idempotencyKey: 'grant:sb11:delta', actor: 't', reason: null })).entry;
+    for (const suffix of ['', ':duplicate']) await ledger.append({
+      customerId: 'c', pool: 'paid', kind: 'adjust', amount: 0, unitPriceMinor: null, currency: null, expiresAt: null,
+      source: 'subscription', reference: { paymentId: invoice.id, grantId: delta.id }, idempotencyKey: `attribute:sb11${suffix}`,
+      actor: 'system', reason: 'SB-11 upgrade_invoice_attribution',
+    });
+    const event = { id: 'evt_sb11', provider: 'stripe', type: 'refund.created', occurredAt: clock.now(), customerRef: null,
+      subscriptionRef: null, paymentRef: invoice.providerRef, refundRef: 're_sb11', amount: { amountMinor: 1000, currency: 'USD' }, raw: {} } as unknown as NormalizedEvent;
+
+    const refund = await onExternalRefund({ event, ledger, repo, cs: { openReconcileMismatchCase: async () => {} }, clock, ids: new SequentialIdGen('i_') });
+    const revokes = await ledger.entries('c', { kind: 'revoke' });
+
+    expect(refund.creditsRevoked).toBe(1000);
+    expect(revokes.map((entry) => entry.reference.grantId)).toEqual([delta.id]);
+  });
 });

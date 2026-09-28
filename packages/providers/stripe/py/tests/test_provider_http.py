@@ -23,6 +23,7 @@ from boilpayment_core import (
     PaymentKitError,
     Plan,
     PlanPrice,
+    ProviderError,
 )
 from boilpayment_stripe import StripeProvider
 
@@ -131,6 +132,25 @@ def test_ec_f_stripe_create_customer_posts_with_bearer_auth_and_body(mock):
 # ---------------------------------------------------------------------------
 
 
+def test_sb_03_subscription_checkout_sends_plan_trial_days_to_stripe(mock):
+    mock.respond_json(
+        200,
+        {
+            "id": "cs_trial",
+            "object": "checkout.session",
+            "url": "https://checkout.stripe.com/cs_trial",
+        },
+    )
+    provider = _provider()
+    trial_plan = _plan()
+    trial_plan.trial_days = 14
+
+    asyncio.run(provider.create_checkout(_checkout_input(plan=trial_plan)))
+
+    body = parse_qs(mock.requests[0].post_data)
+    assert body["subscription_data[trial_period_days]"] == ["14"]
+
+
 def test_ec_e6_create_checkout_subscription_idempotency_key_and_body(mock):
     mock.respond_json(
         200,
@@ -170,7 +190,7 @@ def test_ec_e6_create_checkout_subscription_idempotency_key_and_body(mock):
     )
 
 
-def test_ec_e6_create_checkout_one_time_mode_payment_no_subscription_data(mock):
+def test_sb_03_one_time_checkout_stays_payment_only_without_subscription_data(mock):
     mock.respond_json(
         200,
         {
@@ -210,6 +230,48 @@ def test_ec_f_stripe_missing_provider_price_ref_raises_before_any_http_call(mock
         "(see docs/GUIDE.md)"
     )
     assert len(mock.requests) == 0
+
+
+def test_ot_03_definitive_stripe_400_checkout_error_preserves_status_and_code(mock):
+    mock.respond_json(
+        400,
+        {
+            "error": {
+                "type": "invalid_request_error",
+                "code": "parameter_invalid_integer",
+                "message": "bad price",
+            }
+        },
+    )
+    provider = _provider()
+
+    with pytest.raises(ProviderError) as excinfo:
+        asyncio.run(provider.create_checkout(_checkout_input()))
+
+    assert excinfo.value.http_status == 400
+    assert excinfo.value.failure.provider_code == "parameter_invalid_integer"
+    assert excinfo.value.failure.retryable is False
+
+
+def test_ot_03_uncertain_stripe_500_checkout_error_is_retryable(mock):
+    mock.respond_json(
+        500,
+        {
+            "error": {
+                "type": "api_error",
+                "code": "internal_error",
+                "message": "temporary failure",
+            }
+        },
+    )
+    provider = _provider()
+
+    with pytest.raises(ProviderError) as excinfo:
+        asyncio.run(provider.create_checkout(_checkout_input()))
+
+    assert excinfo.value.http_status == 500
+    assert excinfo.value.failure.provider_code == "internal_error"
+    assert excinfo.value.failure.retryable is True
 
 
 # ---------------------------------------------------------------------------

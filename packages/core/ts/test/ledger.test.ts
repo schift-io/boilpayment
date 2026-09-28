@@ -89,6 +89,30 @@ describe('EC:B3 consume order — poolOrder is drained in the given sequence, ex
 });
 
 describe('EC:B14 expiry filter at consume/balance time', () => {
+  it('[SB-07] linked grace expiry extends a dated grant but never converts a null expiry', async () => {
+    const clock = new FixedClock(NOW);
+    const ledger = new InMemoryLedger(new SequentialIdGen('led_'), clock);
+    const dated = (await ledger.append(mkGrant({
+      customerId: 'c1', pool: 'paid', amount: 10, idempotencyKey: 'g_dated',
+      expiresAt: new Date('2025-12-31T00:00:00.000Z'),
+    }))).entry;
+    const unbounded = (await ledger.append(mkGrant({
+      customerId: 'c1', pool: 'paid', amount: 5, idempotencyKey: 'g_unbounded', expiresAt: null,
+    }))).entry;
+    const graceUntil = new Date('2026-01-08T00:00:00.000Z');
+    for (const grant of [dated, unbounded]) {
+      await ledger.append({
+        customerId: 'c1', pool: 'paid', kind: 'adjust', amount: 0, unitPriceMinor: null,
+        currency: null, expiresAt: graceUntil, source: 'subscription', reference: { grantId: grant.id },
+        idempotencyKey: `extend:${grant.id}`, actor: 'system', reason: 'SB-07 grace_expiry_extension',
+      });
+    }
+
+    const balance = await ledger.balance('c1', 'paid', NOW);
+    expect(balance.available).toBe(15);
+    expect(balance.expiring).toEqual([{ expiresAt: graceUntil, amount: 10 }]);
+  });
+
   it('EC:B14 a grant whose expiresAt <= now is excluded from consume even though the batch has not run', async () => {
     const ledger = new InMemoryLedger(new SequentialIdGen('led_'));
     const past = new Date('2025-12-31T00:00:00.000Z'); // before NOW

@@ -212,6 +212,7 @@ async def do_grant(
     currency: str = "USD",
     expires_at=None,
     key: str | None = None,
+    remainder_minor: int = 0,
 ):
     result = await ledger.append(
         NewLedgerEntry(
@@ -226,6 +227,7 @@ async def do_grant(
             reference=LedgerReference(payment_id=payment_id),
             idempotency_key=key or f"topup:{payment_id}",
             actor="system",
+            reason=f"remainder_minor:{remainder_minor}" if remainder_minor > 0 else None,
         )
     )
     return result.entry
@@ -312,6 +314,161 @@ def test_d2_measured_smoke_scenario_unused_credits_outside_window():
         assert "unused_credits" in decision.reason
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    ("amount_minor", "stored_unit_price_minor", "expected_refund_minor"),
+    [(1999, 1, 1799), (999, 0, 899)],
+)
+def test_ot_17_outside_seven_days_values_unused_credits_exactly(
+    amount_minor: int,
+    stored_unit_price_minor: int,
+    expected_refund_minor: int,
+):
+    async def scenario():
+        clock, _ids, ledger, repo, policy = make_env()
+        payment = await make_topup(repo, clock, f"pay_ot17_{amount_minor}", amount_minor)
+        await do_grant(
+            ledger,
+            payment.id,
+            1000,
+            stored_unit_price_minor,
+            remainder_minor=amount_minor - stored_unit_price_minor * 1000,
+        )
+        await do_consume(ledger, clock, policy, 100, f"consume:ot17:{amount_minor}")
+        clock.advance(8 * DAY_MS)
+
+        decision = await evaluate(
+            EvaluateInput(
+                payment=payment,
+                policy=policy,
+                ledger=ledger,
+                repo=repo,
+                clock=clock,
+            )
+        )
+
+        assert decision.rule_id == "D2"
+        assert decision.amount.amount_minor == expected_refund_minor
+        assert decision.credits_to_revoke == 900
+
+    asyncio.run(scenario())
+
+
+def test_ot_15_inside_seven_days_keeps_1979_refund_after_ten_credits_used():
+    async def scenario():
+        clock, _ids, ledger, repo, policy = make_env()
+        payment = await make_topup(repo, clock, "pay_ot15_1999", 1999)
+        await do_grant(ledger, payment.id, 1000, 1)
+        await do_consume(ledger, clock, policy, 10, "consume:ot15:1999")
+        clock.advance(7 * DAY_MS)
+
+        decision = await evaluate(
+            EvaluateInput(
+                payment=payment,
+                policy=policy,
+                ledger=ledger,
+                repo=repo,
+                clock=clock,
+            )
+        )
+
+        assert decision.rule_id == "D1"
+        assert decision.amount.amount_minor == 1979
+        assert decision.credits_to_revoke == 990
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    ("days", "consumed", "expected_amount", "expected_credits", "expected_rule"),
+    [(3, 0, 2000, 2000, "D1"), (8, 500, 1500, 1500, "D2")],
+    ids=["full", "partial"],
+)
+def test_sb_11_anchor_invoice_attribution_includes_upgrade_delta(
+    days: int,
+    consumed: int,
+    expected_amount: int,
+    expected_credits: int,
+    expected_rule: str,
+):
+    async def scenario():
+        clock, _ids, ledger, repo, policy = make_env()
+        invoice = await make_topup(repo, clock, "pay_sb11_anchor_invoice", 2000)
+        delta_grant = (
+            await ledger.append(
+                NewLedgerEntry(
+                    customer_id=CUSTOMER_ID,
+                    pool="paid",
+                    kind="grant",
+                    amount=2000,
+                    unit_price_minor=None,
+                    currency=None,
+                    expires_at=None,
+                    source="subscription",
+                    reference=LedgerReference(payment_id="pay_sb11_upgrade_difference"),
+                    idempotency_key="grant:sb11:upgrade-delta",
+                    actor="system",
+                )
+            )
+        ).entry
+        await ledger.append(
+            NewLedgerEntry(
+                customer_id=CUSTOMER_ID,
+                pool="paid",
+                kind="adjust",
+                amount=0,
+                unit_price_minor=None,
+                currency=None,
+                expires_at=None,
+                source="subscription",
+                reference=LedgerReference(
+                    payment_id=invoice.id,
+                    grant_id=delta_grant.id,
+                ),
+                idempotency_key="attribute:sb11:anchor-invoice",
+                actor="system",
+                reason="SB-11 upgrade_invoice_attribution",
+            )
+        )
+        await ledger.append(
+            NewLedgerEntry(
+                customer_id=CUSTOMER_ID,
+                pool="paid",
+                kind="adjust",
+                amount=0,
+                unit_price_minor=None,
+                currency=None,
+                expires_at=None,
+                source="subscription",
+                reference=LedgerReference(
+                    payment_id=invoice.id,
+                    grant_id=delta_grant.id,
+                ),
+                idempotency_key="attribute:sb11:anchor-invoice:duplicate",
+                actor="system",
+                reason="SB-11 upgrade_invoice_attribution",
+            )
+        )
+        if consumed > 0:
+            await do_consume(ledger, clock, policy, consumed, "consume:sb11:delta")
+        clock.advance(days * DAY_MS)
+
+        decision = await evaluate(
+            EvaluateInput(
+                payment=invoice,
+                policy=policy,
+                ledger=ledger,
+                repo=repo,
+                clock=clock,
+            )
+        )
+
+        assert decision.rule_id == expected_rule
+        assert decision.amount.amount_minor == expected_amount
+        assert decision.credits_to_revoke == expected_credits
+
+    asyncio.run(scenario())
 
 
 def test_d2_time_prorated_d3_within_elapsed_ratio_no_deny_floor_rounding():
@@ -713,6 +870,85 @@ def test_findings1_regression_b8_fallback_uses_injected_clock():
 
 
 # ═══════════════════════════════ refund.execute ═══════════════════════════════
+
+
+def test_sb_11_requested_invoice_refund_revokes_linked_delta_bucket() -> None:
+    async def run():
+        clock, ids, ledger, repo, policy = make_env()
+        invoice = await make_topup(repo, clock, "pay_sb11_execute_invoice", 2000)
+        delta = (
+            await ledger.append(
+                NewLedgerEntry(
+                    customer_id=CUSTOMER_ID,
+                    pool="paid",
+                    kind="grant",
+                    amount=2000,
+                    unit_price_minor=None,
+                    currency=None,
+                    expires_at=None,
+                    source="subscription",
+                    reference=LedgerReference(payment_id="pay_sb11_execute_difference"),
+                    idempotency_key="grant:sb11:execute-delta",
+                    actor="system",
+                )
+            )
+        ).entry
+        await ledger.append(
+            NewLedgerEntry(
+                customer_id=CUSTOMER_ID,
+                pool="paid",
+                kind="adjust",
+                amount=0,
+                unit_price_minor=None,
+                currency=None,
+                expires_at=None,
+                source="subscription",
+                reference=LedgerReference(payment_id=invoice.id, grant_id=delta.id),
+                idempotency_key="attribute:sb11:execute-invoice",
+                actor="system",
+                reason="SB-11 upgrade_invoice_attribution",
+            )
+        )
+        clock.advance(3 * DAY_MS)
+        decision = await evaluate(
+            EvaluateInput(
+                payment=invoice,
+                policy=policy,
+                ledger=ledger,
+                repo=repo,
+                clock=clock,
+            )
+        )
+
+        refund = await execute(
+            ExecuteInput(
+                decision=decision,
+                provider=FakeProvider(),
+                ledger=ledger,
+                repo=repo,
+                clock=clock,
+                ids=ids,
+            )
+        )
+        revokes = [
+            entry
+            for entry in await ledger.entries(CUSTOMER_ID, kind="revoke")
+            if entry.reference.refund_id == refund.id
+        ]
+        use = await do_consume(
+            ledger, clock, policy, 1, "consume:sb11:after-refund"
+        )
+        return (
+            [entry.reference.grant_id for entry in revokes],
+            (await ledger.balance(CUSTOMER_ID, "paid", clock.now())).available,
+            use.ok,
+            delta.id,
+        )
+
+    grant_ids, balance, consume_ok, delta_id = asyncio.run(run())
+    assert grant_ids == [delta_id]
+    assert balance == 0
+    assert consume_ok is False
 
 
 def test_d15_hold_revoke_release_ordering_attributed_to_grant():

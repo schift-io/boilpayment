@@ -105,6 +105,32 @@ describe('PostgresLedgerStore', () => {
     expect(result.entries[1].amount).toBe(-5);
   });
 
+  it('[SB-07] balance and consume honor an append-only grace expiry extension', async () => {
+    const customerId = await makeCustomer();
+    const now = new Date();
+    const originalExpiry = new Date(now.getTime() + 60_000);
+    const graceUntil = new Date(now.getTime() + 7 * 86_400_000);
+    const grant = (await ledger.append({
+      customerId, pool: 'paid', kind: 'grant', amount: 100, unitPriceMinor: 10, currency: 'USD',
+      expiresAt: originalExpiry, source: 'subscription', reference: {},
+      idempotencyKey: `grant:${randomUUID()}`, actor: 'system', reason: null,
+    })).entry;
+    await ledger.append({
+      customerId, pool: 'paid', kind: 'adjust', amount: 0, unitPriceMinor: null, currency: 'USD',
+      expiresAt: graceUntil, source: 'subscription', reference: { grantId: grant.id },
+      idempotencyKey: `adjust:${randomUUID()}`, actor: 'system', reason: 'SB-07 grace_expiry_extension',
+    });
+    const duringGrace = new Date(originalExpiry.getTime() + 60_000);
+
+    expect((await ledger.balance(customerId, 'paid', duringGrace)).expiring).toEqual([
+      { expiresAt: graceUntil, amount: 100 },
+    ]);
+    expect((await ledger.consume({
+      customerId, poolOrder: ['paid'], amount: 10, idempotencyKey: `consume:${randomUUID()}`,
+      meta: {}, now: duringGrace, negativeBalance: 'block', negativeFloor: 0,
+    })).ok).toBe(true);
+  });
+
   it('[EC:B4] negative_balance="block" rejects atomically: ok=false, no rows written, balance unchanged', async () => {
     const customerId = await makeCustomer();
     await ledger.append({

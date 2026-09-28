@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from boilpayment_core import LedgerReference, NewLedgerEntry, Payment, Refund
 
-from .util import revert_refunded_upgrade
+from .util import _upgrade_invoice_attributed_grant_ids, revert_refunded_upgrade
 
 if TYPE_CHECKING:
     from .execute import ExecuteInput
@@ -26,11 +26,24 @@ async def settle_refund(input: ExecuteInput, provider_result: Refund, payment: P
         # ledger, dunning (A16) and expiry (B14) see those grants as consumed; an unattributed revoke
         # would be double-counted later (found by examples/e2e). Remainder stays unattributed.
         all_entries = await ledger.entries(decision.customer_id, pool="paid")
-        grants = [
-            e
-            for e in all_entries
-            if e.kind == "grant" and e.reference.payment_id == decision.payment_id
-        ]
+        # SB-11 -- requested refunds follow the same exact invoice attribution as evaluation and
+        # external settlement, so the revoke lands on the original delta bucket.
+        attributed_grant_ids = _upgrade_invoice_attributed_grant_ids(
+            all_entries, decision.payment_id
+        )
+        grants_by_id = {
+            entry.id: entry
+            for entry in all_entries
+            if entry.kind == "grant"
+            and (
+                entry.reference.payment_id == decision.payment_id
+                or (
+                    entry.source == "subscription"
+                    and entry.id in attributed_grant_ids
+                )
+            )
+        }
+        grants = list(grants_by_id.values())
         # Retry-safe: subtract what this refund_id already revoked (a retried execute must not revoke twice).
         already_revoked = sum(
             -e.amount

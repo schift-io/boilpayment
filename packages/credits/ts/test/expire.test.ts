@@ -4,6 +4,23 @@ import { FixedClock, InMemoryLedger, SequentialIdGen } from 'boilpayment-core';
 import { expireDue } from '../src/index.js';
 
 describe('EC:B14 expireDue — bookkeeping only, neutral to balance', () => {
+  it('[SB-07] does not expire a grant before its linked grace extension ends', async () => {
+    const clock = new FixedClock(new Date('2024-02-02T00:00:00.000Z'));
+    const ledger = new InMemoryLedger(new SequentialIdGen('led_'), clock);
+    const grant = (await ledger.append({
+      customerId: 'cust_1', pool: 'paid', kind: 'grant', amount: 100, unitPriceMinor: null, currency: null,
+      expiresAt: new Date('2024-02-01T00:00:00.000Z'), source: 'subscription', reference: {},
+      idempotencyKey: 'g_sb07', actor: 'system', reason: null,
+    })).entry;
+    await ledger.append({
+      customerId: 'cust_1', pool: 'paid', kind: 'adjust', amount: 0, unitPriceMinor: null, currency: null,
+      expiresAt: new Date('2024-02-08T00:00:00.000Z'), source: 'subscription', reference: { grantId: grant.id },
+      idempotencyKey: 'extend_sb07', actor: 'system', reason: 'SB-07 grace_expiry_extension',
+    });
+
+    expect((await expireDue({ ledger, clock, customerId: 'cust_1' })).entries).toEqual([]);
+  });
+
   it('writing expire rows for due grants does not change balance() before or after', async () => {
     const ledger = new InMemoryLedger(new SequentialIdGen('led_'));
     const clock = new FixedClock(new Date('2024-01-01T00:00:00.000Z'));

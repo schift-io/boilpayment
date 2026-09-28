@@ -29,6 +29,7 @@ from boilpayment_core import (
     WebhookEventRecord,
     WebhookEventStatus,
     currency_exponent,
+    effective_grant_expiry,
 )
 
 # ── Public types ─────────────────────────────────────────────────────────────────────────
@@ -240,7 +241,7 @@ async def _fetch_scoped(
 
 @dataclass(slots=True)
 class _BucketState:
-    expires_at: datetime | None
+    grant: LedgerEntry
     remaining: int
 
 
@@ -253,9 +254,9 @@ def _running_balances(entries: list[LedgerEntry]) -> list[int]:
     buckets: dict[str, _BucketState] = {}
     unbucketed = 0
     out: list[int] = []
-    for e in entries:
+    for index, e in enumerate(entries):
         if e.kind == "grant":
-            buckets[e.id] = _BucketState(expires_at=e.expires_at, remaining=e.amount)
+            buckets[e.id] = _BucketState(grant=e, remaining=e.amount)
         else:
             gid = e.reference.grant_id
             bucket = buckets.get(gid) if gid else None
@@ -266,7 +267,8 @@ def _running_balances(entries: list[LedgerEntry]) -> list[int]:
         now = e.created_at
         total = unbucketed
         for b in buckets.values():
-            if b.expires_at is not None and b.expires_at <= now:  # EC:B14
+            expires_at = effective_grant_expiry(b.grant, entries[: index + 1])
+            if expires_at is not None and expires_at <= now:  # EC:B14 SB-07
                 continue
             total += b.remaining
         out.append(total)

@@ -173,10 +173,15 @@ class FakeProvider:
 # ── adapters bridging webhook/cs's flat-kwarg Protocols to the real
 #    dataclass-input lifecycle/refund functions ──────────────────────────────
 class _LifecycleDunningAdapter:
-    async def on_payment_failed(self, *, sub, policy, repo, notifier, clock):
+    async def on_payment_failed(self, *, sub, policy, ledger, repo, notifier, clock):
         return await lifecycle.dunning.on_payment_failed(
             lifecycle.dunning.OnPaymentFailedInput(
-                sub=sub, policy=policy, repo=repo, notifier=notifier, clock=clock
+                sub=sub,
+                policy=policy,
+                ledger=ledger,
+                repo=repo,
+                notifier=notifier,
+                clock=clock,
             )
         )
 

@@ -301,14 +301,18 @@ class PostgresLedgerStore:
                         break
                     await cur.execute(
                         """
-                        select g.id as grant_id, g.expires_at, g.unit_price_minor,
+                        select g.id as grant_id,
+                               paykit_effective_grant_expiry(g.id, g.expires_at) as expires_at,
+                               g.unit_price_minor,
                                g.amount + coalesce((
                                  select sum(le.amount) from ledger_entries le where le.reference ->> 'grantId' = g.id
                                ), 0) as remaining
                         from ledger_entries g
                         where g.customer_id = %s and g.pool = %s and g.kind = 'grant'
-                          and (g.expires_at is null or g.expires_at > %s)
-                        order by g.expires_at asc nulls last, g.created_at asc
+                          and (paykit_effective_grant_expiry(g.id, g.expires_at) is null
+                            or paykit_effective_grant_expiry(g.id, g.expires_at) > %s)
+                        order by paykit_effective_grant_expiry(g.id, g.expires_at) asc nulls last,
+                                 g.created_at asc
                         for update
                         """,
                         (input.customer_id, pool, input.now),

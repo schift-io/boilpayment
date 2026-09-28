@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from boilpayment_core import (
+    GRACE_EXPIRY_EXTENSION_REASON,
+    GRACE_EXPIRY_RESTORE_REASON,
+    PAID_PERIOD_PRESERVED_REASON,
     Clock,
     IdGen,
     LedgerEntry,
@@ -22,6 +26,7 @@ from boilpayment_core import (
     Policy,
     Repo,
     Subscription,
+    effective_grant_expiry,
     key_matches_instant,
     ledger_instant_key,
 )
@@ -48,6 +53,7 @@ from .missed_periods import apply_missed_periods, settle_open_attempt_if_behind
 from .period import next_period
 from .renewal import OnRenewalPaidInput, on_renewal_paid
 from .retry import retry_on_version_conflict
+from .upgrade import fail_pending_upgrade
 
 _HOUR = timedelta(hours=1)
 
@@ -98,6 +104,8 @@ class OnPaymentFailedInput:
     repo: Repo
     notifier: Notifier
     clock: Clock
+    # SB-07/SB-13 -- optional for source compatibility; production paths pass it.
+    ledger: LedgerStore | None = None
 
 
 @dataclass(kw_only=True, slots=True)
@@ -121,6 +129,116 @@ async def on_payment_failed(input: OnPaymentFailedInput) -> OnPaymentFailedResul
     now = clock.now()
     grace_days = policy.dunning.grace_days
     grace_until = now + timedelta(days=grace_days) if grace_days > 0 else now
+
+    if input.ledger is not None:
+        # SB-13 -- a failed Polar difference order rolls its pending upgrade back before dunning.
+        sub = await fail_pending_upgrade(
+            sub=sub, ledger=input.ledger, repo=repo, clock=clock
+        )
+        if sub.provider in ("stripe", "polar"):
+            async def preserve_paid_period() -> None:
+                entries = await input.ledger.entries(sub.customer_id)
+                for grant in entries:
+                    if (
+                        grant.kind != "grant"
+                        or grant.pool != "paid"
+                        or grant.source != "subscription"
+                    ):
+                        continue
+                    if grant.reference.subscription_id != sub.id:
+                        continue
+                    if grant.reference.period_start != sub.current_period.start:
+                        continue
+                    # SB-09 -- zero audit marker: this grant bought the preserved paid period.
+                    await input.ledger.append(
+                        NewLedgerEntry(
+                            customer_id=sub.customer_id,
+                            pool=grant.pool,
+                            kind="adjust",
+                            amount=0,
+                            unit_price_minor=None,
+                            currency=grant.currency,
+                            expires_at=None,
+                            source="subscription",
+                            reference=dataclasses.replace(
+                                grant.reference, grant_id=grant.id
+                            ),
+                            idempotency_key=(
+                                f"adjust:paid-period-preserved:{sub.id}:{grant.id}"
+                            ),
+                            actor="system",
+                            reason=PAID_PERIOD_PRESERVED_REASON,
+                        )
+                    )
+                    if grace_until <= now:
+                        continue
+                    expires_at = effective_grant_expiry(grant, entries)
+                    linked = [
+                        entry
+                        for entry in entries
+                        if entry.kind != "grant" and entry.reference.grant_id == grant.id
+                    ]
+                    remaining_before_expiry = grant.amount + sum(
+                        entry.amount
+                        for entry in linked
+                        if entry.kind != "expire"
+                        and entry.reason != GRACE_EXPIRY_RESTORE_REASON
+                    )
+                    if (
+                        expires_at is None
+                        or expires_at >= grace_until
+                        or remaining_before_expiry <= 0
+                    ):
+                        continue
+                    expired_debit = -sum(
+                        entry.amount
+                        for entry in linked
+                        if entry.kind == "expire" and entry.amount < 0
+                    )
+                    restore_amount = min(expired_debit, remaining_before_expiry)
+                    if restore_amount > 0:
+                        await input.ledger.append(
+                            NewLedgerEntry(
+                                customer_id=sub.customer_id,
+                                pool=grant.pool,
+                                kind="adjust",
+                                amount=restore_amount,
+                                unit_price_minor=None,
+                                currency=grant.currency,
+                                expires_at=None,
+                                source="subscription",
+                                reference=dataclasses.replace(
+                                    grant.reference, grant_id=grant.id
+                                ),
+                                idempotency_key=(
+                                    f"adjust:grace-expiry-restore:{sub.id}:{grant.id}"
+                                ),
+                                actor="system",
+                                reason=GRACE_EXPIRY_RESTORE_REASON,
+                            )
+                        )
+                    await input.ledger.append(
+                        NewLedgerEntry(
+                            customer_id=sub.customer_id,
+                            pool=grant.pool,
+                            kind="adjust",
+                            amount=0,
+                            unit_price_minor=None,
+                            currency=grant.currency,
+                            expires_at=grace_until,
+                            source="subscription",
+                            reference=dataclasses.replace(
+                                grant.reference, grant_id=grant.id
+                            ),
+                            idempotency_key=(
+                                f"adjust:grace-expiry:{sub.id}:{grant.id}:{iso_z(grace_until)}"
+                            ),
+                            actor="system",
+                            reason=GRACE_EXPIRY_EXTENSION_REASON,
+                        )
+                    )
+
+            await input.ledger.transaction(sub.customer_id, preserve_paid_period)
 
     updated = replace_sub(sub, status="past_due", grace_until=grace_until)
     await repo.subscriptions.put(updated)
@@ -194,7 +312,14 @@ async def on_grace_expired(input: OnGraceExpiredInput) -> OnGraceExpiredResult:
             ),
             None,
         )
-        if grant is not None:
+        preserved = grant is not None and any(
+            e.kind == "adjust"
+            and e.amount == 0
+            and e.reason == PAID_PERIOD_PRESERVED_REASON
+            and e.reference.grant_id == grant.id
+            for e in all_entries
+        )
+        if grant is not None and not preserved:
             used = sum(
                 e.amount
                 for e in all_entries

@@ -146,7 +146,9 @@ async def _resolve_held(
         code="review_voided", provider_code=None, retryable=False, user_message="A person closed this charge after review."))
     await repo.payments.put(voided)
     if sub is not None and sub.status in ("active", "past_due"):
-        failed = await on_payment_failed(OnPaymentFailedInput(sub=sub, policy=policy, repo=repo, notifier=notifier, clock=clock))
+        failed = await on_payment_failed(OnPaymentFailedInput(
+            sub=sub, policy=policy, ledger=ledger, repo=repo, notifier=notifier, clock=clock,  # SB-07
+        ))
         return ResolveHeldAttemptResult(payment=voided, sub=failed.sub)
     return ResolveHeldAttemptResult(payment=voided, sub=sub)
 

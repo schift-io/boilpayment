@@ -7,6 +7,10 @@ from .attempt_review import is_legacy_attempt_row as is_legacy_attempt_row
 from .attempt_review import is_under_review as is_under_review
 from .attempt_review import lookup_mismatch as lookup_mismatch
 from .clock import FixedClock, SequentialIdGen, SystemClock, UuidIdGen  # noqa: F401
+from .expiry import GRACE_EXPIRY_EXTENSION_REASON as GRACE_EXPIRY_EXTENSION_REASON
+from .expiry import GRACE_EXPIRY_RESTORE_REASON as GRACE_EXPIRY_RESTORE_REASON
+from .expiry import PAID_PERIOD_PRESERVED_REASON as PAID_PERIOD_PRESERVED_REASON
+from .expiry import effective_grant_expiry as effective_grant_expiry
 from .idempotent import (  # noqa: F401
     RunIdempotentResult,
     deserialize_cs_case,

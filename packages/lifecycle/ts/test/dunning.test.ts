@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { CollectingNotifier, FixedClock, InMemoryLedger, InMemoryRepo, Plan, Payment, Repo, Subscription, SequentialIdGen, resolvePolicy } from 'boilpayment-core';
 import { dunning } from '../src/index.js';
+import { expireDue } from 'boilpayment-credits';
 import { FakeNativeProvider, FakeSelfSchedulingProvider } from './helpers.js';
 
 const plan: Plan = { id: 'plan_a', name: 'Plan A', interval: 'month', creditsPerPeriod: 100, usageIncluded: 0, trialDays: 0, prices: [{ currency: 'USD', amountMinor: 1000 }] };
@@ -38,6 +39,44 @@ function dunningPolicy(retryAttempts: number, retryIntervalHours: number[]) {
 }
 
 describe('EC:A13 dunning.onPaymentFailed — starts grace period', () => {
+  it('[SB-07] serializes grace extension against concurrent expireDue', async () => {
+    class TrackingLedger extends InMemoryLedger {
+      calls = 0;
+      active = 0;
+      maxActive = 0;
+      override transaction<T>(customerId: string, fn: () => Promise<T>): Promise<T> {
+        return super.transaction(customerId, async () => {
+          this.calls += 1;
+          this.active += 1;
+          this.maxActive = Math.max(this.maxActive, this.active);
+          await Promise.resolve();
+          try { return await fn(); } finally { this.active -= 1; }
+        });
+      }
+    }
+    const clock = new FixedClock(period.end);
+    const ledger = new TrackingLedger(new SequentialIdGen('led_'), clock);
+    const repo = new InMemoryRepo();
+    const notifier = new CollectingNotifier();
+    const sub = mkSub();
+    await repo.subscriptions.put(sub);
+    await ledger.append({
+      customerId: sub.customerId, pool: 'paid', kind: 'grant', amount: 100,
+      unitPriceMinor: null, currency: null, expiresAt: period.end, source: 'subscription',
+      reference: { subscriptionId: sub.id, periodStart: period.start },
+      idempotencyKey: 'grant:concurrent', actor: 'system', reason: null,
+    });
+
+    await Promise.all([
+      dunning.onPaymentFailed({ sub, policy: resolvePolicy(), ledger, repo, notifier, clock }),
+      expireDue({ ledger, clock, customerId: sub.customerId }),
+    ]);
+
+    expect(ledger.calls).toBe(2);
+    expect(ledger.maxActive).toBe(1);
+    expect((await ledger.balance(sub.customerId, 'paid', clock.now())).available).toBe(100);
+  });
+
   it('graceDays=7 (default): status=past_due, graceUntil=+7d, notifies payment.failed + grace.started', async () => {
     const clock = new FixedClock(new Date('2024-01-16T00:00:00.000Z'));
     const repo = new InMemoryRepo();
@@ -64,9 +103,121 @@ describe('EC:A13 dunning.onPaymentFailed — starts grace period', () => {
     expect(res.sub.graceUntil).toEqual(clock.now());
     expect(notifier.sent.map((n) => n.type)).toEqual(['payment.failed']);
   });
+
+  it('[SB-07] extends the previous period grant through grace without duplicating it on redelivery', async () => {
+    const clock = new FixedClock(period.end);
+    const ledger = new InMemoryLedger(new SequentialIdGen('led_'), clock);
+    const repo = new InMemoryRepo();
+    const notifier = new CollectingNotifier();
+    const sub = mkSub();
+    await repo.subscriptions.put(sub);
+    const grant = (await ledger.append({
+      customerId: sub.customerId, pool: 'paid', kind: 'grant', amount: 100,
+      unitPriceMinor: 10, currency: 'USD', expiresAt: period.end, source: 'subscription',
+      reference: { subscriptionId: sub.id, periodStart: period.start },
+      idempotencyKey: `grant:${sub.id}:${period.start.toISOString()}`, actor: 'system', reason: null,
+    })).entry;
+    const policy = resolvePolicy();
+
+    const first = await dunning.onPaymentFailed({ sub, policy, ledger, repo, notifier, clock });
+    await dunning.onPaymentFailed({ sub: first.sub, policy, ledger, repo, notifier, clock });
+
+    const grants = await ledger.entries(sub.customerId, { kind: 'grant' });
+    expect(grants).toHaveLength(1);
+    expect(grants.find((entry) => entry.id === grant.id)?.expiresAt).toEqual(period.end);
+    const adjustments = (await ledger.entries(sub.customerId)).filter((entry) => entry.kind === 'adjust');
+    expect(adjustments.filter((entry) => entry.reason === 'SB-07 paid_period_preserved')).toHaveLength(1);
+    expect(adjustments.find((entry) => entry.reason === 'SB-07 grace_expiry_extension')).toMatchObject({
+      amount: 0, reason: 'SB-07 grace_expiry_extension', expiresAt: first.sub.graceUntil,
+      reference: { grantId: grant.id },
+    });
+    expect((await ledger.balance(sub.customerId, 'paid', clock.now())).expiring).toEqual([
+      { expiresAt: first.sub.graceUntil, amount: 100 },
+    ]);
+
+    clock.advance(7 * 86_400_000 - 60_000);
+    const duringGrace = await ledger.consume({
+      customerId: sub.customerId, poolOrder: ['paid'], amount: 10, idempotencyKey: 'consume:sb07:during',
+      meta: { reason: 'usage' }, now: clock.now(), negativeBalance: 'deny', negativeFloor: 0,
+    });
+    expect(duringGrace.ok).toBe(true);
+
+    clock.advance(60_000);
+    const atGraceEnd = await ledger.consume({
+      customerId: sub.customerId, poolOrder: ['paid'], amount: 1, idempotencyKey: 'consume:sb07:after',
+      meta: { reason: 'usage' }, now: clock.now(), negativeBalance: 'deny', negativeFloor: 0,
+    });
+    expect(atGraceEnd.ok).toBe(false);
+    expect(atGraceEnd.shortfall).toBe(1);
+  });
+
+  it('[SB-07] restores only credits debited by expireDue before starting grace', async () => {
+    const clock = new FixedClock(period.end);
+    const ledger = new InMemoryLedger(new SequentialIdGen('led_'), clock);
+    const repo = new InMemoryRepo();
+    const notifier = new CollectingNotifier();
+    const sub = mkSub();
+    await repo.subscriptions.put(sub);
+    const grant = (await ledger.append({
+      customerId: sub.customerId, pool: 'paid', kind: 'grant', amount: 100,
+      unitPriceMinor: 10, currency: 'USD', expiresAt: period.end, source: 'subscription',
+      reference: { subscriptionId: sub.id, periodStart: period.start },
+      idempotencyKey: `grant:${sub.id}:${period.start.toISOString()}`, actor: 'system', reason: null,
+    })).entry;
+    await ledger.consume({
+      customerId: sub.customerId, poolOrder: ['paid'], amount: 40, idempotencyKey: 'consume:before-expiry',
+      meta: {}, now: new Date(period.end.getTime() - 1), negativeBalance: 'deny', negativeFloor: 0,
+    });
+    await expireDue({ ledger, clock, customerId: sub.customerId });
+
+    const first = await dunning.onPaymentFailed({ sub, policy: resolvePolicy(), ledger, repo, notifier, clock });
+    await dunning.onPaymentFailed({ sub: first.sub, policy: resolvePolicy(), ledger, repo, notifier, clock });
+
+    const linked = (await ledger.entries(sub.customerId)).filter((entry) => entry.reference.grantId === grant.id);
+    expect(linked.filter((entry) => entry.kind === 'expire').map((entry) => entry.amount)).toEqual([-60]);
+    expect(linked.filter((entry) => entry.reason === 'SB-07 grace_expiry_restore').map((entry) => entry.amount)).toEqual([60]);
+    expect(linked.filter((entry) => entry.reason === 'SB-07 grace_expiry_extension').map((entry) => entry.amount)).toEqual([0]);
+    expect(await ledger.balance(sub.customerId, 'paid', clock.now())).toMatchObject({
+      available: 60, expiring: [{ expiresAt: first.sub.graceUntil, amount: 60 }],
+    });
+    clock.advance(7 * 86_400_000 - 1);
+    expect((await ledger.consume({
+      customerId: sub.customerId, poolOrder: ['paid'], amount: 10, idempotencyKey: 'consume:restored-grace',
+      meta: {}, now: clock.now(), negativeBalance: 'deny', negativeFloor: 0,
+    })).ok).toBe(true);
+    clock.advance(1);
+    expect((await ledger.consume({
+      customerId: sub.customerId, poolOrder: ['paid'], amount: 1, idempotencyKey: 'consume:restored-expired',
+      meta: {}, now: clock.now(), negativeBalance: 'deny', negativeFloor: 0,
+    })).ok).toBe(false);
+  });
 });
 
 describe('EC:A16 dunning.onGraceExpired — resolves credits on final failure', () => {
+  it('[SB-09] keeps marked paid-period credits after final failure with full rollover', async () => {
+    const clock = new FixedClock(period.end);
+    const ledger = new InMemoryLedger(new SequentialIdGen('led_'), clock);
+    const repo = new InMemoryRepo();
+    const notifier = new CollectingNotifier();
+    const sub = mkSub();
+    await repo.subscriptions.put(sub);
+    await ledger.append({
+      customerId: sub.customerId, pool: 'paid', kind: 'grant', amount: 100,
+      unitPriceMinor: null, currency: null, expiresAt: null, source: 'subscription',
+      reference: { subscriptionId: sub.id, periodStart: period.start },
+      idempotencyKey: `grant:${sub.id}:${period.start.toISOString()}`, actor: 'system', reason: null,
+    });
+    const policy = resolvePolicy({ credits: { rollover: 'full' } });
+    const failed = await dunning.onPaymentFailed({ sub, policy, ledger, repo, notifier, clock });
+    clock.advance(7 * 86_400_000);
+
+    const result = await dunning.onGraceExpired({ sub: failed.sub, policy, ledger, repo, notifier, clock });
+
+    expect(result.revoked).toEqual([]);
+    expect((await ledger.balance(sub.customerId, 'paid', clock.now())).available).toBe(100);
+    expect((await ledger.entries(sub.customerId)).filter((entry) => entry.reason === 'SB-07 paid_period_preserved')).toHaveLength(1);
+  });
+
   it("onFinalFailure='revoke_unpaid_period' (default) revokes the remaining balance of the current period's grant", async () => {
     const clock = new FixedClock(new Date('2024-01-23T00:00:00.000Z'));
     const ledger = new InMemoryLedger(new SequentialIdGen('led_'));
