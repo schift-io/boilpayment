@@ -23,7 +23,15 @@ The 13 TypeScript module packages are private workspace packages. Do not publish
   from 0.2.0, run `npx boilpayment migrate` to apply both. There is no upgrade path from 0.1.0.
 - The `docs/cases.tsv` rows were measured against Stripe and Polar test doubles that follow the providers'
   documented shapes, not against the Stripe test mode or the Polar sandbox. Run `npx boilpayment live` with your
-  own test keys before taking live payments; it checks the real API round trip.
+  own test keys before taking live payments; it checks the real API round trip. Shapes taken from the docs but not
+  yet seen from a live provider: Polar `reference_id` reaching the order metadata (payment links), Polar
+  `total_amount` on a taxed order (the discount check compares `subtotal - discount` with the amount paid), the
+  discount fields read to refuse a preset 100% code (Stripe `coupon.percent_off` / `amount_off`, Polar
+  `basis_points` / `amount`), and a 100%-off Stripe Checkout Session arriving as `no_payment_required` with no
+  PaymentIntent.
+- 100% discounts are not supported (cases.tsv DC-07, DC-07S): a preset 100% code is refused at checkout; a
+  customer-entered one records the payment, grants nothing and opens one needs_human case.
+- The Python package needs `stripe>=12.5` (earlier releases lack `StripeClient.v1`).
 
 ## 1. Pre-flight
 
