@@ -421,6 +421,13 @@ async def recover_missing_grants(input: RecoverMissingGrantsInput) -> list[CsCas
         # EC:A46 -- a declined charge bought nothing; a pending self-scheduled attempt belongs to the scheduler.
         if payment.status == "failed":
             continue
+        # OT-09 -- a payment held for its registration is not a missing grant; only the registration-hold
+        # path (reconcile, after the window) opens the single case for it.
+        if (
+            await input.repo.operations.get(f"checkout-payment-held:{payment.id}") is not None
+            and await input.repo.operations.get(f"purchase-entitlement:{payment.id}") is None
+        ):
+            continue
         raw = payment.raw if isinstance(payment.raw, dict) else {}
         if raw.get("boilpaymentTrialOpeningInvoice") is True:
             continue

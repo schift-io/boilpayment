@@ -205,6 +205,10 @@ export async function recoverMissingGrants(input: RecoverMissingGrantsInput): Pr
     // EC:A46 — a declined charge bought nothing, and a self-scheduled attempt still pending belongs to
     // the scheduler (EC:A36 A38): neither is a missing grant.
     if (payment.status === 'failed') continue;
+    // OT-09 — a payment held for its registration is not a missing grant; only the registration-hold
+    // path (reconcile, after the window) opens the single case for it.
+    if (await input.repo.operations.get(`checkout-payment-held:${payment.id}`)
+      && !(await input.repo.operations.get(`purchase-entitlement:${payment.id}`))) continue;
     if (payment.status === 'pending' && (payment.raw as { boilpaymentAttemptKey?: unknown } | undefined)?.boilpaymentAttemptKey) continue;
     const entries = await input.ledger.entries(payment.customerId, { kind: 'grant' });
     if (entries.some((entry) => entry.reference.paymentId === payment.id)) continue;
