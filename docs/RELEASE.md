@@ -21,6 +21,9 @@ The 13 TypeScript module packages are private workspace packages. Do not publish
 - Migration `0015_grace_credit_expiry.sql` adds two SQL functions (no table or column change), and
   `0016_affiliate_commissions.sql` adds append-only affiliate commission accounting. After upgrading
   from 0.2.0, run `npx boilpayment migrate` to apply both. There is no upgrade path from 0.1.0.
+- The `docs/cases.tsv` rows were measured against Stripe and Polar test doubles that follow the providers'
+  documented shapes, not against the Stripe test mode or the Polar sandbox. Run `npx boilpayment live` with your
+  own test keys before taking live payments; it checks the real API round trip.
 
 ## 1. Pre-flight
 
