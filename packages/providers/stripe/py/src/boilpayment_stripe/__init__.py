@@ -481,18 +481,29 @@ SUB_STATUS: dict[str, str] = {
 
 # EC:F(Stripe) — normalize Subscription (pure). See spec "계약 메모" for id/customer_id/plan_id sourcing.
 def _as_dict(obj: Any) -> dict[str, Any]:
-    """StripeObject (stripe-python >= 13) is neither iterable nor a Mapping; use to_dict()."""
-    if obj is None:
-        return {}
-    if hasattr(obj, "to_dict"):
-        return dict(obj.to_dict())
-    if isinstance(obj, dict):
-        return dict(obj)
-    if hasattr(obj, "items"):
-        return dict(obj.items())
-    if hasattr(obj, "__dict__"):
-        return {k: v for k, v in vars(obj).items() if not k.startswith("_")}
-    return {}
+    """StripeObject (stripe-python >= 13) is neither iterable nor a Mapping; use to_dict().
+
+    The result is plain JSON-able data all the way down: a dict that wraps a StripeObject value
+    (a checkout session with its expanded PaymentIntent/Invoice) is converted too, so no SDK
+    object can reach a persisted column."""
+    plain = _plain(obj)
+    return plain if isinstance(plain, dict) else {}
+
+
+def _plain(v: Any) -> Any:
+    if v is None or isinstance(v, (str, int, float, bool)):
+        return v
+    if hasattr(v, "to_dict"):
+        return _plain(dict(v.to_dict()))
+    if isinstance(v, dict):
+        return {k: _plain(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_plain(x) for x in v]
+    if hasattr(v, "items"):
+        return {k: _plain(x) for k, x in v.items()}
+    if hasattr(v, "__dict__"):
+        return {k: _plain(x) for k, x in vars(v).items() if not k.startswith("_")}
+    return v
 
 
 def _ref_id(v: Any) -> str | None:

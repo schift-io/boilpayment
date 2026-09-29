@@ -114,6 +114,10 @@ export async function startCheckout(input: StartCheckoutInput): Promise<Checkout
   const checkout = attempt.result.checkout;
   await runIdempotent({ repo: input.repo, clock: input.clock, key: `checkout-entitlement-by-id:${checkout.id}`, kind: 'checkout.entitlement',
     payload: { key }, serialize: (value) => value, deserialize: parseCheckoutSnapshot, fn: async () => ({ ...snapshot, checkoutId: checkout.id, checkoutProviderRef: checkout.providerRef }) });
+  // OT-09 — a one-time payment event can name only the kit's key (PaymentIntent metadata), never the
+  // checkout id; this reverse pointer lets the webhook find the sale to hold the payment for.
+  await runIdempotent({ repo: input.repo, clock: input.clock, key: `checkout-id-by-key:${key}`, kind: 'checkout.entitlement',
+    payload: { checkoutId: checkout.id }, fn: async () => ({ checkoutId: checkout.id }) });
   return checkout;
 }
 

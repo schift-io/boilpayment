@@ -126,6 +126,37 @@ describe.each(['stripe', 'polar'] as const)('%s commerce webhooks', (providerNam
     expect(grants).toBe(0);
   });
 
+  it('[OT-09] a PaymentIntent naming the kit checkout key is held before registration', async () => {
+    // Given -- the PaymentIntent carries the kit's key in metadata, never the session id
+    if (providerName !== 'stripe') return;
+    const repo = new InMemoryRepo();
+    const clock = new FixedClock(now);
+    for (const [key, result] of [
+      ['checkout-entitlement-by-id:checkout-1', { customerId: 'customer-1', plan: { id: 'plan-1', interval: null }, affiliateId: null }],
+      ['checkout-id-by-key:intent-1', { checkoutId: 'checkout-1' }],
+    ] as const) {
+      await repo.operations.put({ id: key, key, kind: 'checkout.entitlement', payloadHash: 'x', status: 'done', result, error: null,
+        createdAt: now, completedAt: now, attempts: 1 });
+    }
+    const intent = remote(providerName, { saleEvidence: null, raw: { metadata: { checkoutEntitlementKey: 'intent-1' } } });
+    const provider = new FakeProvider({ name: providerName, verify: () => event(providerName), getPaymentImpl: () => intent });
+    let grants = 0;
+    const handlers = defaultHandlers({
+      policy: DEFAULT_POLICY, ledger: new InMemoryLedger(), repo, notifier: new CollectingNotifier(), clock, ids: new SequentialIdGen('id-'),
+      grantLinkPayment: async () => { grants += 1; },
+    });
+    const handler = handlers['payment.succeeded'];
+    if (!handler) throw new Error('payment handler missing');
+
+    // When
+    await handler({ event: event(providerName), provider, repo, clock, correlationId: 'correlation-1' });
+
+    // Then
+    expect(await repo.operations.get('checkout-payment-held:payment:stripe:pi-canonical')).toMatchObject({ status: 'done' });
+    expect(await repo.payments.list()).toHaveLength(1);
+    expect(grants).toBe(0);
+  });
+
   it('[PL-02, AF-01/02] grants a valid link once and accrues once', async () => {
     // Given
     const repo = new InMemoryRepo();

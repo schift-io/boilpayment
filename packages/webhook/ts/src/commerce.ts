@@ -94,6 +94,16 @@ export function createCommerceWebhook(input: CommerceWebhookInput) {
     return matched.length === 1 ? matched[0] ?? null : null;
   }
 
+  // OT-09 — a Stripe PaymentIntent carries the kit's checkout key, not the session id.
+  async function checkoutIdFromMetadata(remote: Payment): Promise<string | null> {
+    const metadata = record(record(remote.raw)?.['metadata']);
+    const key = metadata?.['checkoutEntitlementKey'];
+    if (typeof key !== 'string' || !key) return null;
+    const pointer = await repo.operations.get(`checkout-id-by-key:${key}`);
+    const checkoutId = pointer?.status === 'done' ? record(pointer.result)?.['checkoutId'] : null;
+    return typeof checkoutId === 'string' ? checkoutId : null;
+  }
+
   async function holdCheckout(remote: Payment, checkoutId: string): Promise<Payment | null | undefined> {
     const operation = await repo.operations.get(`checkout-entitlement-by-id:${checkoutId}`);
     const snapshot = operation?.kind === 'checkout.entitlement' && operation.status === 'done'
@@ -179,7 +189,7 @@ export function createCommerceWebhook(input: CommerceWebhookInput) {
         status: remote.status,
       });
     }
-    const checkoutId = remote.saleEvidence?.checkoutId ?? null;
+    const checkoutId = remote.saleEvidence?.checkoutId ?? await checkoutIdFromMetadata(remote);
     if (checkoutId) {
       const held = await holdCheckout(remote, checkoutId);
       if (held !== undefined) return held;

@@ -153,6 +153,19 @@ class CommerceWebhook:
         ]
         return matched[0] if len(matched) == 1 else None
 
+    async def _checkout_id_from_metadata(self, remote: Payment) -> str | None:
+        """OT-09 -- a Stripe PaymentIntent carries the kit's checkout key, not the session id."""
+        raw = remote.raw if isinstance(remote.raw, dict) else {}
+        metadata = raw.get("metadata")
+        key = metadata.get("checkoutEntitlementKey") if isinstance(metadata, dict) else None
+        if not isinstance(key, str) or not key:
+            return None
+        pointer = await self._input.repo.operations.get(f"checkout-id-by-key:{key}")
+        if pointer is None or pointer.status != "done" or not isinstance(pointer.result, dict):
+            return None
+        checkout_id = pointer.result.get("checkoutId")
+        return checkout_id if isinstance(checkout_id, str) else None
+
     async def _hold_checkout(
         self, remote: Payment, checkout_id: str
     ) -> Payment | None | Literal[False]:
@@ -294,8 +307,11 @@ class CommerceWebhook:
                 "topup_payment_not_succeeded",
                 {"payment_id": remote.id, "status": remote.status},
             )
-        if remote.sale_evidence is not None and remote.sale_evidence.checkout_id is not None:
-            held = await self._hold_checkout(remote, remote.sale_evidence.checkout_id)
+        checkout_id = (
+            remote.sale_evidence.checkout_id if remote.sale_evidence is not None else None
+        ) or await self._checkout_id_from_metadata(remote)
+        if checkout_id is not None:
+            held = await self._hold_checkout(remote, checkout_id)
             if held is not False:
                 return held
         await self._handle_link(ctx, remote)

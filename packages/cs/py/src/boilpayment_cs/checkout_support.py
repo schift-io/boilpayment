@@ -242,6 +242,20 @@ async def start_checkout(input: StartCheckoutInput) -> Checkout:
         deserialize=parse_checkout_snapshot,
         fn=alias,
     )
+
+    # OT-09 -- a one-time payment event can name only the kit's key (PaymentIntent metadata), never
+    # the checkout id; this reverse pointer lets the webhook find the sale to hold the payment for.
+    async def pointer() -> dict[str, str]:
+        return {"checkoutId": checkout.id}
+
+    await run_idempotent(
+        repo=input.repo,
+        clock=input.clock,
+        key=f"checkout-id-by-key:{key}",
+        kind="checkout.entitlement",
+        payload={"checkoutId": checkout.id},
+        fn=pointer,
+    )
     return checkout
 
 

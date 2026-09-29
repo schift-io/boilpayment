@@ -66,6 +66,10 @@ export async function reconcile(input: ReconcileInput): Promise<CsCase[]> {
       const payments = await provider.listPayments({ customerRef: pref.ref, since });
       for (const payment of payments) {
         if (payment.status !== 'succeeded') continue;
+        // OT-09 — a payment held for its registration is not a missing grant; the hold window owns it.
+        const localId = `payment:${payment.provider}:${payment.providerRef}`;
+        if (await input.repo.operations.get(`checkout-payment-held:${localId}`)
+          && !(await input.repo.operations.get(`purchase-entitlement:${localId}`))) continue;
         let grantKey: string;
         if (payment.kind === 'subscription') {
           if (!payment.period) continue;

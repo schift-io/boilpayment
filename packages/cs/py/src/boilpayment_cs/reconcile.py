@@ -129,6 +129,13 @@ async def reconcile(input: ReconcileInput) -> list[CsCase]:
             for payment in payments:
                 if payment.status != "succeeded":
                     continue
+                # OT-09 -- a payment held for its registration is not a missing grant; the hold window owns it.
+                local_id = f"payment:{payment.provider}:{payment.provider_ref}"
+                if (
+                    await input.repo.operations.get(f"checkout-payment-held:{local_id}") is not None
+                    and await input.repo.operations.get(f"purchase-entitlement:{local_id}") is None
+                ):
+                    continue
                 if payment.kind == "subscription":
                     if payment.period is None:
                         continue

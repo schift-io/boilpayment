@@ -590,3 +590,51 @@ def test_dc05_and_af04_renew_by_plan_at_actual_charge_by_policy(
         ) == expected_commissions
 
     asyncio.run(run())
+
+
+def test_ot09_stripe_payment_intent_before_registration_is_held_by_checkout_key() -> None:
+    async def run() -> None:
+        # Given -- a PaymentIntent names the kit's checkout key in metadata, never the session id
+        repo = InMemoryRepo()
+        clock = FixedClock(NOW)
+        for key, result in (
+            ("checkout-entitlement-by-id:checkout-1", {
+                "customer_id": "customer-1", "plan": {"id": "plan-1", "interval": None}, "affiliate_id": None,
+            }),
+            ("checkout-id-by-key:intent-1", {"checkoutId": "checkout-1"}),
+        ):
+            await repo.operations.put(Operation(
+                id=key, key=key, kind="checkout.entitlement", payload_hash="x", status="done",
+                result=result, error=None, created_at=NOW, completed_at=NOW, attempts=1,
+            ))
+        intent = _remote(
+            "stripe", sale_evidence=None,
+            raw={"metadata": {"checkoutEntitlementKey": "intent-1"}},
+        )
+        provider = FakeProvider(
+            name="stripe",
+            verify=lambda _headers, _body: _event("stripe"),
+            get_payment_impl=lambda _ref: intent,
+        )
+        grants: list[str] = []
+
+        async def grant(payment, plan, subscription) -> None:
+            grants.append(payment.id)
+
+        handlers = default_handlers(
+            policy=DEFAULT_POLICY, ledger=InMemoryLedger(), repo=repo, notifier=CollectingNotifier(),
+            clock=clock, ids=SequentialIdGen("id-"), grant_link_payment=grant,
+        )
+
+        # When
+        await handlers["payment.succeeded"](HandlerCtx(
+            event=_event("stripe"), provider=provider, repo=repo, clock=clock, correlation_id="c-1",
+        ))
+
+        # Then
+        held = await repo.operations.get("checkout-payment-held:payment:stripe:pi-canonical")
+        assert held is not None and held.status == "done"
+        assert len(await repo.payments.list()) == 1
+        assert grants == []
+
+    asyncio.run(run())
