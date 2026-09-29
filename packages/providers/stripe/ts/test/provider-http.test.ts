@@ -89,6 +89,7 @@ describe('[EC:E6] createCheckout', () => {
   });
 
   it('[DC-01] sends a preset promotion code instead of enabling code entry', async () => {
+    mock.respondJson(200, { id: 'promo_launch', object: 'promotion_code', coupon: { id: 'launch', object: 'coupon', percent_off: 20 } });
     mock.respondJson(200, { id: 'cs_preset', object: 'checkout.session', url: 'https://checkout.stripe.com/cs_preset' });
     const provider = makeProvider();
     const input = checkoutInput();
@@ -96,9 +97,34 @@ describe('[EC:E6] createCheckout', () => {
 
     await provider.createCheckout(input);
 
-    const body = new URLSearchParams(mock.requests[0].body);
+    const body = new URLSearchParams(mock.requests[1].body);
     expect(body.get('discounts[0][promotion_code]')).toBe('promo_launch');
     expect(body.get('allow_promotion_codes')).toBeNull();
+  });
+
+  it.each([
+    ['percent_off 100', { percent_off: 100 }],
+    ['amount_off at the price', { amount_off: 9900, currency: 'krw' }],
+    ['amount_off above the price', { amount_off: 20000, currency: 'krw' }],
+  ])('[DC-07] a preset promotion code with %s is refused before any Checkout Session exists', async (_name, coupon) => {
+    mock.respondJson(200, { id: 'promo_free', object: 'promotion_code', coupon: { id: 'free', object: 'coupon', ...coupon } });
+    const provider = makeProvider();
+    const input = checkoutInput();
+    Object.assign(input, { presetDiscountCode: 'promo_free' });
+
+    await expect(provider.createCheckout(input)).rejects.toMatchObject({ code: 'full_discount_unsupported' });
+
+    expect(mock.requests.filter((request) => request.path === '/v1/checkout/sessions')).toHaveLength(0);
+  });
+
+  it('[DC-07] a coupon given only as an id is fetched and judged the same way', async () => {
+    mock.respondJson(200, { id: 'promo_free', object: 'promotion_code', promotion: { type: 'coupon', coupon: 'free' } });
+    mock.respondJson(200, { id: 'free', object: 'coupon', percent_off: 100 });
+    const provider = makeProvider();
+    const input = checkoutInput();
+    Object.assign(input, { presetDiscountCode: 'promo_free' });
+
+    await expect(provider.createCheckout(input)).rejects.toMatchObject({ code: 'full_discount_unsupported' });
   });
 
   it('[AF-01] propagates the affiliate id through checkout, payment, and subscription metadata', async () => {
@@ -186,6 +212,7 @@ describe('[EC:E6] createCheckout', () => {
   });
 
   it('[DC-06] an exhausted promotion code is a definitive provider refusal with no checkout result', async () => {
+    mock.respondJson(200, { id: 'promo_exhausted', object: 'promotion_code', coupon: { id: 'c', object: 'coupon', percent_off: 20 } });
     mock.respondJson(400, { error: { type: 'invalid_request_error', code: 'promotion_code_max_redemptions', message: 'refused' } });
     const provider = makeProvider();
     const input = checkoutInput();
@@ -195,7 +222,7 @@ describe('[EC:E6] createCheckout', () => {
 
     expect(error).toBeInstanceOf(ProviderError);
     expect(error).toMatchObject({ httpStatus: 400, failure: { providerCode: 'promotion_code_max_redemptions', retryable: false } });
-    expect(mock.requests).toHaveLength(1);
+    expect(mock.requests).toHaveLength(2);
   });
 
   it('[OT-03] uncertain Stripe 500 checkout errors are retryable ProviderErrors', async () => {
@@ -216,6 +243,20 @@ describe('[EC:E6] createCheckout', () => {
 });
 
 describe('[EC:E7] getPayment', () => {
+  it('[DC-07] a 100%-discounted Checkout Session with no PaymentIntent or invoice normalizes to a paid-zero payment', async () => {
+    mock.respondJson(200, {
+      id: 'cs_free_1', object: 'checkout.session', mode: 'payment', payment_status: 'no_payment_required',
+      payment_intent: null, invoice: null, subscription: null, amount_subtotal: 10000, amount_total: 0,
+      total_details: { amount_discount: 10000 }, currency: 'krw', created: 1700000000, metadata: {},
+    });
+    const provider = makeProvider();
+
+    const payment = await provider.getPayment('cs_free_1');
+
+    expect(payment).toMatchObject({ providerRef: 'cs_free_1', status: 'succeeded', kind: 'topup', amount: { amountMinor: 0, currency: 'KRW' },
+      saleEvidence: { checkoutId: 'cs_free_1', providerSubtotal: { amountMinor: 10000 }, discountAmount: { amountMinor: 10000 } } });
+  });
+
   it('[DC-02 PL-02] cs_ ref retrieves authoritative checkout evidence and returns the underlying payment ref', async () => {
     mock.respondJson(200, {
       id: 'cs_link_1', object: 'checkout.session', mode: 'payment', payment_status: 'paid',

@@ -163,6 +163,9 @@ class TestCreateCheckout:
     def test_dc_01_af_01_forwards_discount_controls_and_affiliate_metadata(
         self, recorder
     ):
+        recorder.queue(json_response(
+            {"id": "discount_20pct", "type": "percentage", "basis_points": 2000}
+        ))
         recorder.queue(
             json_response(
                 {
@@ -212,6 +215,9 @@ class TestCreateCheckout:
         }
 
     def test_dc_06_exhausted_discount_refusal_returns_no_checkout(self, recorder):
+        recorder.queue(json_response(
+            {"id": "discount_exhausted", "type": "percentage", "basis_points": 2000}
+        ))
         recorder.queue(
             json_response({"detail": "discount max redemptions reached"}, status=422)
         )
@@ -236,6 +242,39 @@ class TestCreateCheckout:
             )))
 
         assert excinfo.value.http_status == 422
+        assert len(recorder.requests) == 2
+
+    @pytest.mark.parametrize(
+        "discount",
+        [
+            {"type": "percentage", "basis_points": 10_000},
+            {"type": "fixed", "amount": 1000, "currency": "usd"},
+            {"type": "fixed", "amount": 4000, "currency": "usd"},
+        ],
+    )
+    def test_dc_07_full_discount_is_refused_before_any_polar_checkout(
+        self, recorder, discount
+    ):
+        recorder.queue(json_response({"id": "discount_free", **discount}))
+        price = PlanPrice(
+            currency="usd", amount_minor=1000,
+            provider_price_refs={"polar": "prod_polar_1"},
+        )
+        plan = Plan(
+            id="plan_pro", name="Pro", interval=None, credits_per_period=1000,
+            usage_included=0, trial_days=0, prices=[price],
+        )
+        from boilpayment_core import CreateCheckoutInput
+
+        with pytest.raises(PaymentKitError) as excinfo:
+            asyncio.run(provider().create_checkout(CreateCheckoutInput(
+                customer_ref="cust_abc", plan=plan, price=price, mode="one_time",
+                success_url="https://app.example.com/success",
+                cancel_url="https://app.example.com/cancel",
+                idempotency_key="checkout:free", preset_discount_code="discount_free",
+            )))
+
+        assert excinfo.value.code == "full_discount_unsupported"
         assert len(recorder.requests) == 1
 
     def test_ec_f_polar_missing_provider_price_ref_raises_without_network_call(

@@ -514,7 +514,7 @@ export function generateIndexTs(config: PaykitConfig): string {
   }
   if (hasReservations) l.push(`    sweepReservations: () => sweepReservations({ repo: full.repo, ledger: full.ledger, clock: full.clock }),`);
   l.push(`    reconcile: async (since: Date) => {`);
-  if (hasCredits) l.push(`      const recovered = await recoverMissingGrants({ ...supportDeps, grants: { topup, grantForPeriod }, since });`);
+  if (hasCredits) l.push(`      const recovered = await recoverMissingGrants({ ...supportDeps, grants: { topup, grantForPeriod }, accrueAffiliate: accrueAffiliatePayment, affiliateRenewals, since });`);
   else l.push(`      const recovered: unknown[] = [];`);
   l.push(`      const cases = await reconcileCases({ policy, providers, ledger: full.ledger, repo: full.repo, clock: full.clock, ids: full.ids, since, registrationHoldHours: checkoutConfig.registrationHoldHours });`);
   l.push(`      return [...recovered, ...cases];`);

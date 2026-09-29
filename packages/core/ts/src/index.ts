@@ -12,3 +12,4 @@ export * from './payment-refs.js';
 export * from './attempt-review.js';
 export * from './expiry.js';
 export * from './affiliate.js';
+export * from './zeroSale.js';

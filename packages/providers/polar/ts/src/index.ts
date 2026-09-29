@@ -372,6 +372,17 @@ export class PolarProvider implements PaymentProvider {
         { planId: input.plan.id },
       );
     }
+    if (input.presetDiscountCode) {
+      // DC-07 — 100% discounts are not supported: refuse before any provider checkout exists.
+      const discount = await this.request<{ type?: string; basis_points?: number | null; amount?: number | null; currency?: string | null }>(
+        'GET', `/v1/discounts/${encodeURIComponent(input.presetDiscountCode)}`);
+      const percentFull = typeof discount.basis_points === 'number' && discount.basis_points >= 10_000;
+      const amountFull = typeof discount.amount === 'number' && discount.amount >= input.price.amountMinor
+        && (!discount.currency || discount.currency.toUpperCase() === input.price.currency.toUpperCase());
+      if (percentFull || amountFull) {
+        throw new PaymentKitError('100% discounts are not supported', 'full_discount_unsupported', { code: input.presetDiscountCode });
+      }
+    }
     const checkout = await this.request<{ id: string; url: string }>(
       'POST',
       '/v1/checkouts/',

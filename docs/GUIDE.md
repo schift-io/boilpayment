@@ -155,6 +155,8 @@ same exact-integer calculation as an undiscounted refund, and the result never e
 amount. An exhausted code is refused by Stripe or Polar before payment; the kit writes no payment
 or grant for that refused checkout.
 
+100% discounts are not supported: a `presetDiscountCode` that makes the amount 0 is refused at checkout (`full_discount_unsupported`, no provider session and no payment row), and if a customer enters a 100% code on the provider page the kit records the paid-zero sale, grants nothing, accrues no commission and opens exactly one needs_human case (redeliveries and registration add nothing); a zero-amount invoice of a subscription that is not a trial is handled the same way.
+
 ### Payment links (Stripe and Polar)
 
 Create the link in the provider dashboard, then add the existing kit customer before showing it.

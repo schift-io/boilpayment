@@ -251,7 +251,16 @@ function checkoutSaleEvidence(session: ExpandedCheckoutSession) {
 export function normalizeCheckoutSessionAsPayment(session: ExpandedCheckoutSession): Payment {
   const invoice = typeof session.invoice === 'object' && session.invoice ? session.invoice : null;
   const intent = typeof session.payment_intent === 'object' && session.payment_intent ? session.payment_intent : null;
-  const base = invoice ? normalizeInvoiceAsPayment(invoice, intent) : intent ? normalizePaymentIntent(intent, null) : null;
+  const noPaymentRequired = session.payment_status === 'no_payment_required' || session.amount_total === 0;
+  // DC-07 — a 100% discount leaves Checkout with neither PaymentIntent nor invoice; the sale is a paid-zero
+  // payment keyed by the session so the webhook can record it (and hand it to a person) instead of failing.
+  const zeroBase: Payment | null = !invoice && !intent && noPaymentRequired ? {
+    id: session.id, customerId: '', provider: 'stripe', providerRef: session.id, subscriptionId: null,
+    amount: money(0, session.currency ?? 'usd'), status: 'succeeded', kind: 'topup', period: null,
+    occurredAt: new Date(session.created * 1000), failure: null, cashReceipt: null, saleEvidence: null,
+    affiliateId: null, raw: session, providerRefAliases: [],
+  } : null;
+  const base = invoice ? normalizeInvoiceAsPayment(invoice, intent) : intent ? normalizePaymentIntent(intent, null) : zeroBase;
   if (!base) {
     throw new PaymentKitError(`stripe checkout session ${session.id} has no payable reference`, 'provider_shape');
   }
@@ -569,6 +578,21 @@ export class StripeProvider implements PaymentProvider {
     return { ref: customer.id };
   }
 
+  // DC-07 — 100% discounts are not supported: refuse before any provider session exists.
+  private async refuseFullDiscount(code: string, price: { readonly amountMinor: number; readonly currency: string }): Promise<void> {
+    const promotion = await this.client.promotionCodes.retrieve(code) as unknown as { coupon?: unknown; promotion?: { coupon?: unknown } | null };
+    let coupon = promotion.coupon ?? promotion.promotion?.coupon;
+    if (typeof coupon === 'string') coupon = await this.client.coupons.retrieve(coupon);
+    const c = coupon as { percent_off?: number | null; amount_off?: number | null; currency?: string | null } | null | undefined;
+    if (!c) return;
+    const percentFull = typeof c.percent_off === 'number' && c.percent_off >= 100;
+    const amountFull = typeof c.amount_off === 'number' && c.amount_off >= price.amountMinor
+      && (!c.currency || c.currency.toUpperCase() === price.currency.toUpperCase());
+    if (percentFull || amountFull) {
+      throw new PaymentKitError('100% discounts are not supported', 'full_discount_unsupported', { code });
+    }
+  }
+
   // EC:E6 — idempotencyKey passed through to Stripe request options
   async createCheckout(input: CreateCheckoutInput): Promise<Checkout> {
     const priceRef = input.price.providerPriceRefs?.stripe;
@@ -586,6 +610,7 @@ export class StripeProvider implements PaymentProvider {
       ...(input.affiliateId ? { affiliateId: input.affiliateId } : {}),
     };
     try {
+      if (input.presetDiscountCode) await this.refuseFullDiscount(input.presetDiscountCode, input.price);
       const session = await this.client.checkout.sessions.create(
         {
           mode,

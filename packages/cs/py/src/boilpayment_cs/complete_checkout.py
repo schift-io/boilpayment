@@ -5,7 +5,12 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 
-from boilpayment_core import Payment, PaymentKitError, run_idempotent
+from boilpayment_core import (
+    Payment,
+    PaymentKitError,
+    open_zero_sale_case,
+    run_idempotent,
+)
 
 from .purchase_snapshot import (
     PurchaseSnapshot,
@@ -83,13 +88,17 @@ async def register_completed_checkout(input: RegisterCompletedCheckoutInput) -> 
         and subscription_evidence[1].status == "trialing"
         and live.amount.amount_minor == 0
     )
+    # DC-07 -- a paid-zero sale that is not a trial (a 100% discount) is recorded and handed to a person, never granted.
+    zero_sale = live.amount.amount_minor == 0 and not (
+        snapshot.plan.interval is not None and snapshot.plan.trial_days > 0
+    )
     if (
         not matches_checkout_payment(snapshot, live.raw, input.payment_ref)
         or live.provider_ref != input.payment_ref
         or live.provider != snapshot.provider
         or live.status != "succeeded"
-        or (not matches_captured_sale_amount(snapshot, live) and not trial_invoice)
-        or (not bound and not any(payment.provider_ref == input.payment_ref for payment in listed))
+        or (not matches_captured_sale_amount(snapshot, live) and not trial_invoice and not zero_sale)
+        or (not bound and not zero_sale and not any(payment.provider_ref == input.payment_ref for payment in listed))
         or live.customer_id not in ("", snapshot.customer_id, snapshot.customer_ref)
     ):
         raise PaymentKitError(
@@ -97,6 +106,18 @@ async def register_completed_checkout(input: RegisterCompletedCheckoutInput) -> 
             "checkout_evidence_mismatch",
         )
     payment_id = f"payment:{snapshot.provider}:{input.payment_ref}"
+    if zero_sale:
+        recorded_zero = await input.repo.payments.get(payment_id) or replace(
+            live, id=payment_id, customer_id=snapshot.customer_id, subscription_id=None,
+            kind="topup" if snapshot.plan.interval is None else "subscription",
+            affiliate_id=snapshot.affiliate_id,
+        )
+        await input.repo.payments.put(recorded_zero)
+        await open_zero_sale_case(
+            repo=input.repo, clock=input.clock, policy=input.policy,
+            payment=recorded_zero, notifier=input.notifier,
+        )
+        return recorded_zero
     subscription_id = None
     period = live.period
     if snapshot.plan.interval is not None:

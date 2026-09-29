@@ -36,6 +36,8 @@ from boilpayment_core import (
     Policy,
     Repo,
     Subscription,
+    is_zero_sale_handled,
+    open_zero_sale_case,
     record_payment_ref_aliases,
     run_idempotent,
 )
@@ -445,6 +447,7 @@ def default_handlers(
         repo=repo,
         clock=clock,
         policy=policy,
+        notifier=notifier,
         decode_link_reference=decode_link_reference,
         grant_link_payment=grant_link_payment,
         open_link_mismatch_case=open_link_mismatch_case,
@@ -482,6 +485,10 @@ def default_handlers(
         else:
             payment = await commerce.handle_unregistered_payment(ctx, payment_ref)
         if payment is None:
+            return
+        if await is_zero_sale_handled(repo, payment.id):
+            return  # DC-07 -- recorded, nothing granted, case already open
+        if known_payments and await commerce.retry_incomplete_link(ctx, payment):
             return
         link_grant = await repo.operations.get(f"payment-link-grant:{payment.id}")
         if (
@@ -551,6 +558,16 @@ def default_handlers(
                     raw={**raw, "boilpaymentTrialOpeningInvoice": True},
                 )
                 await repo.payments.put(payment)
+                return
+            # DC-07 -- a paid-zero invoice that is not a trial (a 100% forever/repeating discount) grants nothing.
+            in_trial = (
+                stored_sub is not None and stored_sub.status == "trialing"
+                and plan is not None and plan.trial_days > 0
+            )
+            if payment.amount.amount_minor == 0 and not in_trial:
+                await open_zero_sale_case(
+                    repo=repo, clock=clock, policy=policy, payment=payment, notifier=notifier,
+                )
                 return
             if lifecycle is not None:
                 # EC:K1 call-site audit -- resolve_local_subscription reads the row, then
@@ -640,6 +657,11 @@ def default_handlers(
                     "Top-up payment has not succeeded", "topup_payment_not_succeeded",
                     {"payment_id": payment.id, "status": payment.status},
                 )
+            if payment.amount.amount_minor == 0:  # DC-07
+                await open_zero_sale_case(
+                    repo=repo, clock=clock, policy=policy, payment=payment, notifier=notifier,
+                )
+                return
             # EC:B10 -- the kit cannot know how many credits a one-time payment buys; the app resolves it.
             n = await resolve_topup_credits(payment) if resolve_topup_credits else None
             if n is None:

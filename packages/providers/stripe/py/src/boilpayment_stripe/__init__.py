@@ -448,6 +448,17 @@ def normalize_checkout_session_as_payment(session: Any) -> Payment:
         base = normalize_invoice_as_payment(expanded_invoice, expanded_intent)
     elif expanded_intent is not None:
         base = normalize_payment_intent(expanded_intent)
+    elif _get(session, "payment_status") == "no_payment_required" or _get(session, "amount_total") == 0:
+        # DC-07 -- a 100% discount leaves Checkout with neither PaymentIntent nor invoice; the sale is a
+        # paid-zero payment keyed by the session so the webhook can record it instead of failing.
+        session_id = _get(session, "id")
+        base = Payment(
+            id=session_id, customer_id="", provider="stripe", provider_ref=session_id,
+            subscription_id=None, amount=_money(0, _get(session, "currency") or "usd"),
+            status="succeeded", kind="topup", period=None,
+            occurred_at=_dt(_get(session, "created")), failure=None, sale_evidence=None,
+            affiliate_id=None, raw=_as_dict(session), provider_ref_aliases=[],
+        )
     else:
         raise PaymentKitError(
             f"stripe checkout session {_get(session, 'id')} has no payable reference",
@@ -895,6 +906,30 @@ class StripeProvider:
         )
         return {"ref": customer.id}
 
+    async def _refuse_full_discount(self, code: str, price: Any) -> None:
+        """DC-07 -- 100% discounts are not supported: refuse before any provider session exists."""
+        promotion = await self._client.v1.promotion_codes.retrieve_async(code)
+        coupon = _get(promotion, "coupon")
+        if coupon is None:
+            coupon = _get(_get(promotion, "promotion"), "coupon")
+        if isinstance(coupon, str):
+            coupon = await self._client.v1.coupons.retrieve_async(coupon)
+        if coupon is None:
+            return
+        percent_off = _get(coupon, "percent_off")
+        amount_off = _get(coupon, "amount_off")
+        currency = _get(coupon, "currency")
+        percent_full = isinstance(percent_off, (int, float)) and percent_off >= 100
+        amount_full = (
+            isinstance(amount_off, int)
+            and amount_off >= price.amount_minor
+            and (not currency or str(currency).upper() == price.currency.upper())
+        )
+        if percent_full or amount_full:
+            raise PaymentKitError(
+                "100% discounts are not supported", "full_discount_unsupported", {"code": code}
+            )
+
     # EC:E6 — idempotency_key passed through to Stripe request options
     async def create_checkout(self, input: CreateCheckoutInput) -> Checkout:
         price_ref = (input.price.provider_price_refs or {}).get("stripe")
@@ -934,6 +969,8 @@ class StripeProvider:
         else:
             params["payment_intent_data"] = {"metadata": metadata}
         try:
+            if input.preset_discount_code:
+                await self._refuse_full_discount(input.preset_discount_code, input.price)
             session = await self._client.v1.checkout.sessions.create_async(
                 params, options={"idempotency_key": input.idempotency_key}
             )

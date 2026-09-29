@@ -465,7 +465,7 @@ export function generateIndexPy(config: PaykitConfig): string {
   }
   l.push('');
   l.push(`    async def _cron_reconcile(since):`);
-  l.push(`        recovered = ${hasCredits ? 'await recover_missing_grants(RecoverMissingGrantsInput(policy=policy, providers=providers, repo=repo, ledger=ledger, clock=clock, ids=ids, notifier=notifier, grants=support_grants, since=since, reporter=license_reporter))' : '[]'}`);
+  l.push(`        recovered = ${hasCredits ? 'await recover_missing_grants(RecoverMissingGrantsInput(policy=policy, providers=providers, repo=repo, ledger=ledger, clock=clock, ids=ids, notifier=notifier, grants=support_grants, accrue_affiliate=_accrue_affiliate_payment, affiliate_renewals=affiliate_config["renewals"], since=since, reporter=license_reporter))' : '[]'}`);
   l.push(`        cases = await reconcile_cases(ReconcileInput(policy=policy, providers=providers, repo=repo, ledger=ledger, clock=clock, ids=ids, since=since, registration_hold_hours=checkout_config["registrationHoldHours"]))`);
   l.push(`        return [*recovered, *cases]`);
   l.push('');

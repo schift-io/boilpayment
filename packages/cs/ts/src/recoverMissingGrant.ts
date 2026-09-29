@@ -1,4 +1,4 @@
-import { runIdempotent, serializeCsCase, deserializeCsCase, keyMatchesInstant, nextPeriod } from 'boilpayment-core';
+import { isZeroSaleHandled, openZeroSaleCase, runIdempotent, serializeCsCase, deserializeCsCase, keyMatchesInstant, nextPeriod } from 'boilpayment-core';
 import type { CsCase, LedgerEntry, Payment, Period, Plan, Subscription } from 'boilpayment-core';
 import { escalate, reject, resolve } from './cases.js';
 import { getPurchaseSnapshot, matchesCapturedSaleAmount } from './purchaseSnapshot.js';
@@ -11,9 +11,17 @@ export interface SupportGrants {
   topup(input: Pick<SupportPaymentInput, 'customerId' | 'policy' | 'ledger' | 'clock' | 'repo'> & { payment: Payment; credits: number }): Promise<SupportGrantOutcome>;
   grantForPeriod(input: Pick<SupportDeps, 'policy' | 'ledger' | 'clock'> & { payment: Payment; sub: Subscription; plan: Plan; period: Period }): Promise<SupportGrantOutcome>;
 }
-export interface RecoverMissingGrantInput extends SupportPaymentInput { readonly grants: SupportGrants }
+/** Appends the affiliate commission accrual for a granted payment; idempotent per payment. */
+export type AccrueAffiliate = (payment: Payment) => Promise<void>;
+export interface RecoverMissingGrantInput extends SupportPaymentInput {
+  readonly grants: SupportGrants;
+  readonly accrueAffiliate?: AccrueAffiliate | null;
+}
 export interface RecoverMissingGrantsInput extends SupportDeps {
   readonly grants: SupportGrants;
+  readonly accrueAffiliate?: AccrueAffiliate | null;
+  /** AF-04 — whether a recovered native renewal accrues (`include`) or only a first purchase does. */
+  readonly affiliateRenewals?: 'first_only' | 'include';
   readonly customerId?: string;
   readonly since?: Date;
 }
@@ -117,9 +125,16 @@ export async function recoverMissingGrant(input: RecoverMissingGrantInput): Prom
       const existing = (await ledger.entries(input.customerId, { kind: 'grant' })).find((entry) => entry.idempotencyKey === grantKey
         || (snapshot.plan.interval !== null && snapshot.subscriptionId && snapshot.period
           && keyMatchesInstant(entry.idempotencyKey, `grant:${snapshot.subscriptionId}:`, new Date(snapshot.period.start)))); // EC:J11
-      if (existing) return resolve({ case: csCase, by: 'auto', decision: { granted: false, entryId: existing.id, paymentId: payment.id, idempotencyKey: grantKey }, repo, clock, onCaseEvent, reporter: input.reporter });
+      const accrue = () => input.accrueAffiliate
+        ? input.accrueAffiliate({ ...payment, affiliateId: payment.affiliateId ?? snapshot.affiliateId })
+        : Promise.resolve();
+      if (existing) {
+        await accrue();
+        return resolve({ case: csCase, by: 'auto', decision: { granted: false, entryId: existing.id, paymentId: payment.id, idempotencyKey: grantKey }, repo, clock, onCaseEvent, reporter: input.reporter });
+      }
       const outcome = await applyPurchasedGrant(input);
       if (!outcome.entry || outcome.deferred) return hold('credit grant was deferred');
+      await accrue();
       return resolve({ case: csCase, by: 'auto', decision: { granted: !outcome.duplicated, entryId: outcome.entry.id, paymentId: payment.id, credits, idempotencyKey: grantKey }, repo, clock, onCaseEvent, reporter: input.reporter });
     } });
   return await repo.csCases.get(completed.result.id) ?? completed.result;
@@ -164,6 +179,11 @@ export async function recoverMissingGrants(input: RecoverMissingGrantsInput): Pr
         };
         await input.repo.payments.put(payment);
         if (trialOpeningInvoice) continue;
+        if (payment.amount.amountMinor === 0) { // DC-07 — a paid-zero renewal is never granted
+          const zeroCase = await openZeroSaleCase({ repo: input.repo, clock: input.clock, policy: input.policy, payment, notifier: input.notifier });
+          if (!reconciledCases.some((item) => item.id === zeroCase.id)) reconciledCases.push(zeroCase);
+          continue;
+        }
         const resolved = await resolveReconciledPlan({ sub: current, payment, deps: input });
         if (resolved.mismatchCase && !reconciledCases.some((item) => item.id === resolved.mismatchCase?.id)) {
           reconciledCases.push(resolved.mismatchCase);
@@ -202,6 +222,7 @@ export async function recoverMissingGrants(input: RecoverMissingGrantsInput): Pr
   for (const payment of payments) {
     if ((input.since && payment.occurredAt < input.since) || payment.kind === 'overage') continue;
     if (rawField(payment.raw, 'boilpaymentTrialOpeningInvoice') === true) continue;
+    if (await isZeroSaleHandled(input.repo, payment.id)) continue; // DC-07 — a person already has the case
     // EC:A46 — a declined charge bought nothing, and a self-scheduled attempt still pending belongs to
     // the scheduler (EC:A36 A38): neither is a missing grant.
     if (payment.status === 'failed') continue;

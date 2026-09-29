@@ -22,6 +22,7 @@ import json
 import time
 from datetime import UTC, datetime
 from typing import Any, Literal
+from urllib.parse import quote
 
 import httpx
 from boilpayment_core import (
@@ -502,6 +503,26 @@ class PolarProvider:
             body["allow_discount_codes"] = True
         if input.preset_discount_code:
             body["discount_id"] = input.preset_discount_code
+        if input.preset_discount_code:
+            # DC-07 -- 100% discounts are not supported: refuse before any provider checkout exists.
+            discount = await self._request(
+                "GET", f"/v1/discounts/{quote(input.preset_discount_code, safe='')}"
+            )
+            basis_points = (discount or {}).get("basis_points")
+            amount = (discount or {}).get("amount")
+            currency = (discount or {}).get("currency")
+            percent_full = isinstance(basis_points, int) and basis_points >= 10_000
+            amount_full = (
+                isinstance(amount, int)
+                and amount >= input.price.amount_minor
+                and (not currency or str(currency).upper() == input.price.currency.upper())
+            )
+            if percent_full or amount_full:
+                raise PaymentKitError(
+                    "100% discounts are not supported",
+                    "full_discount_unsupported",
+                    {"code": input.preset_discount_code},
+                )
         checkout = await self._request(
             "POST",
             "/v1/checkouts/",

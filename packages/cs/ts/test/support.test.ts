@@ -175,7 +175,13 @@ it.each([[7, true], [0, false]] as const)('[SB-03] trialDays=%s accepts only a t
 
   const registration = registerCompletedCheckout({ ...input, checkoutId, paymentRef });
   if (!accepted) {
-    await expect(registration).rejects.toMatchObject({ code: 'checkout_evidence_mismatch' });
+    // DC-07 — a paid-zero subscription invoice that is not a trial is recorded, never granted.
+    const zero = await registration;
+    expect(zero.amount).toEqual({ amountMinor: 0, currency: 'USD' });
+    const cases = (await input.repo.csCases.list()).filter((item) => item.referenceId === zero.id && item.status === 'needs_human');
+    expect(cases).toHaveLength(1);
+    expect(await input.repo.operations.get(`purchase-entitlement:${zero.id}`)).toBeNull();
+    expect(await input.ledger.entries('customer', { kind: 'grant' })).toHaveLength(0);
     return;
   }
   await expect(registration).resolves.toMatchObject({ amount: { amountMinor: 0, currency: 'USD' } });
@@ -515,4 +521,44 @@ it('refund reason rules apply through requestRefund: user_error denied, dissatis
   expect(r2.status).toBe('needs_human'); expect(denied.calls()).toBe(0);
   const r3 = await requestRefund({ ...denied, requestId: 'r-dis-ev', reason: { category: 'dissatisfied', evidenceRef: 'job_1' } });
   expect(r3.status).toBe('resolved_auto'); expect(denied.calls()).toBe(1);
+});
+
+it('[DC-07] registering a paid-zero sale records it, grants nothing, and opens one case that reconcile leaves alone', async () => {
+  const input = await setup();
+  const provider = input.providers.stripe;
+  let key = '';
+  provider.createCheckout = async (args) => { key = args.metadata?.checkoutEntitlementKey ?? ''; return { id: 'cs_zero', url: 'https://example.test/zero', providerRef: 'cs_zero' }; };
+  const zero: Payment = { ...input.payment, id: 'remote-zero', providerRef: 'cs_zero', amount: { amountMinor: 0, currency: 'USD' }, customerId: 'cus_1' };
+  provider.getPayment = async () => ({ ...zero, raw: { metadata: { checkoutEntitlementKey: key } } });
+  provider.listPayments = async () => [];
+  await startCheckout({ ...input, planId: 'credits100', provider: 'stripe', currency: 'USD', requestId: 'zero',
+    successUrl: 'https://example.test/ok', cancelUrl: 'https://example.test/cancel', presetDiscountCode: undefined });
+
+  const first = await registerCompletedCheckout({ ...input, checkoutId: 'cs_zero', paymentRef: 'cs_zero' });
+  const second = await registerCompletedCheckout({ ...input, checkoutId: 'cs_zero', paymentRef: 'cs_zero' });
+  const results = await recoverMissingGrants({ ...input, grants: input.grants, since: new Date('2025-12-31T00:00:00Z') });
+
+  expect(second.id).toBe(first.id);
+  expect(first.amount.amountMinor).toBe(0);
+  expect(await input.repo.operations.get(`purchase-entitlement:${first.id}`)).toBeNull();
+  const cases = (await input.repo.csCases.list()).filter((item) => item.referenceId === first.id);
+  expect(cases).toHaveLength(1);
+  expect(cases[0]).toMatchObject({ status: 'needs_human' });
+  expect(results.filter((item) => item.referenceId === first.id)).toHaveLength(0);
+  expect((await input.ledger.entries('customer', { kind: 'grant' })).filter((entry) => entry.reference.paymentId === first.id)).toHaveLength(0);
+});
+
+it('[DC-07] a preset code the provider refuses as a 100% discount leaves no checkout result and no payment row', async () => {
+  const input = await setup();
+  const provider = input.providers.stripe;
+  const before = (await input.repo.payments.list()).length;
+  provider.createCheckout = async () => { throw new PaymentKitError('100% discounts are not supported', 'full_discount_unsupported'); };
+
+  await expect(startCheckout({ ...input, planId: 'credits100', provider: 'stripe', currency: 'USD', requestId: 'free-code',
+    successUrl: 'https://example.test/ok', cancelUrl: 'https://example.test/cancel', presetDiscountCode: 'promo_free' }))
+    .rejects.toMatchObject({ code: 'full_discount_unsupported' });
+
+  expect((await input.repo.payments.list()).length).toBe(before);
+  const results = (await input.repo.operations.list()).filter((operation) => operation.key.startsWith('checkout-result:customer:free-code'));
+  expect(results.every((operation) => operation.status !== 'done')).toBe(true);
 });

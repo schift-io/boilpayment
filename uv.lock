@@ -293,7 +293,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "boilpayment-core", editable = "packages/core/py" },
-    { name = "stripe", specifier = ">=11" },
+    { name = "stripe", specifier = ">=12.5" },
 ]
 
 [[package]]

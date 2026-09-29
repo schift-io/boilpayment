@@ -10,7 +10,7 @@ export function supportTs(hasCredits: boolean, reasons = false): string {
   return `  const supportDeps = { policy, providers, repo: full.repo, ledger: full.ledger, clock: full.clock, ids: full.ids, notifier, reporter: licenseReporter };
   const support = {
     requestRefund: (input: Pick<Parameters<typeof requestRefund>[0], 'customerId' | 'paymentId' | 'requestId' | 'requestedAmount'${reasons ? " | 'reason'" : ''}>) => requestRefund({ ...input, ...supportDeps }),
-${hasCredits ? `    recoverMissingGrant: (input: { customerId: string; paymentId: string }) => recoverMissingGrant({ ...input, ...supportDeps, grants: { topup, grantForPeriod } }),` : ''}
+${hasCredits ? `    recoverMissingGrant: (input: { customerId: string; paymentId: string }) => recoverMissingGrant({ ...input, ...supportDeps, grants: { topup, grantForPeriod }, accrueAffiliate: accrueAffiliatePayment }),` : ''}
   };`;
 }
 
@@ -28,7 +28,7 @@ export function supportPy(hasCredits: boolean, reasons = false): string {
         return await request_refund(RequestRefundInput(customer_id=customer_id, payment_id=payment_id, request_id=request_id, requested_amount=requested_amount, ${reasons ? 'reason=reason, ' : ''}policy=policy, providers=providers, repo=repo, ledger=ledger, clock=clock, ids=ids, notifier=notifier, reporter=license_reporter))
 ${hasCredits ? `
     async def recover_support_grant(*, customer_id: str, payment_id: str):
-        return await recover_missing_grant(RecoverMissingGrantInput(customer_id=customer_id, payment_id=payment_id, policy=policy, providers=providers, repo=repo, ledger=ledger, clock=clock, ids=ids, notifier=notifier, grants=support_grants, reporter=license_reporter))
+        return await recover_missing_grant(RecoverMissingGrantInput(customer_id=customer_id, payment_id=payment_id, policy=policy, providers=providers, repo=repo, ledger=ledger, clock=clock, ids=ids, notifier=notifier, grants=support_grants, accrue_affiliate=_accrue_affiliate_payment, reporter=license_reporter))
 ` : ''}
     support = {"request_refund": request_support_refund${hasCredits ? ', "recover_missing_grant": recover_support_grant' : ''}}
 `;

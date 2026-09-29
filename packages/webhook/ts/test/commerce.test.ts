@@ -198,6 +198,88 @@ describe.each(['stripe', 'polar'] as const)('%s commerce webhooks', (providerNam
     expect(await repo.affiliateCommissions.list({ affiliateId: 'affiliate-1' })).toHaveLength(1);
   });
 
+  it('[PL-02, AF-01/02] a link grant that failed once completes on redelivery, granting and accruing once', async () => {
+    // Given -- the payment is recorded, then the grant fails once
+    const repo = new InMemoryRepo();
+    const clock = new FixedClock(now);
+    await repo.plans.put(plan(providerName));
+    await repo.customers.put({ id: 'customer-1', email: null, providerRefs: [], status: 'active', createdAt: now });
+    const basePayment = remote(providerName);
+    const providerPayment = providerName === 'polar' && basePayment.saleEvidence
+      ? remote(providerName, { saleEvidence: { ...basePayment.saleEvidence, paymentLinkId: null } })
+      : basePayment;
+    const provider = new FakeProvider({ name: providerName, verify: () => event(providerName), getPaymentImpl: () => providerPayment });
+    const granted: string[] = [];
+    let failNext = true;
+    const handlers = defaultHandlers({
+      policy: DEFAULT_POLICY,
+      ledger: new InMemoryLedger(),
+      repo,
+      notifier: new CollectingNotifier(),
+      clock,
+      ids: new SequentialIdGen('id-'),
+      decodeLinkReference: () => ({ customerId: 'customer-1', affiliateId: 'affiliate-1' }),
+      grantLinkPayment: async ({ payment }) => {
+        if (failNext) { failNext = false; throw new Error('transient'); }
+        granted.push(payment.id);
+      },
+      commissionForPayment: async () => ({ amountMinor: 160, currency: 'USD' }),
+      credits: { topup: async () => { throw new Error('link replay must not use checkout grants'); } },
+      resolveTopupCredits: async () => null,
+    });
+    const handler = handlers['payment.succeeded'];
+    if (!handler) throw new Error('payment handler missing');
+
+    // When
+    await expect(handler({ event: event(providerName), provider, repo, clock, correlationId: 'correlation-1' })).rejects.toThrow();
+    await handler({ event: { ...event(providerName), id: 'event-2', paymentRef: 'pi-canonical' }, provider, repo, clock, correlationId: 'correlation-2' });
+    await handler({ event: { ...event(providerName), id: 'event-3', paymentRef: 'pi-canonical' }, provider, repo, clock, correlationId: 'correlation-3' });
+
+    // Then
+    expect(granted).toEqual([`payment:${providerName}:pi-canonical`]);
+    expect(await repo.operations.get(`payment-link-grant:payment:${providerName}:pi-canonical`)).toMatchObject({ status: 'done' });
+    expect(await repo.affiliateCommissions.list({ affiliateId: 'affiliate-1' })).toHaveLength(1);
+  });
+
+  it('[PL-03] a link mismatch case that failed to open once is opened exactly once on redelivery', async () => {
+    // Given
+    const repo = new InMemoryRepo();
+    const clock = new FixedClock(now);
+    await repo.plans.put(plan(providerName));
+    const basePayment = remote(providerName);
+    if (!basePayment.saleEvidence) throw new Error('sale evidence missing');
+    const providerPayment = remote(providerName, { saleEvidence: { ...basePayment.saleEvidence, linkReference: 'invalid' } });
+    const provider = new FakeProvider({ name: providerName, verify: () => event(providerName), getPaymentImpl: () => providerPayment });
+    const opened: string[] = [];
+    let failNext = true;
+    const handlers = defaultHandlers({
+      policy: DEFAULT_POLICY,
+      ledger: new InMemoryLedger(),
+      repo,
+      notifier: new CollectingNotifier(),
+      clock,
+      ids: new SequentialIdGen('id-'),
+      decodeLinkReference: () => null,
+      openLinkMismatchCase: async ({ reason }) => {
+        if (failNext) { failNext = false; throw new Error('transient'); }
+        opened.push(reason);
+      },
+      credits: { topup: async () => { throw new Error('link mismatch replay must not grant'); } },
+      resolveTopupCredits: async () => null,
+    });
+    const handler = handlers['payment.succeeded'];
+    if (!handler) throw new Error('payment handler missing');
+
+    // When
+    await expect(handler({ event: event(providerName), provider, repo, clock, correlationId: 'correlation-1' })).rejects.toThrow();
+    await handler({ event: { ...event(providerName), id: 'event-2', paymentRef: 'pi-canonical' }, provider, repo, clock, correlationId: 'correlation-2' });
+    await handler({ event: { ...event(providerName), id: 'event-3', paymentRef: 'pi-canonical' }, provider, repo, clock, correlationId: 'correlation-3' });
+
+    // Then
+    expect(opened).toEqual(['invalid_reference']);
+    expect(await repo.payments.list()).toHaveLength(1);
+  });
+
   it.each([
     ['missing_reference', null, null],
     ['invalid_reference', 'invalid', null],
@@ -391,4 +473,123 @@ describe.each(['stripe', 'polar'] as const)('%s commerce webhooks', (providerNam
     expect((await repo.payments.list())[0]?.amount.amountMinor).toBe(2_000);
     expect(await repo.affiliateCommissions.list({ affiliateId: 'affiliate-1' })).toHaveLength(expectedCommissions);
   });
+  async function zeroSaleOutcome(repo: InMemoryRepo) {
+    const cases = (await repo.csCases.list()).filter((item) => item.decision && (item.decision as { reason?: string }).reason === 'zero_amount_sale');
+    return { cases, commissions: await repo.affiliateCommissions.list({ affiliateId: 'affiliate-1' }) };
+  }
+
+  it('[DC-07] a paid-zero one-time checkout is recorded, granted nothing, and opens exactly one case', async () => {
+    // Given -- the customer typed a 100% code on the provider page
+    const repo = new InMemoryRepo();
+    const clock = new FixedClock(now);
+    await repo.operations.put({
+      id: 'checkout-entitlement-by-id:checkout-1', key: 'checkout-entitlement-by-id:checkout-1', kind: 'checkout.entitlement',
+      payloadHash: 'snapshot', status: 'done', error: null, createdAt: now, completedAt: now, attempts: 1,
+      result: { customerId: 'customer-1', plan: { id: 'plan-once', interval: null, trialDays: 0 }, affiliateId: 'affiliate-1' },
+    });
+    const zero = remote(providerName, {
+      amount: { amountMinor: 0, currency: 'USD' },
+      saleEvidence: { providerSubtotal: { amountMinor: 2_000, currency: 'USD' }, discountAmount: { amountMinor: 2_000, currency: 'USD' },
+        priceRef: 'price-1', checkoutId: 'checkout-1', paymentLinkId: null, linkReference: null },
+    });
+    const provider = new FakeProvider({ name: providerName, verify: () => event(providerName), getPaymentImpl: () => zero });
+    let grants = 0;
+    const handlers = defaultHandlers({
+      policy: DEFAULT_POLICY, ledger: new InMemoryLedger(), repo, notifier: new CollectingNotifier(), clock, ids: new SequentialIdGen('id-'),
+      grantLinkPayment: async () => { grants += 1; },
+      credits: { topup: async () => { throw new Error('a paid-zero sale must not grant'); } },
+      resolveTopupCredits: async () => 100,
+      commissionForPayment: async () => ({ amountMinor: 160, currency: 'USD' }),
+    });
+    const handler = handlers['payment.succeeded'];
+    if (!handler) throw new Error('payment handler missing');
+
+    // When -- delivered, then redelivered twice
+    await handler({ event: event(providerName), provider, repo, clock, correlationId: 'c-1' });
+    await handler({ event: { ...event(providerName), id: 'event-2' }, provider, repo, clock, correlationId: 'c-2' });
+    await handler({ event: { ...event(providerName), id: 'event-3' }, provider, repo, clock, correlationId: 'c-3' });
+
+    // Then
+    expect(await repo.payments.list()).toHaveLength(1);
+    const outcome = await zeroSaleOutcome(repo);
+    expect(outcome.cases).toHaveLength(1);
+    expect(outcome.cases[0]).toMatchObject({ status: 'needs_human', customerId: 'customer-1' });
+    expect(outcome.commissions).toHaveLength(0);
+    expect(grants).toBe(0);
+    expect(await repo.operations.get(`checkout-payment-held:payment:${providerName}:pi-canonical`)).toBeNull();
+  });
+
+  it('[DC-07] a paid-zero payment-link sale grants nothing and opens exactly one case', async () => {
+    // Given
+    const repo = new InMemoryRepo();
+    const clock = new FixedClock(now);
+    await repo.plans.put(plan(providerName));
+    await repo.customers.put({ id: 'customer-1', email: null, providerRefs: [], status: 'active', createdAt: now });
+    const base = remote(providerName, { amount: { amountMinor: 0, currency: 'USD' } });
+    const zero = providerName === 'polar' && base.saleEvidence
+      ? { ...base, saleEvidence: { ...base.saleEvidence, paymentLinkId: null } } : base;
+    const provider = new FakeProvider({ name: providerName, verify: () => event(providerName), getPaymentImpl: () => zero });
+    let grants = 0;
+    const handlers = defaultHandlers({
+      policy: DEFAULT_POLICY, ledger: new InMemoryLedger(), repo, notifier: new CollectingNotifier(), clock, ids: new SequentialIdGen('id-'),
+      decodeLinkReference: () => ({ customerId: 'customer-1', affiliateId: 'affiliate-1' }),
+      grantLinkPayment: async () => { grants += 1; },
+      commissionForPayment: async () => ({ amountMinor: 160, currency: 'USD' }),
+      credits: { topup: async () => { throw new Error('a paid-zero sale must not grant'); } },
+      resolveTopupCredits: async () => null,
+    });
+    const handler = handlers['payment.succeeded'];
+    if (!handler) throw new Error('payment handler missing');
+
+    // When
+    await handler({ event: event(providerName), provider, repo, clock, correlationId: 'c-1' });
+    await handler({ event: { ...event(providerName), id: 'event-2', paymentRef: 'pi-canonical' }, provider, repo, clock, correlationId: 'c-2' });
+
+    // Then
+    expect(grants).toBe(0);
+    const outcome = await zeroSaleOutcome(repo);
+    expect(outcome.cases).toHaveLength(1);
+    expect(outcome.commissions).toHaveLength(0);
+  });
+
+  it.each([
+    ['not a trial', 'active', 0, 0, 1],
+    ['a trial', 'trialing', 7, 1, 0],
+  ] as const)('[DC-07] a zero subscription invoice that is %s', async (_name, status, trialDays, renewals, cases) => {
+    // Given
+    const repo = new InMemoryRepo();
+    const clock = new FixedClock(now);
+    const currentPlan = { ...plan(providerName, 'month'), trialDays };
+    await repo.plans.put(currentPlan);
+    const period = { start: now, end: new Date('2026-10-28T00:00:00Z') };
+    const localSub: Subscription = {
+      id: 'local-sub', customerId: 'customer-1', planId: currentPlan.id, provider: providerName, providerRef: 'provider-sub',
+      status, currentPeriod: period, anchorDay: 28, cancelAtPeriodEnd: false, graceUntil: null, billingKey: null,
+      scheduledPlanId: null, version: 0, createdAt: now, affiliateId: 'affiliate-1',
+    };
+    await repo.subscriptions.put(localSub);
+    const zero = remote(providerName, {
+      providerRef: 'checkout-session-ref', kind: 'subscription', subscriptionId: 'provider-sub', period,
+      amount: { amountMinor: 0, currency: 'USD' }, saleEvidence: null, affiliateId: null,
+    });
+    const provider = new FakeProvider({ name: providerName, verify: () => event(providerName, 'provider-sub'), getPaymentImpl: () => zero, getSubscriptionImpl: () => localSub });
+    let renewed = 0;
+    const handlers = defaultHandlers({
+      policy: DEFAULT_POLICY, ledger: new InMemoryLedger(), repo, notifier: new CollectingNotifier(), clock, ids: new SequentialIdGen('id-'),
+      lifecycle: { onRenewalPaid: async () => { renewed += 1; }, dunning: { onPaymentFailed: async () => {} } },
+      affiliateRenewals: 'include',
+      commissionForPayment: async () => ({ amountMinor: 160, currency: 'USD' }),
+    });
+    const handler = handlers['payment.succeeded'];
+    if (!handler) throw new Error('payment handler missing');
+
+    // When
+    await handler({ event: event(providerName, 'provider-sub'), provider, repo, clock, correlationId: 'c-1' });
+    await handler({ event: { ...event(providerName, 'provider-sub'), id: 'event-2' }, provider, repo, clock, correlationId: 'c-2' });
+
+    // Then
+    expect(renewed).toBe(renewals === 1 ? 2 : 0);
+    expect((await zeroSaleOutcome(repo)).cases).toHaveLength(cases);
+  });
+
 });

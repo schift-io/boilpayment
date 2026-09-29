@@ -1,4 +1,4 @@
-import { PaymentKitError, ProviderError, runIdempotent } from 'boilpayment-core';
+import { PaymentKitError, ProviderError, openZeroSaleCase, runIdempotent } from 'boilpayment-core';
 import type { Checkout, Payment, ProviderName, Subscription } from 'boilpayment-core';
 import type { SupportDeps } from './support.js';
 import { parseCheckoutSnapshot, parsePurchaseSnapshot, matchesCapturedSaleAmount, matchesCheckoutPayment } from './purchaseSnapshot.js';
@@ -92,7 +92,7 @@ export async function startCheckout(input: StartCheckoutInput): Promise<Checkout
             if (isDefinitiveProviderRefusal(error)) throw error;
             return { kind: 'unknown' };
           }
-          if (error.code === 'missing_provider_price_ref') {
+          if (error.code === 'missing_provider_price_ref' || error.code === 'full_discount_unsupported') {
             const captured = await input.repo.operations.get(key);
             if (captured?.status === 'done') await input.repo.operations.put({ ...captured, status: 'failed', result: null,
               error: error.message, completedAt: input.clock.now() });
@@ -148,13 +148,23 @@ export async function registerCompletedCheckout(input: RegisterCompletedCheckout
   const listed = bound ? [] : await provider.listPayments({ customerRef: snapshot.customerRef, since: new Date(snapshot.capturedAt) });
   const trialInvoice = snapshot.provider === 'stripe' && snapshot.plan.trialDays > 0
     && subscriptionEvidence?.live.status === 'trialing' && live.amount.amountMinor === 0;
+  // DC-07 — a paid-zero sale that is not a trial (a 100% discount) is recorded and handed to a person, never granted.
+  const zeroSale = live.amount.amountMinor === 0 && !(snapshot.plan.interval !== null && snapshot.plan.trialDays > 0);
   if (!matchesCheckoutPayment(snapshot, live.raw, input.paymentRef) || live.providerRef !== input.paymentRef || live.provider !== snapshot.provider || live.status !== 'succeeded'
-    || (!matchesCapturedSaleAmount(snapshot, live) && !trialInvoice)
-    || (!bound && !listed.some((payment) => payment.providerRef === input.paymentRef))
+    || (!matchesCapturedSaleAmount(snapshot, live) && !trialInvoice && !zeroSale)
+    || (!bound && !zeroSale && !listed.some((payment) => payment.providerRef === input.paymentRef))
     || (live.customerId !== '' && live.customerId !== snapshot.customerId && live.customerId !== snapshot.customerRef)) {
     throw new PaymentKitError('provider payment does not match captured sale', 'checkout_evidence_mismatch');
   }
   const paymentId = `payment:${snapshot.provider}:${input.paymentRef}`;
+  if (zeroSale) {
+    const recordedZero = await input.repo.payments.get(paymentId) ?? { ...live, id: paymentId, customerId: snapshot.customerId,
+      subscriptionId: null, kind: snapshot.plan.interval === null ? 'topup' as const : 'subscription' as const, cashReceipt: live.cashReceipt ?? null,
+      affiliateId: snapshot.affiliateId };
+    await input.repo.payments.put(recordedZero);
+    await openZeroSaleCase({ repo: input.repo, clock: input.clock, policy: input.policy, payment: recordedZero, notifier: input.notifier });
+    return recordedZero;
+  }
   let subscriptionId: string | null = null;
   let period = live.period;
   if (snapshot.plan.interval !== null) {

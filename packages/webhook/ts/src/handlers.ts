@@ -21,7 +21,9 @@ import {
   holdAttemptForReview,
   isClosedByPerson,
   isUnderReview,
+  isZeroSaleHandled,
   lookupMismatch,
+  openZeroSaleCase,
   recordPaymentRefAliases,
   runIdempotent,
 } from 'boilpayment-core';
@@ -323,6 +325,7 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
     repo,
     clock,
     policy,
+    notifier,
     decodeLinkReference: input.decodeLinkReference,
     grantLinkPayment: input.grantLinkPayment,
     openLinkMismatchCase: input.openLinkMismatchCase,
@@ -347,6 +350,8 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
         ? await resolveRenewalPayment(ctx, paymentRef, ctx.event.subscriptionRef)
         : await commerce.handleUnregisteredPayment(ctx, paymentRef);
     if (!payment) return;
+    if (await isZeroSaleHandled(repo, payment.id)) return; // DC-07 — recorded, nothing granted, case already open
+    if (knownPayments.length > 0 && await commerce.retryIncompleteLink(ctx, payment)) return;
     const linkGrant = await repo.operations.get(`payment-link-grant:${payment.id}`);
     if (linkGrant?.kind === 'payment_link.grant' && linkGrant.status === 'done') return;
     const linkMismatch = await repo.operations.get(`payment-link-mismatch:${payment.id}`);
@@ -382,6 +387,12 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
           ...payment,
           raw: { ...(paymentRaw ?? {}), boilpaymentTrialOpeningInvoice: true },
         });
+        return;
+      }
+      // DC-07 — a paid-zero invoice that is not a trial (a 100% forever/repeating discount) grants nothing.
+      const inTrial = storedSub?.status === 'trialing' && storedPlan !== null && storedPlan.trialDays > 0;
+      if (payment.amount.amountMinor === 0 && !inTrial) {
+        await openZeroSaleCase({ repo, clock, policy, payment, notifier });
         return;
       }
       if (lifecycle) {
@@ -443,6 +454,10 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
       // before this retry is refused; the record fails and a later delivery/retry re-checks).
       if (payment.status !== 'succeeded') {
         throw new PaymentKitError('Top-up payment has not succeeded', 'topup_payment_not_succeeded', { paymentId: payment.id, status: payment.status });
+      }
+      if (payment.amount.amountMinor === 0) { // DC-07
+        await openZeroSaleCase({ repo, clock, policy, payment, notifier });
+        return;
       }
       // EC:B10 — the kit cannot know how many credits a one-time payment buys; the app resolves it.
       const n = input.resolveTopupCredits ? await input.resolveTopupCredits(payment) : null;

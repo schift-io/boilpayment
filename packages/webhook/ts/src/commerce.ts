@@ -1,7 +1,8 @@
-import { PaymentKitError, recordPaymentRefAliases, runIdempotent } from 'boilpayment-core';
+import { PaymentKitError, openZeroSaleCase, recordPaymentRefAliases, runIdempotent } from 'boilpayment-core';
 import type {
   Clock,
   Money,
+  Notifier,
   Payment,
   Plan,
   Policy,
@@ -16,6 +17,8 @@ export interface CommerceWebhookInput {
   readonly repo: Repo;
   readonly clock: Clock;
   readonly policy: Policy;
+  /** DC-07 — told when a paid-zero sale opens its case; optional. */
+  readonly notifier?: Notifier | null;
   readonly decodeLinkReference?: ((reference: string) => { readonly customerId: string; readonly affiliateId: string | null } | null) | null;
   readonly grantLinkPayment?: ((input: { readonly payment: Payment; readonly plan: Plan; readonly subscription: Subscription | null }) => Promise<void>) | null;
   readonly openLinkMismatchCase?: ((input: { readonly payment: Payment; readonly reason: LinkMismatchReason }) => Promise<void>) | null;
@@ -120,6 +123,21 @@ export function createCommerceWebhook(input: CommerceWebhookInput) {
     return null;
   }
 
+  const isFreeTrialPlan = (plan: { readonly interval: unknown; readonly trialDays?: unknown }): boolean =>
+    plan.interval !== null && typeof plan.trialDays === 'number' && plan.trialDays > 0;
+
+  // DC-07 — a paid-zero sale that is not a trial: record it, grant nothing, open one case.
+  async function handleZeroCheckoutSale(remote: Payment, checkoutId: string): Promise<boolean> {
+    const operation = await repo.operations.get(`checkout-entitlement-by-id:${checkoutId}`);
+    if (operation?.kind !== 'checkout.entitlement' || operation.status !== 'done') return false;
+    const snapshot = checkoutSnapshot(operation.result);
+    if (!snapshot) return false;
+    if (snapshot.kind === 'subscription' && isFreeTrialPlan({ interval: 'x', trialDays: record(record(operation.result)?.['plan'])?.['trialDays'] })) return false;
+    const payment = await recordPayment(remote, snapshot.customerId, snapshot.kind, null, remote.affiliateId ?? snapshot.affiliateId);
+    await openZeroSaleCase({ repo, clock, policy, payment, notifier: input.notifier });
+    return true;
+  }
+
   async function handlePaymentLink(ctx: HandlerCtx, remote: Payment): Promise<null> {
     const evidence = remote.saleEvidence;
     const identifiedLink = Boolean(evidence?.paymentLinkId)
@@ -144,6 +162,11 @@ export function createCommerceWebhook(input: CommerceWebhookInput) {
     }
 
     const affiliateId = decoded.affiliateId ?? remote.affiliateId ?? null;
+    if (remote.amount.amountMinor === 0 && !isFreeTrialPlan(plan)) {
+      const zero = await recordPayment(remote, customerId, plan.interval === null ? 'topup' : 'subscription', null, affiliateId);
+      await openZeroSaleCase({ repo, clock, policy, payment: zero, notifier: input.notifier });
+      return null;
+    }
     let subscription: Subscription | null = null;
     if (plan.interval !== null) {
       const subscriptionRef = ctx.event.subscriptionRef ?? remote.subscriptionId;
@@ -190,6 +213,7 @@ export function createCommerceWebhook(input: CommerceWebhookInput) {
       });
     }
     const checkoutId = remote.saleEvidence?.checkoutId ?? await checkoutIdFromMetadata(remote);
+    if (checkoutId && remote.amount.amountMinor === 0 && await handleZeroCheckoutSale(remote, checkoutId)) return null;
     if (checkoutId) {
       const held = await holdCheckout(remote, checkoutId);
       if (held !== undefined) return held;
@@ -197,5 +221,25 @@ export function createCommerceWebhook(input: CommerceWebhookInput) {
     return handlePaymentLink(ctx, remote);
   }
 
-  return { accrueAffiliate, handleUnregisteredPayment };
+  // A redelivery for a payment whose link grant (or link mismatch case) started and did not finish
+  // runs the link path again; a known link payment has no purchase snapshot, so the top-up branch
+  // could never complete it.
+  async function retryIncompleteLink(ctx: HandlerCtx, payment: Payment): Promise<boolean> {
+    const grant = await repo.operations.get(`payment-link-grant:${payment.id}`);
+    const mismatch = await repo.operations.get(`payment-link-mismatch:${payment.id}`);
+    const pending = (grant?.kind === 'payment_link.grant' && grant.status !== 'done')
+      || (mismatch?.kind === 'payment_link.mismatch' && mismatch.status !== 'done');
+    if (!pending) return false;
+    const remote = await ctx.provider.getPayment(payment.providerRef);
+    if (remote.status !== 'succeeded') {
+      throw new PaymentKitError('Top-up payment has not succeeded', 'topup_payment_not_succeeded', {
+        paymentId: payment.id,
+        status: remote.status,
+      });
+    }
+    await handlePaymentLink(ctx, remote);
+    return true;
+  }
+
+  return { accrueAffiliate, handleUnregisteredPayment, retryIncompleteLink };
 }

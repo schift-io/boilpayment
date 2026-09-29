@@ -536,9 +536,16 @@ def test_sb_03_only_trialing_plan_accepts_zero_amount_first_invoice(
             payment_ref=payment_ref,
         )
         if not accepted:
-            with pytest.raises(PaymentKitError) as excinfo:
-                await register_completed_checkout(request)
-            assert excinfo.value.code == "checkout_evidence_mismatch"
+            # DC-07 -- a paid-zero subscription invoice that is not a trial is recorded, never granted.
+            payment = await register_completed_checkout(request)
+            assert payment.amount == Money(amount_minor=0, currency="USD")
+            cases = [
+                case for case in await deps["repo"].cs_cases.list()
+                if case.reference_id == payment.id and case.status == "needs_human"
+            ]
+            assert len(cases) == 1
+            assert await deps["repo"].operations.get(f"purchase-entitlement:{payment.id}") is None
+            assert await deps["ledger"].entries("customer", kind="grant") == []
             return
         payment = await register_completed_checkout(request)
         assert payment.amount == Money(amount_minor=0, currency="USD")
@@ -1213,5 +1220,80 @@ def test_refund_reason_rules_apply_through_request_refund():
         ok = await request_refund(req("r-dis-ev", RefundReasonInput(category="dissatisfied", evidence_ref="job_1")))
         assert ok.status == "resolved_auto"
         assert provider.refund_calls == 1
+
+    anyio.run(go)
+
+
+def test_dc_07_registering_a_paid_zero_sale_records_it_and_opens_one_case():
+    async def go():
+        deps, provider, _initial = await setup()
+        state = {"key": ""}
+
+        async def create_checkout(request):
+            state["key"] = request.metadata["checkoutEntitlementKey"]
+            return Checkout(id="cs_zero", provider_ref="cs_zero", url="https://example.test/zero")
+
+        async def get_payment(_ref):
+            return replace(
+                provider.payment, id="remote-zero", provider_ref="cs_zero", customer_id="cus_1",
+                amount=Money(amount_minor=0, currency="USD"),
+                raw={"metadata": {"checkoutEntitlementKey": state["key"]}},
+            )
+
+        async def list_payments(**_kwargs):
+            return []
+
+        provider.create_checkout = create_checkout
+        provider.get_payment = get_payment
+        provider.list_payments = list_payments
+        await start_checkout(StartCheckoutInput(
+            **deps, customer_id="customer", plan_id="credits100", provider="stripe",
+            currency="USD", request_id="zero", success_url="https://example.test/ok",
+            cancel_url="https://example.test/cancel",
+        ))
+        request = RegisterCompletedCheckoutInput(
+            **deps, customer_id="customer", checkout_id="cs_zero", payment_ref="cs_zero",
+        )
+
+        first = await register_completed_checkout(request)
+        second = await register_completed_checkout(request)
+        results = await recover_missing_grants(RecoverMissingGrantsInput(
+            **deps, grants=Grants(), since=datetime(2025, 12, 31, tzinfo=UTC),
+        ))
+
+        assert second.id == first.id and first.amount.amount_minor == 0
+        assert await deps["repo"].operations.get(f"purchase-entitlement:{first.id}") is None
+        cases = [c for c in await deps["repo"].cs_cases.list() if c.reference_id == first.id]
+        assert len(cases) == 1 and cases[0].status == "needs_human"
+        assert [c for c in results if c.reference_id == first.id] == []
+        entries = await deps["ledger"].entries("customer", kind="grant")
+        assert [e for e in entries if e.reference.payment_id == first.id] == []
+
+    anyio.run(go)
+
+
+def test_dc_07_full_discount_refusal_leaves_no_checkout_result_and_no_payment_row():
+    async def go():
+        deps, provider, _initial = await setup()
+        before = len(await deps["repo"].payments.list())
+
+        async def create_checkout(_request):
+            raise PaymentKitError("100% discounts are not supported", "full_discount_unsupported")
+
+        provider.create_checkout = create_checkout
+        with pytest.raises(PaymentKitError) as excinfo:
+            await start_checkout(StartCheckoutInput(
+                **deps, customer_id="customer", plan_id="credits100", provider="stripe",
+                currency="USD", request_id="free-code", success_url="https://example.test/ok",
+                cancel_url="https://example.test/cancel", preset_discount_code="promo_free",
+            ))
+
+        assert excinfo.value.code == "full_discount_unsupported"
+        assert len(await deps["repo"].payments.list()) == before
+        results = [
+            op for op in await deps["repo"].operations.list()
+            if op.key.startswith("checkout-result:customer:free-code")
+        ]
+        assert all(op.status != "done" for op in results)
 
     anyio.run(go)

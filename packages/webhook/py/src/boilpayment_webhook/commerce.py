@@ -14,12 +14,14 @@ from boilpayment_core import (
     CsCase,
     Customer,
     Money,
+    Notifier,
     Payment,
     PaymentKitError,
     Plan,
     Policy,
     Repo,
     Subscription,
+    open_zero_sale_case,
     record_payment_ref_aliases,
     run_idempotent,
 )
@@ -45,6 +47,8 @@ class CommerceWebhookInput:
     repo: Repo
     clock: Clock
     policy: Policy
+    # DC-07 -- told when a paid-zero sale opens its case; optional.
+    notifier: Notifier | None
     decode_link_reference: Callable[[str], PaymentLinkReference | None] | None
     grant_link_payment: Callable[[Payment, Plan, Subscription | None], Awaitable[None]] | None
     open_link_mismatch_case: Callable[[Payment, LinkMismatchReason], Awaitable[None]] | None
@@ -203,6 +207,32 @@ class CommerceWebhook:
         )
         return None
 
+    @staticmethod
+    def _is_free_trial(interval: Any, trial_days: Any) -> bool:
+        return interval is not None and isinstance(trial_days, int) and trial_days > 0
+
+    async def _handle_zero_checkout_sale(self, remote: Payment, checkout_id: str) -> bool:
+        """DC-07 -- a paid-zero sale that is not a trial: record it, grant nothing, open one case."""
+        repo = self._input.repo
+        operation = await repo.operations.get(f"checkout-entitlement-by-id:{checkout_id}")
+        if operation is None or operation.kind != "checkout.entitlement" or operation.status != "done":
+            return False
+        snapshot = self._checkout_snapshot(operation.result)
+        if snapshot is None:
+            return False
+        customer_id, kind, affiliate_id = snapshot
+        plan = operation.result.get("plan") if isinstance(operation.result, dict) else None
+        if kind == "subscription" and self._is_free_trial("x", plan.get("trialDays") if isinstance(plan, dict) else None):
+            return False
+        payment = await self._record_payment(
+            remote, customer_id, kind, None, remote.affiliate_id or affiliate_id
+        )
+        await open_zero_sale_case(
+            repo=repo, clock=self._input.clock, policy=self._input.policy,
+            payment=payment, notifier=self._input.notifier,
+        )
+        return True
+
     async def _handle_link(self, ctx: HandlerCtx, remote: Payment) -> None:
         evidence = remote.sale_evidence
         identified_link = (
@@ -250,7 +280,18 @@ class CommerceWebhook:
             )
             await self._open_mismatch(payment, reason or "plan_unresolved")
             return
-        await self._grant_link(ctx, remote, customer_id, decoded["affiliate_id"] or remote.affiliate_id, plan)
+        link_affiliate_id = decoded["affiliate_id"] or remote.affiliate_id
+        if remote.amount.amount_minor == 0 and not self._is_free_trial(plan.interval, plan.trial_days):
+            zero = await self._record_payment(
+                remote, customer_id, "topup" if plan.interval is None else "subscription",
+                None, link_affiliate_id,
+            )
+            await open_zero_sale_case(
+                repo=self._input.repo, clock=self._input.clock, policy=self._input.policy,
+                payment=zero, notifier=self._input.notifier,
+            )
+            return
+        await self._grant_link(ctx, remote, customer_id, link_affiliate_id, plan)
 
     async def _grant_link(
         self, ctx: HandlerCtx, remote: Payment, customer_id: str,
@@ -291,6 +332,33 @@ class CommerceWebhook:
             clock=self._input.clock, fn=grant_once,
         )
 
+    async def retry_incomplete_link(self, ctx: HandlerCtx, payment: Payment) -> bool:
+        """Run the link path again for a payment whose link grant or mismatch case did not finish.
+
+        A known link payment has no purchase snapshot, so the plain top-up branch could never
+        complete it.
+        """
+        repo = self._input.repo
+        grant = await repo.operations.get(f"payment-link-grant:{payment.id}")
+        mismatch = await repo.operations.get(f"payment-link-mismatch:{payment.id}")
+        pending = (
+            grant is not None and grant.kind == "payment_link.grant" and grant.status != "done"
+        ) or (
+            mismatch is not None and mismatch.kind == "payment_link.mismatch"
+            and mismatch.status != "done"
+        )
+        if not pending:
+            return False
+        remote = await ctx.provider.get_payment(payment.provider_ref)
+        if remote.status != "succeeded":
+            raise PaymentKitError(
+                "Top-up payment has not succeeded",
+                "topup_payment_not_succeeded",
+                {"payment_id": payment.id, "status": remote.status},
+            )
+        await self._handle_link(ctx, remote)
+        return True
+
     async def handle_unregistered_payment(self, ctx: HandlerCtx, requested_ref: str) -> Payment | None:
         if ctx.provider.name not in ("stripe", "polar"):
             await self._input.mark_unknown_provider_ref("payment", requested_ref, ctx.provider.name)
@@ -310,6 +378,11 @@ class CommerceWebhook:
         checkout_id = (
             remote.sale_evidence.checkout_id if remote.sale_evidence is not None else None
         ) or await self._checkout_id_from_metadata(remote)
+        if (
+            checkout_id is not None and remote.amount.amount_minor == 0
+            and await self._handle_zero_checkout_sale(remote, checkout_id)
+        ):
+            return None
         if checkout_id is not None:
             held = await self._hold_checkout(remote, checkout_id)
             if held is not False:

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Any, Protocol, assert_never
+from typing import Any, Literal, Protocol, assert_never
 
 from boilpayment_core import (
     Clock,
@@ -19,8 +20,10 @@ from boilpayment_core import (
     Repo,
     Subscription,
     deserialize_cs_case,
+    is_zero_sale_handled,
     key_matches_instant,
     next_period,
+    open_zero_sale_case,
     run_idempotent,
     serialize_cs_case,
 )
@@ -71,11 +74,16 @@ class SupportGrants(Protocol):
 @dataclass(frozen=True, slots=True, kw_only=True)
 class RecoverMissingGrantInput(SupportPaymentInput):
     grants: SupportGrants
+    # Appends the affiliate commission accrual for a granted payment; idempotent per payment.
+    accrue_affiliate: Callable[[Payment], Awaitable[None]] | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class RecoverMissingGrantsInput(SupportDeps):
     grants: SupportGrants
+    accrue_affiliate: Callable[[Payment], Awaitable[None]] | None = None
+    # AF-04 -- whether a recovered native renewal accrues ("include") or only a first purchase does.
+    affiliate_renewals: Literal["first_only", "include"] = "first_only"
     customer_id: str | None = None
     since: datetime | None = None
 
@@ -247,6 +255,12 @@ async def recover_missing_grant(input: RecoverMissingGrantInput) -> CsCase:
     if policy.cs.regrant.mode == "manual_approve":
         return await hold("cs.regrant.mode=manual_approve, awaiting approval")
 
+    async def accrue() -> None:
+        if input.accrue_affiliate is not None:
+            await input.accrue_affiliate(replace(
+                payment, affiliate_id=payment.affiliate_id or snapshot.affiliate_id,
+            ))
+
     async def complete() -> CsCase:
         entries = await input.ledger.entries(input.customer_id, kind="grant")
         existing = next(
@@ -268,6 +282,7 @@ async def recover_missing_grant(input: RecoverMissingGrantInput) -> CsCase:
             None,
         )  # EC:J11
         if existing:
+            await accrue()
             return await resolve(
                 ResolveInput(
                     reporter=input.reporter,
@@ -287,6 +302,7 @@ async def recover_missing_grant(input: RecoverMissingGrantInput) -> CsCase:
         outcome = await apply_purchased_grant(input)
         if outcome.entry is None or outcome.deferred:
             return await hold("credit grant was deferred")
+        await accrue()
         return await resolve(
             ResolveInput(
                 reporter=input.reporter,
@@ -372,6 +388,14 @@ async def recover_missing_grants(input: RecoverMissingGrantsInput) -> list[CsCas
                     )
                     continue
                 await input.repo.payments.put(payment)
+                if payment.amount.amount_minor == 0:  # DC-07 -- a paid-zero renewal is never granted
+                    zero_case = await open_zero_sale_case(
+                        repo=input.repo, clock=input.clock, policy=input.policy,
+                        payment=payment, notifier=input.notifier,
+                    )
+                    if all(case.id != zero_case.id for case in reconciled_cases):
+                        reconciled_cases.append(zero_case)
+                    continue
                 plan, mismatch_case = await _resolve_reconciled_plan(current, payment, input)
                 if mismatch_case is not None and all(case.id != mismatch_case.id for case in reconciled_cases):
                     reconciled_cases.append(mismatch_case)
@@ -401,6 +425,15 @@ async def recover_missing_grants(input: RecoverMissingGrantsInput) -> list[CsCas
                     sub=replace(current, plan_id=plan.id, status="active"), plan=plan, period=payment.period,
                     payment=payment, policy=input.policy, ledger=input.ledger, clock=input.clock,
                 )
+                # AF-04 -- same rule as the webhook: renewals accrue only when configured, a first purchase always does.
+                if input.accrue_affiliate is not None and (
+                    input.affiliate_renewals == "include"
+                    or (
+                        (purchase := await input.repo.operations.get(f"purchase-entitlement:{payment.id}")) is not None
+                        and purchase.kind == "purchase.entitlement"
+                    )
+                ):
+                    await input.accrue_affiliate(payment)
                 fresh = await input.repo.subscriptions.get(current.id)
                 if fresh is not None and fresh.status in ("active", "past_due") and payment.period.end > fresh.current_period.end:
                     await input.repo.subscriptions.put(replace(
@@ -431,6 +464,8 @@ async def recover_missing_grants(input: RecoverMissingGrantsInput) -> list[CsCas
         raw = payment.raw if isinstance(payment.raw, dict) else {}
         if raw.get("boilpaymentTrialOpeningInvoice") is True:
             continue
+        if await is_zero_sale_handled(input.repo, payment.id):
+            continue  # DC-07 -- a person already has the case
         if payment.status == "pending" and raw.get("boilpaymentAttemptKey"):
             continue
         entries = await input.ledger.entries(payment.customer_id, kind="grant")
@@ -459,6 +494,7 @@ async def recover_missing_grants(input: RecoverMissingGrantsInput) -> list[CsCas
                     grants=input.grants,
                     notifier=input.notifier,
                     on_case_event=input.on_case_event,
+                    accrue_affiliate=input.accrue_affiliate,
                 )
             )
         )

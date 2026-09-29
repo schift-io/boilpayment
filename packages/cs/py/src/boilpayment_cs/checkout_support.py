@@ -187,7 +187,7 @@ async def start_checkout(input: StartCheckoutInput) -> Checkout:
                 if _is_definitive_provider_refusal(error):
                     raise
                 return CheckoutAttempt(checkout=None)
-            if error.code == "missing_provider_price_ref":
+            if error.code in ("missing_provider_price_ref", "full_discount_unsupported"):
                 recorded = await input.repo.operations.get(key)
                 if recorded is not None and recorded.status == "done":
                     await input.repo.operations.put(replace(

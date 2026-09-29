@@ -163,14 +163,45 @@ def test_dc_01_checkout_enables_customer_entered_promotion_codes(mock):
 
 
 def test_dc_01_checkout_sends_preset_promotion_code_instead_of_code_entry(mock):
+    mock.respond_json(200, {"id": "promo_launch", "object": "promotion_code", "coupon": {"id": "launch", "object": "coupon", "percent_off": 20}})
     mock.respond_json(200, {"id": "cs_preset", "object": "checkout.session", "url": "https://checkout.stripe.com/cs_preset"})
     provider = _provider()
 
     asyncio.run(provider.create_checkout(_checkout_input(allow_discount_codes=True, preset_discount_code="promo_launch")))
 
-    body = parse_qs(mock.requests[0].post_data)
+    body = parse_qs(mock.requests[1].post_data)
     assert body["discounts[0][promotion_code]"] == ["promo_launch"]
     assert "allow_promotion_codes" not in body
+
+
+@pytest.mark.parametrize(
+    "coupon",
+    [
+        {"percent_off": 100},
+        {"amount_off": 9900, "currency": "krw"},
+        {"amount_off": 20000, "currency": "krw"},
+    ],
+)
+def test_dc_07_full_promotion_code_is_refused_before_any_checkout_session(mock, coupon):
+    mock.respond_json(200, {"id": "promo_free", "object": "promotion_code", "coupon": {"id": "free", "object": "coupon", **coupon}})
+    provider = _provider()
+
+    with pytest.raises(PaymentKitError) as excinfo:
+        asyncio.run(provider.create_checkout(_checkout_input(preset_discount_code="promo_free")))
+
+    assert excinfo.value.code == "full_discount_unsupported"
+    assert not [r for r in mock.requests if r.path == "/v1/checkout/sessions"]
+
+
+def test_dc_07_coupon_given_only_as_an_id_is_fetched_and_judged_the_same_way(mock):
+    mock.respond_json(200, {"id": "promo_free", "object": "promotion_code", "promotion": {"type": "coupon", "coupon": "free"}})
+    mock.respond_json(200, {"id": "free", "object": "coupon", "percent_off": 100})
+    provider = _provider()
+
+    with pytest.raises(PaymentKitError) as excinfo:
+        asyncio.run(provider.create_checkout(_checkout_input(preset_discount_code="promo_free")))
+
+    assert excinfo.value.code == "full_discount_unsupported"
 
 
 def test_af_01_checkout_propagates_affiliate_metadata(mock):
@@ -287,6 +318,7 @@ def test_ot_03_definitive_stripe_400_checkout_error_preserves_status_and_code(mo
 
 
 def test_dc_06_exhausted_promotion_code_is_definitive_provider_refusal(mock):
+    mock.respond_json(200, {"id": "promo_exhausted", "object": "promotion_code", "coupon": {"id": "c", "object": "coupon", "percent_off": 20}})
     mock.respond_json(
         400,
         {"error": {"type": "invalid_request_error", "code": "promotion_code_max_redemptions", "message": "refused"}},
@@ -303,7 +335,7 @@ def test_dc_06_exhausted_promotion_code_is_definitive_provider_refusal(mock):
     assert excinfo.value.http_status == 400
     assert excinfo.value.failure.provider_code == "promotion_code_max_redemptions"
     assert excinfo.value.failure.retryable is False
-    assert len(mock.requests) == 1
+    assert len(mock.requests) == 2
 
 
 def test_ot_03_uncertain_stripe_500_checkout_error_is_retryable(mock):
@@ -993,3 +1025,21 @@ def test_checkout_entitlement_survives_payment_retrieval(mock, mode):
     assert payment.subscription_id == (
         "sub_entitlement" if mode == "subscription" else None
     )
+
+
+def test_dc_07_checkout_session_without_payment_intent_or_invoice_is_a_paid_zero_payment(mock):
+    mock.respond_json(200, {
+        "id": "cs_free_1", "object": "checkout.session", "mode": "payment",
+        "payment_status": "no_payment_required", "payment_intent": None, "invoice": None,
+        "subscription": None, "amount_subtotal": 10000, "amount_total": 0,
+        "total_details": {"amount_discount": 10000}, "currency": "krw",
+        "created": 1700000000, "metadata": {},
+    })
+    provider = _provider()
+
+    payment = asyncio.run(provider.get_payment("cs_free_1"))
+
+    assert payment.provider_ref == "cs_free_1" and payment.status == "succeeded"
+    assert payment.kind == "topup" and payment.amount.amount_minor == 0
+    assert payment.sale_evidence.checkout_id == "cs_free_1"
+    assert payment.sale_evidence.discount_amount.amount_minor == 10000
