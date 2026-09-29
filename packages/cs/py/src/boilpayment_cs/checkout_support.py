@@ -30,6 +30,21 @@ class StartCheckoutInput(SupportDeps):
     request_id: str
     success_url: str
     cancel_url: str
+    allow_discount_codes: bool = False
+    preset_discount_code: str | None = None
+    affiliate_id: str | None = None
+
+
+def _is_definitive_provider_refusal(error: ProviderError) -> bool:
+    detail_status = (
+        error.details.get("status") if isinstance(error.details, dict) else None
+    )
+    status = error.http_status if error.http_status is not None else detail_status
+    return (
+        isinstance(status, int)
+        and 400 <= status < 500
+        and status not in (408, 409, 429)
+    )
 
 
 async def start_checkout(input: StartCheckoutInput) -> Checkout:
@@ -81,6 +96,9 @@ async def start_checkout(input: StartCheckoutInput) -> Checkout:
                 price=prices[0],
                 policy=input.policy,
                 captured_at=input.clock.now().isoformat(),
+                allow_discount_codes=input.allow_discount_codes,
+                preset_discount_code=input.preset_discount_code,
+                affiliate_id=input.affiliate_id,
             )
         )
 
@@ -94,6 +112,9 @@ async def start_checkout(input: StartCheckoutInput) -> Checkout:
             "plan_id": input.plan_id,
             "provider": input.provider,
             "currency": input.currency,
+            "allow_discount_codes": input.allow_discount_codes,
+            "preset_discount_code": input.preset_discount_code,
+            "affiliate_id": input.affiliate_id,
         },
         serialize=asdict,
         deserialize=parse_checkout_snapshot,
@@ -146,10 +167,14 @@ async def start_checkout(input: StartCheckoutInput) -> Checkout:
                     success_url=input.success_url,
                     cancel_url=input.cancel_url,
                     idempotency_key=key,
+                    allow_discount_codes=snapshot.allow_discount_codes,
+                    preset_discount_code=snapshot.preset_discount_code,
+                    affiliate_id=snapshot.affiliate_id,
                     metadata={
                         "customerId": snapshot.customer_id,
                         "planId": snapshot.plan.id,
                         "checkoutEntitlementKey": key,
+                        **({"affiliateId": snapshot.affiliate_id} if snapshot.affiliate_id else {}),
                     },
                 )
             )
@@ -159,9 +184,7 @@ async def start_checkout(input: StartCheckoutInput) -> Checkout:
         # catalog repair is recaptured on retry; provider/transport outcomes remain unknown here.
         except PaymentKitError as error:
             if isinstance(error, ProviderError):
-                detail_status = error.details.get("status") if isinstance(error.details, dict) else None
-                status = error.http_status if error.http_status is not None else detail_status
-                if isinstance(status, int) and 400 <= status < 500 and status not in (408, 409, 429):
+                if _is_definitive_provider_refusal(error):
                     raise
                 return CheckoutAttempt(checkout=None)
             if error.code == "missing_provider_price_ref":
@@ -174,20 +197,27 @@ async def start_checkout(input: StartCheckoutInput) -> Checkout:
         except (OSError, TimeoutError, RuntimeError):
             return CheckoutAttempt(checkout=None)
 
-    attempt = await run_idempotent(
-        repo=input.repo,
-        clock=input.clock,
-        key=f"checkout-result:{input.customer_id}:{input.request_id}",
-        kind="checkout.entitlement",
-        payload={
-            "key": key,
-            "success_url": input.success_url,
-            "cancel_url": input.cancel_url,
-        },
-        serialize=asdict,
-        deserialize=parse_checkout_attempt,
-        fn=create,
-    )
+    result_key = f"checkout-result:{input.customer_id}:{input.request_id}"
+    try:
+        attempt = await run_idempotent(
+            repo=input.repo,
+            clock=input.clock,
+            key=result_key,
+            kind="checkout.entitlement",
+            payload={
+                "key": key,
+                "success_url": input.success_url,
+                "cancel_url": input.cancel_url,
+            },
+            serialize=asdict,
+            deserialize=parse_checkout_attempt,
+            fn=create,
+        )
+    except ProviderError as error:
+        if _is_definitive_provider_refusal(error):
+            await input.repo.operations.delete(result_key)
+            await input.repo.operations.delete(key)
+        raise
     if attempt.result.checkout is None:
         raise PaymentKitError(
             "checkout creation outcome unknown; reconcile before a new request",

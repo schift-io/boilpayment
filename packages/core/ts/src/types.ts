@@ -222,6 +222,8 @@ export interface Subscription {
    */
   version: number;
   createdAt: Date;
+  /** Affiliate captured when the subscription started; null/absent means direct acquisition. */
+  affiliateId?: string | null;
 }
 
 export type PaymentStatus =
@@ -253,6 +255,33 @@ export interface Payment {
   /** EC:E24 — other refs the provider uses for this same payment (Stripe invoice ↔ PaymentIntent ↔ charge).
    *  Set by provider adapters on fetched payments; the webhook records them as aliases. Not stored on the row. */
   providerRefAliases?: string[] | null;
+  /** Provider-authoritative sale facts used to validate discounted and payment-link purchases. */
+  saleEvidence?: SaleEvidence | null;
+  /** User-owned affiliate attribution captured at checkout or decoded from a payment link. */
+  affiliateId?: string | null;
+}
+
+export interface SaleEvidence {
+  providerSubtotal: Money;
+  discountAmount: Money;
+  priceRef: string | null;
+  checkoutId: string | null;
+  paymentLinkId: string | null;
+  linkReference: string | null;
+}
+
+export type AffiliateCommissionKind = 'accrual' | 'reversal';
+
+export interface AffiliateCommission {
+  id: string;
+  kind: AffiliateCommissionKind;
+  affiliateId: string;
+  paymentId: string;
+  refundId: string | null;
+  relatedAccrualId: string | null;
+  amount: Money;
+  idempotencyKey: string;
+  createdAt: Date;
 }
 
 export interface PaymentFailure {
@@ -503,6 +532,10 @@ export interface CreateCheckoutInput {
   cancelUrl: string;
   idempotencyKey: string;
   metadata?: Record<string, string>;
+  /** Omitted is equivalent to false, preserving existing callers. */
+  allowDiscountCodes?: boolean;
+  presetDiscountCode?: string | null;
+  affiliateId?: string | null;
 }
 export interface Checkout { id: string; url: string; providerRef: string }
 
@@ -596,6 +629,18 @@ export interface OperationTable extends Table<Operation> {
    * set). False when another writer changed it first. Optional: a Repo without it keeps the plain put.
    */
   compareAndSet?(expected: Pick<Operation, 'key' | 'status' | 'result'>, next: Operation): Promise<boolean>;
+  /** Remove provisional evidence when the provider definitively refuses before a checkout exists. */
+  delete(id: string): Promise<void>;
+}
+export interface AffiliateCommissionFilter {
+  affiliateId?: string;
+  paymentId?: string;
+  kind?: AffiliateCommissionKind;
+}
+export interface AffiliateCommissionTable {
+  /** Append-only. A repeated idempotency key returns the original row without replacing it. */
+  append(row: AffiliateCommission): Promise<AffiliateCommission>;
+  list(filter?: AffiliateCommissionFilter): Promise<AffiliateCommission[]>;
 }
 export interface Repo {
   customers: Table<Customer>;
@@ -608,6 +653,7 @@ export interface Repo {
   webhookEvents: Table<WebhookEventRecord>;
   outbox: Table<OutboxItem>;
   operations: OperationTable; // EC:J1-J5
+  affiliateCommissions: AffiliateCommissionTable;
 }
 
 export type NotifyType =
@@ -644,4 +690,6 @@ export interface Deps {
   policy: Policy;
   /** EC:L1 — optional; every caller falls back to NoopLogger so no existing Deps construction breaks. */
   logger?: Logger;
+  /** Optional user-supplied commission amountMinor calculator; overrides configured rules. */
+  affiliateCommission?: (payment: Payment) => number | Promise<number>;
 }

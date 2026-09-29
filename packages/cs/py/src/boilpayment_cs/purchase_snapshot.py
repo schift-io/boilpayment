@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import TypeAlias
 
 from boilpayment_core import (
+    Payment,
     PaymentKitError,
     Plan,
     PlanPrice,
@@ -32,6 +33,9 @@ class CheckoutSnapshot:
     price: PlanPrice
     policy: Policy
     captured_at: str
+    allow_discount_codes: bool = False
+    preset_discount_code: str | None = None
+    affiliate_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -117,6 +121,13 @@ def parse_checkout_snapshot(value: JsonValue) -> CheckoutSnapshot:
         price=_price(row["price"]),
         policy=policy_from_dict(_record(row["policy"])),
         captured_at=_text(row["captured_at"]),
+        allow_discount_codes=row.get("allow_discount_codes") is True,
+        preset_discount_code=_text(row["preset_discount_code"])
+        if row.get("preset_discount_code") is not None
+        else None,
+        affiliate_id=_text(row["affiliate_id"])
+        if row.get("affiliate_id") is not None
+        else None,
     )
 
 
@@ -135,6 +146,9 @@ def parse_purchase_snapshot(value: JsonValue) -> PurchaseSnapshot:
         price=checkout.price,
         policy=checkout.policy,
         captured_at=checkout.captured_at,
+        allow_discount_codes=checkout.allow_discount_codes,
+        preset_discount_code=checkout.preset_discount_code,
+        affiliate_id=checkout.affiliate_id,
         payment_id=_text(row["payment_id"]),
         payment_ref=_text(row["payment_ref"]),
         purchased_at=_text(row["purchased_at"]),
@@ -175,4 +189,29 @@ def matches_checkout_payment(
         and metadata.get("checkoutEntitlementKey") == snapshot.intent_key
     ) or (
         snapshot.provider == "polar" and raw.get("checkout_id") == snapshot.checkout_id
+    )
+
+
+def matches_captured_sale_amount(snapshot: CheckoutSnapshot, payment: Payment) -> bool:
+    """Accept list price, or a lower amount backed by provider discount arithmetic."""
+    if snapshot.price.currency != payment.amount.currency or payment.amount.amount_minor < 0:
+        return False
+    if snapshot.price.amount_minor == payment.amount.amount_minor:
+        return True
+    evidence = payment.sale_evidence
+    if (
+        evidence is None
+        or evidence.provider_subtotal.currency != snapshot.price.currency
+        or evidence.discount_amount.currency != snapshot.price.currency
+        or evidence.provider_subtotal.amount_minor != snapshot.price.amount_minor
+        or evidence.discount_amount.amount_minor <= 0
+        or evidence.provider_subtotal.amount_minor - evidence.discount_amount.amount_minor
+        != payment.amount.amount_minor
+    ):
+        return False
+    captured_price_ref = (snapshot.price.provider_price_refs or {}).get(snapshot.provider)
+    return (
+        not captured_price_ref
+        or not evidence.price_ref
+        or captured_price_ref == evidence.price_ref
     )

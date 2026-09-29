@@ -317,7 +317,7 @@ describe('refund.evaluate', () => {
   });
 
   it('[EC:D2/min_of_both] picks unused_credits when it is smaller', async () => {
-    const pol = resolvePolicy({ refund: { method: 'min_of_both' } });
+    const pol = resolvePolicy({ refund: { method: 'min_of_both', overuseBehavior: 'refund_time_prorated_anyway' } });
     const period = { start: new Date('2026-01-01T00:00:00Z'), end: new Date('2026-01-31T00:00:00Z') };
     const p: Payment = {
       id: 'pay_mob1', customerId, provider: 'stripe', providerRef: 'pi_mob1', subscriptionId: 'sub_1',
@@ -325,8 +325,8 @@ describe('refund.evaluate', () => {
       occurredAt: period.start, failure: null,
     };
     await repo.payments.put(p);
-    await grant(p.id, 20, 30); // total value 600 minor
-    await consume(1, 'consume:mob1'); // unused=19 -> 570 minor, well under elapsed ratio
+    await grant(p.id, 100, 30); // the 3,000-minor payment bought 100 credits
+    await consume(81, 'consume:mob1'); // unused=19 -> 570 minor, well under elapsed ratio
     clock.advance(20 * 86_400_000); // time_prorated amount = 1000 minor (as above)
     const decision = await evaluate({ payment: p, policy: pol, ledger, repo, clock });
     expect(decision.ruleId).toBe('D2');

@@ -1,5 +1,6 @@
 import type { Payment, Refund } from 'boilpayment-core';
 import type { ExecuteInput } from './execute.js';
+import { appendAffiliateReversals } from './affiliate-reversal.js';
 import { revertRefundedUpgrade, upgradeInvoiceAttributedGrantIds } from './util.js';
 
 export async function settleRefund(input: ExecuteInput, providerResult: Refund, payment: Payment): Promise<Refund> {
@@ -72,6 +73,7 @@ export async function settleRefund(input: ExecuteInput, providerResult: Refund, 
     failure: providerResult.failure ?? null, createdAt: clock.now(),
   };
   await repo.refunds.put(refund);
+  await appendAffiliateReversals({ repo, ledger, clock, payment, refund });
 
   // EC:K5 K6 — cancel the cash receipt AFTER the refund has already landed successfully. A
   // cash-receipt-cancel failure must NEVER roll back or downgrade the refund's own success —

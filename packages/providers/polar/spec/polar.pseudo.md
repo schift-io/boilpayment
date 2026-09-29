@@ -50,7 +50,7 @@ steps:
 | PaymentProvider 메서드 | Polar 호출 | 비고 |
 |---|---|---|
 | `createCustomer` | `customers.create({email, name, externalId?})` | `{ ref: customer.id }` |
-| `createCheckout` | `POST /v1/checkouts/ {products:[price.providerPriceRefs.polar], customer_id: customerRef, metadata:{...input.metadata, planId}, success_url}` | Polar 체크아웃은 상품(Product) 단위 — `price.providerPriceRefs.polar` 를 Polar Product ID 로 취급. 없으면 `PaymentKitError('missing_provider_price_ref')`. mode(subscription/one_time) 는 상품 설정에 귀속되어 Polar 쪽에서 결정 — 우리는 전달만. idempotencyKey 는 `httpHeaders:{'Idempotency-Key':...}` 로 best-effort 전달(Polar 공식 문서에 idempotency 헤더 지원이 명시돼있지 않음 — 없어도 무해). 반환 `{id: checkout.id, url: checkout.url, providerRef: checkout.id}` |
+| `createCheckout` | `POST /v1/checkouts/ {products:[price.providerPriceRefs.polar], customer_id: customerRef, metadata:{...input.metadata, planId, affiliateId?}, success_url, allow_discount_codes?, discount_id?}` | Polar 체크아웃은 상품(Product) 단위 — `price.providerPriceRefs.polar` 를 Polar Product ID 로 취급. `allowDiscountCodes`/`presetDiscountCode` 는 각각 `allow_discount_codes`/`discount_id`, `affiliateId` 는 metadata 로 전달한다. 없으면 `PaymentKitError('missing_provider_price_ref')`. mode(subscription/one_time) 는 상품 설정에 귀속되어 Polar 쪽에서 결정 — 우리는 전달만. idempotencyKey 는 `httpHeaders:{'Idempotency-Key':...}` 로 best-effort 전달(Polar 공식 문서에 idempotency 헤더 지원이 명시돼있지 않음 — 없어도 무해). 반환 `{id: checkout.id, url: checkout.url, providerRef: checkout.id}` |
 | `getPayment(ref)` | `orders.get({id: ref})` | order 가 결제 단위. kind: `order.subscriptionId` 있으면 `subscription`, 없으면 `topup` |
 | `listPayments({customerRef, since})` | `orders.list({customerId: customerRef})` 후 `createdAt >= since` 로 필터 (list API 가 since 필터 미제공) | H4·E1 대조용 |
 | `getSubscription(ref)` | `subscriptions.get({id: ref})` | `id`/`customerId`/`planId` 는 `metadata.subscriptionId`/`metadata.customerId`/`metadata.planId` 읽어 채움 (stripe.pseudo.md 의 "계약 메모"와 동일 규칙) |
@@ -61,6 +61,16 @@ steps:
 | `refund({paymentRef, amount, reason, idempotencyKey, extra})` | `refunds.create({orderId: paymentRef, amount: amount.amountMinor, reason: mapReason(reason)})` | D4 D6: 결제 통화·금액 그대로. reason 매핑: `duplicate`→`duplicate`, `fraudulent`→`fraudulent`, 그 외→`customer_request` |
 | `reportUsage({meter, customerRef, quantity, occurredAt, idempotencyKey})` | `events.ingest({events:[{name:meter, customerId:customerRef, metadata:{value:quantity}, timestamp:occurredAt, externalId:idempotencyKey}]})` | C4: `externalId` 로 Polar 측 중복 수집 방지(문서화된 dedup 필드). 로컬 `usage_events` 가 원본 |
 | `verifyWebhook` | 위 "SDK 버전 불일치" 섹션 | E4 |
+
+## 할인·결제 링크·제휴 정규화
+
+`normalizeOrder`/`normalize_order` 는 Polar Order의 `total_amount`를 실제 결제액으로 기록한다.
+`subtotal_amount`, `discount_amount`, `product_id`, `checkout_id`, `checkout_link_id`,
+`metadata.reference_id`는 `Payment.saleEvidence`/`sale_evidence`로 옮긴다. 이 증거로 키트가
+`subtotal - discount == paid`를 확인하며, 결제액이 정가보다 낮아도 플랜 지급량은 바꾸지 않는다.
+`metadata.affiliateId`는 Payment와 Subscription의 affiliate 필드로 전파한다. checkout link의
+`reference_id`와 `utm_*`는 Polar가 checkout metadata에 복사하고, 그 metadata는 Order/Subscription에
+이어진다. 할인된 반복 결제도 플랜 식별은 청구액이 아니라 `product_id`를 사용한다.
 
 ## Webhook 이벤트 매핑
 

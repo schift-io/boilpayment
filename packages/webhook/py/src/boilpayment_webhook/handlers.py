@@ -17,7 +17,7 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from boilpayment_core import (
     INACTIVE_SUBSCRIPTION_STATUSES,
@@ -26,11 +26,13 @@ from boilpayment_core import (
     CsCase,
     IdGen,
     LedgerStore,
+    Money,
     Notification,
     Notifier,
     Payment,
     PaymentKitError,
     PaymentProvider,
+    Plan,
     Policy,
     Repo,
     Subscription,
@@ -39,6 +41,12 @@ from boilpayment_core import (
 )
 
 from .attempt_row import complete_attempt_row
+from .commerce import (
+    CommerceWebhook,
+    CommerceWebhookInput,
+    LinkMismatchReason,
+    PaymentLinkReference,
+)
 from .correlation import with_correlation_id
 from .payment_ref import localize_payment_event
 from .process import Handler, HandlerCtx, HandlerMap
@@ -200,6 +208,17 @@ def default_handlers(
     | None = None,
     on_cash_receipt_error: Callable[[Payment, BaseException], Awaitable[None]]
     | None = None,
+    decode_link_reference: Callable[[str], PaymentLinkReference | None] | None = None,
+    grant_link_payment: Callable[
+        [Payment, Plan, Subscription | None], Awaitable[None]
+    ]
+    | None = None,
+    open_link_mismatch_case: Callable[
+        [Payment, LinkMismatchReason], Awaitable[None]
+    ]
+    | None = None,
+    affiliate_renewals: Literal["first_only", "include"] = "first_only",
+    commission_for_payment: Callable[[Payment], Awaitable[Money | None]] | None = None,
 ) -> HandlerMap:
     async def mark_unknown_provider_ref(
         kind: str, provider_ref: str, provider_name: str
@@ -253,11 +272,15 @@ def default_handlers(
         await record_payment_ref_aliases(repo, payments[0], provider_payment.provider_ref_aliases or [], clock.now())  # EC:E24
         return dataclasses.replace(
             payments[0],
+            provider_ref=provider_payment.provider_ref,
             status=provider_payment.status,
             amount=provider_payment.amount,
             period=provider_payment.period,
             occurred_at=provider_payment.occurred_at,
             failure=provider_payment.failure,
+            raw=provider_payment.raw,
+            sale_evidence=provider_payment.sale_evidence or payments[0].sale_evidence,
+            affiliate_id=provider_payment.affiliate_id or payments[0].affiliate_id,
         )
 
     async def resolve_renewal_payment(
@@ -284,10 +307,11 @@ def default_handlers(
         if raced:
             return raced[0]
         recorded = await repo.payments.put(Payment(
-            id=ids.new_id(), customer_id=sub.customer_id, provider=ctx.provider.name, provider_ref=payment_ref,
+            id=ids.new_id(), customer_id=sub.customer_id, provider=ctx.provider.name, provider_ref=remote.provider_ref,
             subscription_id=sub.id, amount=remote.amount, status=remote.status, kind="subscription",
             period=remote.period, occurred_at=remote.occurred_at, failure=remote.failure,
-            cash_receipt=None, raw=remote.raw,
+            cash_receipt=None, raw=remote.raw, sale_evidence=remote.sale_evidence,
+            affiliate_id=sub.affiliate_id or remote.affiliate_id,
         ))
         await record_payment_ref_aliases(repo, recorded, remote.provider_ref_aliases or [], clock.now())  # EC:E24
         return recorded
@@ -417,18 +441,81 @@ def default_handlers(
             if on_cash_receipt_error is not None:
                 await on_cash_receipt_error(payment, err)
 
+    commerce = CommerceWebhook(CommerceWebhookInput(
+        repo=repo,
+        clock=clock,
+        policy=policy,
+        decode_link_reference=decode_link_reference,
+        grant_link_payment=grant_link_payment,
+        open_link_mismatch_case=open_link_mismatch_case,
+        commission_for_payment=commission_for_payment,
+        resolve_local_payment=resolve_local_payment,
+        mark_unknown_provider_ref=mark_unknown_provider_ref,
+    ))
     async def on_payment_succeeded(ctx: HandlerCtx) -> None:
         # EC:L5 -- every ledger append lifecycle/credits make while handling THIS delivery gets
         # ctx.correlation_id merged into its reference, without lifecycle/credits knowing
         # correlation_id exists (see correlation.py module docstring).
         scoped_ledger = with_correlation_id(ledger, ctx.correlation_id)
-        payment = (
-            await resolve_renewal_payment(
-                ctx, ctx.event.payment_ref, ctx.event.subscription_ref
+        payment_ref = ctx.event.payment_ref
+        if payment_ref is None:
+            raise PaymentKitError(
+                "Payment reference is missing", "payment_reference_missing"
             )
-            if ctx.event.subscription_ref
-            else await resolve_local_payment(ctx, ctx.event.payment_ref)
+        known_payments = await repo.payments.list(
+            provider=ctx.provider.name, provider_ref=payment_ref
         )
+        known_subscriptions = (
+            await repo.subscriptions.list(
+                provider=ctx.provider.name,
+                provider_ref=ctx.event.subscription_ref,
+            )
+            if ctx.event.subscription_ref is not None
+            else []
+        )
+        if known_payments:
+            payment = await resolve_local_payment(ctx, payment_ref)
+        elif ctx.event.subscription_ref is not None and known_subscriptions:
+            payment = await resolve_renewal_payment(
+                ctx, payment_ref, ctx.event.subscription_ref
+            )
+        else:
+            payment = await commerce.handle_unregistered_payment(ctx, payment_ref)
+        if payment is None:
+            return
+        link_grant = await repo.operations.get(f"payment-link-grant:{payment.id}")
+        if (
+            link_grant is not None
+            and link_grant.kind == "payment_link.grant"
+            and link_grant.status == "done"
+        ):
+            return
+        link_mismatch = await repo.operations.get(
+            f"payment-link-mismatch:{payment.id}"
+        )
+        if (
+            link_mismatch is not None
+            and link_mismatch.kind == "payment_link.mismatch"
+            and link_mismatch.status == "done"
+        ):
+            return
+        held_checkout = await repo.operations.get(
+            f"checkout-payment-held:{payment.id}"
+        )
+        registered_checkout = await repo.operations.get(
+            f"purchase-entitlement:{payment.id}"
+        )
+        if (
+            held_checkout is not None
+            and held_checkout.kind == "checkout.paymentHeld"
+            and held_checkout.status == "done"
+            and not (
+                registered_checkout is not None
+                and registered_checkout.kind == "purchase.entitlement"
+                and registered_checkout.status == "done"
+            )
+        ):
+            return
         if ctx.event.subscription_ref:
             # SB-10 -- inspect stored status before resolve_local_subscription overlays provider
             # state. Provider-side active must not resurrect a locally expired/canceled subscription.
@@ -487,6 +574,29 @@ def default_handlers(
                     )
 
                 await _retry_on_version_conflict(_attempt)
+                affiliate_subs = await repo.subscriptions.list(
+                    provider=ctx.provider.name,
+                    provider_ref=ctx.event.subscription_ref,
+                )
+                affiliate_id = (
+                    affiliate_subs[0].affiliate_id if affiliate_subs else None
+                )
+                if affiliate_renewals == "include":
+                    await commerce.accrue_affiliate(
+                        payment, affiliate_id or payment.affiliate_id
+                    )
+                else:
+                    purchase = await repo.operations.get(
+                        f"purchase-entitlement:{payment.id}"
+                    )
+                    if (
+                        purchase is not None
+                        and purchase.kind == "purchase.entitlement"
+                        and payment.affiliate_id is not None
+                    ):
+                        await commerce.accrue_affiliate(
+                            payment, payment.affiliate_id
+                        )
         elif payment.kind == "subscription" and payment.subscription_id:
             # EC:A45 -- a self-scheduled renewal's own payment (PortOne Transaction.Paid for the charge our
             # scheduler made; the event names no subscription). It completes that renewal, never a top-up.
@@ -512,6 +622,15 @@ def default_handlers(
                     )
 
                 await _retry_on_version_conflict(_renew)
+                sub = await repo.subscriptions.get(payment.subscription_id)
+                if affiliate_renewals == "include":
+                    await commerce.accrue_affiliate(
+                        payment,
+                        (sub.affiliate_id if sub is not None else None)
+                        or payment.affiliate_id,
+                    )
+                elif payment.affiliate_id is not None:
+                    await commerce.accrue_affiliate(payment, payment.affiliate_id)
         elif credits is not None:
             # EC:E19 -- only money that arrived buys credits: the status re-fetched from the provider
             # must be 'succeeded' (a forged or early notification, a pending virtual account, or a
@@ -534,6 +653,7 @@ def default_handlers(
                 clock=clock,
                 repo=repo,
             )
+            await commerce.accrue_affiliate(payment, payment.affiliate_id)
         # EC:K2 -- after the goods are granted; applies to both subscription renewals and top-ups
         await maybe_issue_cash_receipt(payment, ctx.provider)
 

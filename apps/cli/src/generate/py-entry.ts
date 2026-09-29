@@ -125,6 +125,23 @@ export function generateIndexPy(config: PaykitConfig): string {
   l.push(`    repo = deps.repo`);
   l.push(`    clock = deps.clock`);
   l.push(`    ids = deps.ids`);
+  l.push(`    checkout_config = config.get("checkout") or {"registrationHoldHours": 24}`);
+  l.push(`    affiliate_config = config.get("affiliate") or {"commission": {"type": "rate", "rate": 0}, "renewals": "first_only"}`);
+  l.push(`    async def _commission_for_payment(payment: Payment) -> Money:`);
+  l.push(`        if deps.affiliate_commission is not None:`);
+  l.push(`            resolved = deps.affiliate_commission(payment)`);
+  l.push(`            amount_minor = await resolved if inspect.isawaitable(resolved) else resolved`);
+  l.push(`            return money(amount_minor, payment.amount.currency)`);
+  l.push(`        rule = affiliate_config["commission"]`);
+  l.push(`        normalized_rule = ({"type": "fixed", "amount_minor": rule["amountMinor"]} if rule["type"] == "fixed" else rule)`);
+  l.push(`        return calculate_affiliate_accrual(payment.amount, normalized_rule)`);
+  l.push(`    async def _accrue_affiliate_payment(payment: Payment) -> None:`);
+  l.push(`        if payment.affiliate_id is None:`);
+  l.push(`            return`);
+  l.push(`        amount = await _commission_for_payment(payment)`);
+  l.push(`        if amount.amount_minor <= 0:`);
+  l.push(`            return`);
+  l.push(`        await repo.affiliate_commissions.append(AffiliateCommission(id=f"affiliate-accrual:{payment.id}", kind="accrual", affiliate_id=payment.affiliate_id, payment_id=payment.id, refund_id=None, related_accrual_id=None, amount=amount, idempotency_key=f"affiliate:{payment.id}:accrual", created_at=clock.now()))`);
   l.push('');
 
   l.push(`    # EC:I5 — reports billable CS case transitions to Schift's license server (docs/CS_SERVER.md).`);
@@ -186,8 +203,34 @@ export function generateIndexPy(config: PaykitConfig): string {
     l.push(`        return await resolve_topup_credits(payment=payment, repo=repo)`);
   }
   l.push(supportPy(hasCredits, hasReasonRules(config)));
+  l.push(`    async def _open_link_mismatch_case(payment: Payment, reason: str) -> None:`);
+  l.push(`        case_id = f"payment-link-mismatch:{payment.id}"`);
+  l.push(`        if await repo.cs_cases.get(case_id) is not None:`);
+  l.push(`            return`);
+  l.push(`        now = clock.now()`);
+  l.push(`        await repo.cs_cases.put(CsCase(id=case_id, customer_id=payment.customer_id, kind="reconcile_mismatch", status="needs_human", reference_id=payment.id, policy_snapshot=deepcopy(policy), decision={"reason": reason}, churn_reason=None, churn_text=None, opened_at=now, resolved_at=None, escalated_at=now))`);
+  l.push(`        await notifier.send(Notification(type="cs.needs_human", customer_id=payment.customer_id or None, payload={"caseId": case_id, "paymentId": payment.id, "reason": reason}))`);
+  if (hasCredits || hasSubscription) {
+    l.push(`    async def _grant_link_payment(payment: Payment, plan: Plan, subscription: Subscription | None) -> None:`);
+    if (hasSubscription) {
+      l.push(`        if subscription is not None:`);
+      l.push(`            await on_renewal_paid(OnRenewalPaidInput(sub=subscription, payment=payment, policy=policy, ledger=ledger, repo=repo, clock=clock))`);
+      l.push(`            return`);
+    }
+    if (hasCredits) {
+      l.push(`        await topup(TopupInput(customer_id=payment.customer_id, payment=payment, credits=plan.credits_per_period, policy=policy, ledger=ledger, repo=repo, clock=clock))`);
+      l.push(`        return`);
+    }
+    l.push(`        raise PaymentKitError("payment-link entitlement is unavailable for this plan", "payment_link_grant_unavailable")`);
+  } else {
+    l.push(`    _grant_link_payment = None`);
+  }
   l.push(`    handlers = default_handlers(`);
   l.push(`        policy=policy, ledger=ledger, repo=repo, notifier=notifier, clock=clock, ids=ids,`);
+  l.push(`        decode_link_reference=decode_payment_link_reference,`);
+  l.push(`        affiliate_renewals=affiliate_config["renewals"], commission_for_payment=_commission_for_payment,`);
+  l.push(`        open_link_mismatch_case=_open_link_mismatch_case,`);
+  l.push(`        grant_link_payment=_grant_link_payment,`);
   l.push(`        lifecycle=${hasSubscription ? '_LifecycleDeps()' : 'None'},`);
   l.push(`        credits=${hasCredits ? '_CreditsDeps()' : 'None'},`);
   l.push(`        refund=_RefundDeps(),`);
@@ -196,10 +239,31 @@ export function generateIndexPy(config: PaykitConfig): string {
   l.push(`    )`);
   l.push('');
 
-  l.push(`    async def checkout(*, customer_id: str, plan_id: str, provider: str, currency: str, request_id: str, success_url: str, cancel_url: str):`);
-  l.push(`        return await start_checkout(StartCheckoutInput(customer_id=customer_id, plan_id=plan_id, provider=provider, currency=currency, request_id=request_id, success_url=success_url, cancel_url=cancel_url, policy=policy, providers=providers, repo=repo, ledger=ledger, clock=clock, ids=ids))`);
+  l.push(`    async def checkout(*, customer_id: str, plan_id: str, provider: str, currency: str, request_id: str, success_url: str, cancel_url: str, allow_discount_codes: bool = False, preset_discount_code: str | None = None, affiliate_id: str | None = None):`);
+  l.push(`        return await start_checkout(StartCheckoutInput(customer_id=customer_id, plan_id=plan_id, provider=provider, currency=currency, request_id=request_id, success_url=success_url, cancel_url=cancel_url, allow_discount_codes=allow_discount_codes, preset_discount_code=preset_discount_code, affiliate_id=affiliate_id, policy=policy, providers=providers, repo=repo, ledger=ledger, clock=clock, ids=ids))`);
   l.push(`    async def register_completed_checkout(*, customer_id: str, checkout_id: str, payment_ref: str, subscription_ref: str | None = None):`);
-  l.push(`        return await register_checkout(RegisterCompletedCheckoutInput(customer_id=customer_id, checkout_id=checkout_id, payment_ref=payment_ref, subscription_ref=subscription_ref, policy=policy, providers=providers, repo=repo, ledger=ledger, clock=clock, ids=ids))`);
+  l.push(`        payment = await register_checkout(RegisterCompletedCheckoutInput(customer_id=customer_id, checkout_id=checkout_id, payment_ref=payment_ref, subscription_ref=subscription_ref, policy=policy, providers=providers, repo=repo, ledger=ledger, clock=clock, ids=ids))`);
+  if (hasCredits || hasSubscription) {
+    l.push(`        if await repo.operations.get(f"checkout-payment-held:{payment.id}") is not None:`);
+    if (hasCredits) {
+      l.push(`            await apply_purchased_grant(ApplyPurchasedGrantInput(customer_id=customer_id, payment_id=payment.id, policy=policy, providers=providers, repo=repo, ledger=ledger, clock=clock, ids=ids, notifier=notifier, grants=support_grants))`);
+      l.push(`            await _accrue_affiliate_payment(payment)`);
+    } else {
+      l.push(`            if payment.kind == "subscription":`);
+      l.push(`                await _accrue_affiliate_payment(payment)`);
+    }
+  }
+  l.push(`        return payment`);
+  l.push(`    def build_payment_link_url(*, provider: str, link_url: str, customer_id: str, affiliate_id: str | None = None) -> str:`);
+  l.push(`        return build_provider_payment_link_url(provider=provider, link_url=link_url, customer_id=customer_id, affiliate_id=affiliate_id)`);
+  l.push(`    async def affiliate_list(*, affiliate_id: str, payment_id: str | None = None, kind: str | None = None):`);
+  l.push(`        return await repo.affiliate_commissions.list(affiliate_id=affiliate_id, payment_id=payment_id, kind=kind)`);
+  l.push(`    async def affiliate_sum(*, affiliate_id: str, currency: str | None = None):`);
+  l.push(`        totals: dict[str, int] = {}`);
+  l.push(`        for row in await repo.affiliate_commissions.list(affiliate_id=affiliate_id):`);
+  l.push(`            totals[row.amount.currency] = totals.get(row.amount.currency, 0) + (row.amount.amount_minor if row.kind == "accrual" else -row.amount.amount_minor)`);
+  l.push(`        return totals.get(currency, 0) if currency is not None else totals`);
+  l.push(`    affiliate = {"list": affiliate_list, "sum": affiliate_sum}`);
   if (hasSubscription) {
     l.push(`    async def upgrade(**kwargs: Any):`);
     l.push(`        """EC:A1 A2 A8 J1-J5 — mid-cycle plan upgrade (immediate proration or scheduled next-period, per policy). Resolves \`provider\` from \`sub.provider\` unless passed explicitly."""`);
@@ -401,7 +465,9 @@ export function generateIndexPy(config: PaykitConfig): string {
   }
   l.push('');
   l.push(`    async def _cron_reconcile(since):`);
-  l.push(`        return ${hasCredits ? 'await recover_missing_grants(RecoverMissingGrantsInput(policy=policy, providers=providers, repo=repo, ledger=ledger, clock=clock, ids=ids, notifier=notifier, grants=support_grants, since=since, reporter=license_reporter))' : '[]'}`);
+  l.push(`        recovered = ${hasCredits ? 'await recover_missing_grants(RecoverMissingGrantsInput(policy=policy, providers=providers, repo=repo, ledger=ledger, clock=clock, ids=ids, notifier=notifier, grants=support_grants, since=since, reporter=license_reporter))' : '[]'}`);
+  l.push(`        cases = await reconcile_cases(ReconcileInput(policy=policy, providers=providers, repo=repo, ledger=ledger, clock=clock, ids=ids, since=since, registration_hold_hours=checkout_config["registrationHoldHours"]))`);
+  l.push(`        return [*recovered, *cases]`);
   l.push('');
 
   l.push(`    cron = {`);
@@ -440,6 +506,8 @@ export function generateIndexPy(config: PaykitConfig): string {
     l.push(`        "check_quota": check_quota,`);
   }
   l.push(`        "checkout": checkout,`);
+  l.push(`        "build_payment_link_url": build_payment_link_url,`);
+  l.push(`        "affiliate": affiliate,`);
   l.push(`        "register_completed_checkout": register_completed_checkout,`);
   l.push(`        "initialize": initialize,`);
   if (hasSubscription) {

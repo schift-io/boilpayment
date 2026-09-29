@@ -12,6 +12,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any, Generic, TypeVar
 
+from .affiliate import InMemoryAffiliateCommissionTable
 from .clock import SystemClock, UuidIdGen
 from .expiry import effective_grant_expiry
 from .types import (
@@ -89,6 +90,9 @@ class VersionedMemTable(MemTable[T]):
 class OperationMemTable(MemTable[Operation]):
     """Claim without yielding between inspection and storage."""
 
+    async def delete(self, id: str) -> None:
+        self._rows.pop(id, None)
+
     async def claim(self, row: Operation) -> Operation | None:
         existing = self._rows.get(row.key)
         if existing is not None and (existing.status != "failed" or existing.payload_hash != row.payload_hash):
@@ -118,6 +122,7 @@ class InMemoryRepo:
         self.webhook_events: MemTable[Any] = MemTable()
         self.outbox: MemTable[Any] = MemTable()
         self.operations = OperationMemTable()  # EC:J1-J5
+        self.affiliate_commissions = InMemoryAffiliateCommissionTable()
 
 
 class NoopNotifier:

@@ -33,7 +33,7 @@ from .cases import (
     reject,
 )
 from .metrics import LicenseReporter
-from .purchase_snapshot import get_purchase_snapshot
+from .purchase_snapshot import get_purchase_snapshot, matches_captured_sale_amount
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -181,8 +181,7 @@ async def resolve_topup_credits(*, payment: Payment, repo: Repo) -> int | None:
         or snapshot.customer_id != payment.customer_id
         or snapshot.payment_ref != payment.provider_ref
         or snapshot.provider != payment.provider
-        or snapshot.price.currency != payment.amount.currency
-        or snapshot.price.amount_minor != payment.amount.amount_minor
+        or not matches_captured_sale_amount(snapshot, payment)
     ):
         return None
     return (

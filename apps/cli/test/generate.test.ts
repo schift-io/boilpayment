@@ -51,6 +51,22 @@ describe('generateEnvExample', () => {
 });
 
 describe('generateIndexPy', () => {
+  it('emits the paired 0.3.0 checkout, payment-link, affiliate, and hold APIs', () => {
+    // Given / When
+    const generated = generateIndexPy(buildConfig({ providers: ['stripe', 'polar'], languages: ['py'], goods: ['credits'] }));
+
+    // Then
+    expect(generated).toContain('allow_discount_codes: bool = False');
+    expect(generated).toContain('preset_discount_code: str | None = None');
+    expect(generated).toContain('affiliate_id: str | None = None');
+    expect(generated).toContain('def build_payment_link_url(');
+    expect(generated).toContain('"affiliate": affiliate');
+    expect(generated).toContain('"list": affiliate_list');
+    expect(generated).toContain('"sum": affiliate_sum');
+    expect(generated).toContain('checkout-payment-held:');
+    expect(generated).toContain('registration_hold_hours');
+  });
+
   it('[SB-07] threads the webhook ledger into generated Python dunning', () => {
     const generated = generateIndexPy(buildConfig({
       providers: ['stripe'], languages: ['py'], models: ['subscription'], goods: ['credits'],
@@ -58,6 +74,16 @@ describe('generateIndexPy', () => {
 
     expect(generated).toContain('async def on_payment_failed(self, *, sub: Any, policy: Any, ledger: Any, repo: Any, notifier: Any, clock: Any)');
     expect(generated).toContain('OnPaymentFailedInput(sub=sub, policy=policy, ledger=ledger, repo=repo, notifier=notifier, clock=clock)');
+  });
+
+  it('[AF-02] releases a held subscription affiliate accrual without the credits module', () => {
+    const generated = generateIndexPy(buildConfig({
+      providers: ['stripe'], languages: ['py'], models: ['subscription'], goods: ['usage_quota'],
+    }));
+
+    expect(generated).toContain('if await repo.operations.get(f"checkout-payment-held:{payment.id}") is not None:');
+    expect(generated).toContain('if payment.kind == "subscription":');
+    expect(generated).toContain('await _accrue_affiliate_payment(payment)');
   });
 
   it('forwards remote_address from a polar-only webhook entry point', () => {
@@ -74,6 +100,20 @@ describe('generateIndexPy', () => {
 });
 
 describe('generateIndexTs', () => {
+  it('emits the paired 0.3.0 checkout, payment-link, affiliate, and hold APIs', () => {
+    // Given / When
+    const generated = generateIndexTs(buildConfig({ providers: ['stripe', 'polar'], languages: ['ts'], goods: ['credits'] }));
+
+    // Then
+    expect(generated).toContain("'allowDiscountCodes' | 'presetDiscountCode' | 'affiliateId'");
+    expect(generated).toContain('const buildPaymentLinkUrl =');
+    expect(generated).toContain('const affiliate = {');
+    expect(generated).toContain('list:');
+    expect(generated).toContain('sum:');
+    expect(generated).toContain('checkout-payment-held:');
+    expect(generated).toContain('registrationHoldHours');
+  });
+
   it('forwards remoteAddress from a polar-only webhook entry point', () => {
     // Given a TypeScript kit with Polar as its only provider.
     const config = buildConfig({ providers: ['polar'], languages: ['ts'] });
@@ -84,6 +124,15 @@ describe('generateIndexTs', () => {
     // Then callers can always supply the peer address and receiveWebhook receives it.
     expect(generated).toContain('remoteAddress?: string');
     expect(generated).toContain('remoteAddress: opts?.remoteAddress');
+  });
+
+  it('[AF-02] releases a held subscription affiliate accrual without the credits module', () => {
+    const generated = generateIndexTs(buildConfig({
+      providers: ['stripe'], languages: ['ts'], models: ['subscription'], goods: ['usage_quota'],
+    }));
+
+    expect(generated).toContain('if (await full.repo.operations.get(`checkout-payment-held:${payment.id}`))');
+    expect(generated).toContain("if (payment.kind === 'subscription') await accrueAffiliatePayment(payment);");
   });
 });
 
@@ -96,7 +145,7 @@ describe('generateMigrations', () => {
     const result = await generateMigrations(config, dir);
     const files = [...result.written].sort();
     expect(files).toEqual(['0001_core.sql', '0002_credits.sql', '0004_webhook.sql', '0005_refund.sql', '0006_cs.sql', '0007_subscription_provider_ref_nullable.sql',
-      '0009_ledger_idempotency_per_customer.sql', '0011_subscription_status_paused_incomplete.sql', '0012_subscription_currency.sql', '0013_ledger_consume_key.sql', '0014_subscription_billing_customer_ref.sql', '0015_grace_credit_expiry.sql']);
+      '0009_ledger_idempotency_per_customer.sql', '0011_subscription_status_paused_incomplete.sql', '0012_subscription_currency.sql', '0013_ledger_consume_key.sql', '0014_subscription_billing_customer_ref.sql', '0015_grace_credit_expiry.sql', '0016_affiliate_commissions.sql']);
   });
 
   it('the kitchen-sink config (usage model + cs enabled) gets every non-IAP migration file (round-5 Info I-1: 0009-0013 too)', async () => {
@@ -105,7 +154,7 @@ describe('generateMigrations', () => {
     const result = await generateMigrations(config, dir);
     const files = [...result.written].sort();
     expect(files).toEqual(['0001_core.sql', '0002_credits.sql', '0003_usage.sql', '0004_webhook.sql', '0005_refund.sql', '0006_cs.sql', '0007_subscription_provider_ref_nullable.sql',
-      '0009_ledger_idempotency_per_customer.sql', '0010_usage_idempotency_per_customer.sql', '0011_subscription_status_paused_incomplete.sql', '0012_subscription_currency.sql', '0013_ledger_consume_key.sql', '0014_subscription_billing_customer_ref.sql', '0015_grace_credit_expiry.sql']);
+      '0009_ledger_idempotency_per_customer.sql', '0010_usage_idempotency_per_customer.sql', '0011_subscription_status_paused_incomplete.sql', '0012_subscription_currency.sql', '0013_ledger_consume_key.sql', '0014_subscription_billing_customer_ref.sql', '0015_grace_credit_expiry.sql', '0016_affiliate_commissions.sql']);
   });
 
   it('a usage_quota-only good (no usage model) also pulls in 0003_usage.sql', async () => {
@@ -120,7 +169,7 @@ describe('generateMigrations', () => {
     const config = kitchenSinkConfig();
     const dir = tmpDir('paykit-migrations-');
     const result = await generateMigrations(config, dir);
-    expect(result.written).toHaveLength(14);
+    expect(result.written).toHaveLength(15);
     for (const file of result.written) expect(await fs.readFile(path.join(dir, 'migrations', file), 'utf8')).toMatch(/create table|alter table|create unique index|drop index|create or replace function/i);
   });
 });
@@ -128,6 +177,15 @@ describe('generateMigrations', () => {
 // --- POLICY.md --------------------------------------------------------------------------------
 
 describe('generatePolicyMd', () => {
+  it('documents checkout hold and affiliate configuration', () => {
+    // Given / When
+    const md = generatePolicyMd(buildConfig());
+
+    // Then
+    expect(md).toContain('checkout.registrationHoldHours');
+    expect(md).toContain('affiliate.commission');
+    expect(md).toContain('affiliate.renewals');
+  });
   it('contains the EC id of every answered (when-gated) policy question, for the kitchen-sink config', () => {
     const config = kitchenSinkConfig();
     config.plans = [samplePlan({ trialDays: 14 })];
@@ -266,5 +324,22 @@ describe('INTEGRATION.md — generated per config, and its symbols must exist in
     expect(doc).toContain('npm i boilpayment-sdk');
     expect(doc).toContain('pip install boilpayment');
     expect(doc).not.toMatch(/boilpayment-(core|credits|lifecycle|refund|usage|webhook|cs)\b/);
+  });
+
+  it('documents every 0.3.0 checkout, link, affiliate, and hold surface in both languages', async () => {
+    // Given
+    const dir = await project({ providers: ['stripe', 'polar'], models: ['subscription', 'topup'], languages: ['ts', 'py'], goods: ['credits'] });
+
+    // When
+    const doc = await fs.readFile(path.join(dir, 'INTEGRATION.md'), 'utf8');
+
+    // Then
+    for (const token of [
+      'allowDiscountCodes', 'presetDiscountCode', 'affiliateId',
+      'allow_discount_codes', 'preset_discount_code', 'affiliate_id',
+      'buildPaymentLinkUrl', 'build_payment_link_url',
+      'affiliate.list', 'affiliate.sum',
+      'checkout.registrationHoldHours', 'affiliate.commission', 'affiliate.renewals',
+    ]) expect(doc).toContain(token);
   });
 });

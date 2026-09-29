@@ -27,10 +27,12 @@ import {
 } from 'boilpayment-core';
 import { localizePaymentEvent } from './payment-ref.js';
 import type {
-  CashReceiptType, Clock, CsCase, IdGen, LedgerStore, Notifier, Payment, PaymentProvider, Policy, Repo, Subscription,
+  CashReceiptType, Clock, CsCase, IdGen, LedgerStore, Money, Notifier, Payment, PaymentProvider, Plan, Policy, Repo, Subscription,
 } from 'boilpayment-core';
 import type { Handler, HandlerCtx, HandlerMap } from './process.js';
 import { withCorrelationId } from './correlation.js';
+import { createCommerceWebhook } from './commerce.js';
+import type { LinkMismatchReason } from './commerce.js';
 
 // EC:K1 call-site helper — deliberately duplicated from packages/lifecycle/ts/src/retry.ts rather
 // than imported: this package intentionally does NOT depend on boilpayment-lifecycle (see
@@ -151,6 +153,16 @@ export interface DefaultHandlersInput {
   resolveCashReceiptIdentity?: ((payment: Payment) => Promise<{ customerIdentityNumber: string; type?: CashReceiptType } | null>) | null;
   /** EC:K6 — called (in addition to a 'reconcile.mismatch' notification) when issuance fails; failure never rolls back the payment. */
   onCashReceiptError?: ((input: { payment: Payment; error: unknown }) => void | Promise<void>) | null;
+  /** Decode the provider-safe customer/affiliate reference emitted by the payment-link helper. */
+  decodeLinkReference?: ((reference: string) => { readonly customerId: string; readonly affiliateId: string | null } | null) | null;
+  /** Grant a provider payment-link purchase under the current plan terms. */
+  grantLinkPayment?: ((input: { readonly payment: Payment; readonly plan: Plan; readonly subscription: Subscription | null }) => Promise<void>) | null;
+  /** Open the operator case for an unmatched payment link. The handler invokes this exactly once. */
+  openLinkMismatchCase?: ((input: { readonly payment: Payment; readonly reason: LinkMismatchReason }) => Promise<void>) | null;
+  /** Whether payments after the affiliate-attributed first subscription payment also accrue. */
+  affiliateRenewals?: 'first_only' | 'include';
+  /** User/config-resolved commission amount. Null means no accrual. */
+  commissionForPayment?: ((payment: Payment) => Promise<Money | null>) | null;
 }
 
 export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
@@ -180,7 +192,18 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
     if (payments.length === 0) return markUnknownProviderRef('payment', providerRef, ctx.provider.name);
     const providerPayment = await ctx.provider.getPayment(providerRef); // re-fetch for verification (EC:E3)
     await recordPaymentRefAliases(repo, payments[0], providerPayment.providerRefAliases ?? [], clock.now()); // EC:E24
-    return { ...payments[0], status: providerPayment.status, amount: providerPayment.amount, period: providerPayment.period, occurredAt: providerPayment.occurredAt, failure: providerPayment.failure };
+    return {
+      ...payments[0],
+      providerRef: providerPayment.providerRef,
+      status: providerPayment.status,
+      amount: providerPayment.amount,
+      period: providerPayment.period,
+      occurredAt: providerPayment.occurredAt,
+      failure: providerPayment.failure,
+      raw: providerPayment.raw,
+      saleEvidence: providerPayment.saleEvidence ?? payments[0].saleEvidence ?? null,
+      affiliateId: providerPayment.affiliateId ?? payments[0].affiliateId ?? null,
+    };
   }
 
   // EC:E16 — a native provider (Stripe/Polar) renews on its own schedule, so the renewal invoice
@@ -200,9 +223,10 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
     const [raced] = await repo.payments.list({ providerRef: paymentRef } as Partial<Payment>);
     if (raced) return raced;
     const recorded = await repo.payments.put({
-      id: ids.newId(), customerId: sub.customerId, provider: ctx.provider.name, providerRef: paymentRef, subscriptionId: sub.id,
+      id: ids.newId(), customerId: sub.customerId, provider: ctx.provider.name, providerRef: remote.providerRef, subscriptionId: sub.id,
       amount: remote.amount, status: remote.status, kind: 'subscription', period: remote.period, occurredAt: remote.occurredAt,
-      failure: remote.failure, cashReceipt: null, raw: remote.raw,
+      failure: remote.failure, cashReceipt: null, raw: remote.raw, saleEvidence: remote.saleEvidence ?? null,
+      affiliateId: sub.affiliateId ?? remote.affiliateId ?? null,
     });
     await recordPaymentRefAliases(repo, recorded, remote.providerRefAliases ?? [], clock.now()); // EC:E24
     return recorded;
@@ -295,14 +319,42 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
     }
   }
 
+  const commerce = createCommerceWebhook({
+    repo,
+    clock,
+    policy,
+    decodeLinkReference: input.decodeLinkReference,
+    grantLinkPayment: input.grantLinkPayment,
+    openLinkMismatchCase: input.openLinkMismatchCase,
+    commissionForPayment: input.commissionForPayment,
+    resolveLocalPayment,
+    markUnknownProviderRef,
+  });
   const onPaymentSucceeded: Handler = async (ctx) => {
     // EC:L5 — every ledger append lifecycle/credits make while handling THIS delivery gets
     // ctx.correlationId merged into its reference, without lifecycle/credits knowing correlationId
     // exists (see correlation.ts doc comment).
     const scopedLedger = withCorrelationId(ledger, ctx.correlationId);
-    const payment = ctx.event.subscriptionRef
-      ? await resolveRenewalPayment(ctx, ctx.event.paymentRef!, ctx.event.subscriptionRef)
-      : await resolveLocalPayment(ctx, ctx.event.paymentRef!);
+    const paymentRef = ctx.event.paymentRef;
+    if (!paymentRef) throw new PaymentKitError('Payment reference is missing', 'payment_reference_missing');
+    const knownPayments = await repo.payments.list({ provider: ctx.provider.name, providerRef: paymentRef } as Partial<Payment>);
+    const knownSubscriptions = ctx.event.subscriptionRef
+      ? await repo.subscriptions.list({ provider: ctx.provider.name, providerRef: ctx.event.subscriptionRef } as Partial<Subscription>)
+      : [];
+    const payment = knownPayments.length > 0
+      ? await resolveLocalPayment(ctx, paymentRef)
+      : ctx.event.subscriptionRef && knownSubscriptions.length > 0
+        ? await resolveRenewalPayment(ctx, paymentRef, ctx.event.subscriptionRef)
+        : await commerce.handleUnregisteredPayment(ctx, paymentRef);
+    if (!payment) return;
+    const linkGrant = await repo.operations.get(`payment-link-grant:${payment.id}`);
+    if (linkGrant?.kind === 'payment_link.grant' && linkGrant.status === 'done') return;
+    const linkMismatch = await repo.operations.get(`payment-link-mismatch:${payment.id}`);
+    if (linkMismatch?.kind === 'payment_link.mismatch' && linkMismatch.status === 'done') return;
+    const heldCheckout = await repo.operations.get(`checkout-payment-held:${payment.id}`);
+    const registeredCheckout = await repo.operations.get(`purchase-entitlement:${payment.id}`);
+    if (heldCheckout?.kind === 'checkout.paymentHeld' && heldCheckout.status === 'done'
+      && !(registeredCheckout?.kind === 'purchase.entitlement' && registeredCheckout.status === 'done')) return;
     if (ctx.event.subscriptionRef) {
       // SB-10 — inspect the stored status before resolveLocalSubscription overlays provider state.
       // A provider-side active status after local expiry/cancellation must not resurrect entitlement.
@@ -343,6 +395,12 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
           const sub = await resolveLocalSubscription(ctx, ctx.event.subscriptionRef!);
           await lifecycle.onRenewalPaid({ sub, payment, policy, ledger: scopedLedger, repo, clock });
         });
+        const [affiliateSub] = await repo.subscriptions.list({ provider: ctx.provider.name, providerRef: ctx.event.subscriptionRef } as Partial<Subscription>);
+        if ((input.affiliateRenewals ?? 'first_only') === 'include') {
+          await commerce.accrueAffiliate(payment, affiliateSub?.affiliateId ?? payment.affiliateId ?? null);
+        } else if ((await repo.operations.get(`purchase-entitlement:${payment.id}`))?.kind === 'purchase.entitlement' && payment.affiliateId) {
+          await commerce.accrueAffiliate(payment, payment.affiliateId);
+        }
       }
     } else if (payment.kind === 'subscription' && payment.subscriptionId) {
       // EC:A45 — a self-scheduled renewal's own payment (PortOne sends Transaction.Paid for the charge
@@ -372,6 +430,12 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
           if (!sub) return markUnknownProviderRef('subscription', payment.subscriptionId as string, ctx.provider.name);
           await lifecycle.onRenewalPaid({ sub, payment: { ...payment, period: paidPeriod }, policy, ledger: scopedLedger, repo, clock });
         });
+        const sub = await repo.subscriptions.get(payment.subscriptionId);
+        if ((input.affiliateRenewals ?? 'first_only') === 'include') {
+          await commerce.accrueAffiliate(payment, sub?.affiliateId ?? payment.affiliateId ?? null);
+        } else if (payment.affiliateId) {
+          await commerce.accrueAffiliate(payment, payment.affiliateId);
+        }
       }
     } else if (credits) {
       // EC:E19 — only money that arrived buys credits: the status re-fetched from the provider must be
@@ -384,6 +448,7 @@ export function defaultHandlers(input: DefaultHandlersInput): HandlerMap {
       const n = input.resolveTopupCredits ? await input.resolveTopupCredits(payment) : null;
       if (n === null || n === undefined) throw new Error('topup_credits_unresolved');
       await credits.topup({ customerId: payment.customerId, payment, credits: n, policy, ledger: scopedLedger, clock, repo });
+      await commerce.accrueAffiliate(payment, payment.affiliateId ?? null);
     }
     await maybeIssueCashReceipt(payment, ctx.provider); // EC:K2 — after the goods are granted; applies to both subscription renewals and top-ups
   };

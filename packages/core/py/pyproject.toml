@@ -1,6 +1,6 @@
 [project]
 name = "boilpayment-core"
-version = "0.2.1"
+version = "0.3.0"
 description = "boilpayment — core types, policy, interfaces, in-memory stores"
 readme = "README.md"
 license = "MIT"

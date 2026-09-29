@@ -14,6 +14,8 @@ from datetime import datetime
 from typing import Any
 
 from boilpayment_core import (
+    AffiliateCommission,
+    AffiliateCommissionKind,
     CashReceiptRef,
     CsCase,
     Customer,
@@ -28,6 +30,7 @@ from boilpayment_core import (
     Policy,
     ProviderRef,
     Refund,
+    SaleEvidence,
     Subscription,
     UsageEvent,
     WebhookEventRecord,
@@ -82,6 +85,7 @@ def _subscription_to_row(s: Subscription) -> dict[str, Any]:
         "billing_key": s.billing_key,
         "scheduled_plan_id": s.scheduled_plan_id,
         "currency": s.currency,  # EC:A28
+        "affiliate_id": s.affiliate_id,
         "version": getattr(s, "version", 0) or 0,  # EC:K1
         "created_at": s.created_at,
     }
@@ -107,6 +111,7 @@ def _row_to_subscription(r: dict[str, Any]) -> Subscription:
         scheduled_plan_id=r["scheduled_plan_id"],
         currency=r.get("currency"),  # EC:A28
         billing_customer_ref=r.get("billing_customer_ref"),  # EC:A60
+        affiliate_id=r.get("affiliate_id"),
         version=int(r.get("version") or 0),  # EC:K1
         created_at=r["created_at"],
     )
@@ -254,6 +259,25 @@ def _payments_table(dsn: str) -> PgTable[Payment]:
             "occurred_at": p.occurred_at,
             "failure": jsonb(failure),
             "cash_receipt": jsonb(p.cash_receipt),  # EC:K2-K7
+            "sale_evidence": jsonb(
+                {
+                    "providerSubtotal": {
+                        "amountMinor": p.sale_evidence.provider_subtotal.amount_minor,
+                        "currency": p.sale_evidence.provider_subtotal.currency,
+                    },
+                    "discountAmount": {
+                        "amountMinor": p.sale_evidence.discount_amount.amount_minor,
+                        "currency": p.sale_evidence.discount_amount.currency,
+                    },
+                    "priceRef": p.sale_evidence.price_ref,
+                    "checkoutId": p.sale_evidence.checkout_id,
+                    "paymentLinkId": p.sale_evidence.payment_link_id,
+                    "linkReference": p.sale_evidence.link_reference,
+                }
+                if p.sale_evidence
+                else None
+            ),
+            "affiliate_id": p.affiliate_id,
             "raw": jsonb(p.raw),
         }
 
@@ -284,10 +308,104 @@ def _payments_table(dsn: str) -> PgTable[Payment]:
             occurred_at=r["occurred_at"],
             failure=failure,
             cash_receipt=_cash_receipt(r.get("cash_receipt")),  # EC:K2-K7
+            sale_evidence=(
+                SaleEvidence(
+                    provider_subtotal=Money(
+                        amount_minor=r["sale_evidence"]["providerSubtotal"]["amountMinor"],
+                        currency=r["sale_evidence"]["providerSubtotal"]["currency"],
+                    ),
+                    discount_amount=Money(
+                        amount_minor=r["sale_evidence"]["discountAmount"]["amountMinor"],
+                        currency=r["sale_evidence"]["discountAmount"]["currency"],
+                    ),
+                    price_ref=r["sale_evidence"]["priceRef"],
+                    checkout_id=r["sale_evidence"]["checkoutId"],
+                    payment_link_id=r["sale_evidence"]["paymentLinkId"],
+                    link_reference=r["sale_evidence"]["linkReference"],
+                )
+                if r.get("sale_evidence")
+                else None
+            ),
+            affiliate_id=r.get("affiliate_id"),
             raw=r["raw"],
         )
 
     return PgTable(dsn, "payments", to_row, from_row)
+
+
+def _row_to_affiliate_commission(r: dict[str, Any]) -> AffiliateCommission:
+    from boilpayment_core import Money
+
+    return AffiliateCommission(
+        id=r["id"],
+        kind=r["kind"],
+        affiliate_id=r["affiliate_id"],
+        payment_id=r["payment_id"],
+        refund_id=r["refund_id"],
+        related_accrual_id=r["related_commission_id"],
+        amount=Money(amount_minor=r["amount_minor"], currency=r["currency"]),
+        idempotency_key=r["idempotency_key"],
+        created_at=r["created_at"],
+    )
+
+
+class AffiliateCommissionsTable:
+    """Append-only affiliate commission rows, idempotent by idempotency_key."""
+
+    def __init__(self, dsn: str) -> None:
+        self._dsn = dsn
+
+    async def append(self, row: AffiliateCommission) -> AffiliateCommission:
+        async with connection(self._dsn) as conn, conn.cursor() as cur:
+            await cur.execute(
+                """insert into affiliate_commissions
+                   (id, affiliate_id, payment_id, kind, amount_minor, currency, refund_id,
+                    related_commission_id, idempotency_key, created_at)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   on conflict (idempotency_key) do nothing returning *""",
+                (
+                    row.id,
+                    row.affiliate_id,
+                    row.payment_id,
+                    row.kind,
+                    row.amount.amount_minor,
+                    row.amount.currency,
+                    row.refund_id,
+                    row.related_accrual_id,
+                    row.idempotency_key,
+                    row.created_at,
+                ),
+            )
+            stored = await cur.fetchone()
+            if stored is None:
+                await cur.execute(
+                    "select * from affiliate_commissions where idempotency_key = %s",
+                    (row.idempotency_key,),
+                )
+                stored = await cur.fetchone()
+            return _row_to_affiliate_commission(stored)
+
+    async def list(
+        self,
+        *,
+        affiliate_id: str | None = None,
+        payment_id: str | None = None,
+        kind: AffiliateCommissionKind | None = None,
+    ) -> list[AffiliateCommission]:
+        filters = {
+            "affiliate_id": affiliate_id,
+            "payment_id": payment_id,
+            "kind": kind,
+        }
+        entries = [(column, value) for column, value in filters.items() if value is not None]
+        params = [value for _, value in entries]
+        sql = "select * from affiliate_commissions"
+        if entries:
+            sql += " where " + " and ".join(f"{column} = %s" for column, _ in entries)
+        sql += " order by created_at, id"
+        async with connection(self._dsn) as conn, conn.cursor() as cur:
+            await cur.execute(sql, params)
+            return [_row_to_affiliate_commission(row) for row in await cur.fetchall()]
 
 
 def _usage_events_table(dsn: str) -> PgTable[UsageEvent]:
@@ -464,6 +582,10 @@ def _row_to_operation(r: dict[str, Any]) -> Operation:
 class OperationsTable:
     def __init__(self, dsn: str) -> None:
         self._dsn = dsn
+
+    async def delete(self, id: str) -> None:
+        async with atomic(self._dsn) as conn, conn.cursor() as cur:
+            await cur.execute("delete from operations where key = %s", (id,))
 
     async def claim(self, row: Operation) -> Operation | None:
         async with atomic(self._dsn) as conn, conn.cursor() as cur:
@@ -729,3 +851,4 @@ class PostgresRepo:
         self.webhook_events = _webhook_events_table(dsn)
         self.outbox = _outbox_table(dsn)
         self.operations = OperationsTable(dsn)
+        self.affiliate_commissions = AffiliateCommissionsTable(dsn)

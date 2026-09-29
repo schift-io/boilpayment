@@ -4,8 +4,7 @@ import type {
 } from 'boilpayment-core';
 import { prorationFraction, scaleMinor } from 'boilpayment-core';
 import {
-  applyRounding, daysBetween, prorationRatio, totalGrantValueMinor,
-  upgradeInvoiceAttributedGrantIds, weightedAvgUnitPrice,
+  applyRounding, daysBetween, prorationRatio, upgradeInvoiceAttributedGrantIds,
 } from './util.js';
 import { ruleForReason } from './reason.js';
 import type { RefundReasonInput } from './reason.js';
@@ -137,14 +136,9 @@ export async function evaluate(input: EvaluateInput): Promise<RefundDecision> {
       return ineligible(payment, subId, 'D2', 'refund.method=deny');
     }
     const consumed = await consumedFromGrants(ledger, customerId, grants, totalGranted, clock.now());
-    // SB-11 — upgrade delta grants deliberately have no stored price; the attributed invoice is
-    // their payment evidence and supplies the exact value used for proportional refunds.
-    const totalGrantValue = paymentGrants.hasAttributedUpgradeDelta
-      ? payment.amount.amountMinor
-      : totalGrantValueMinor(grants);
-    const unitPrice = paymentGrants.hasAttributedUpgradeDelta && totalGranted > 0
-      ? payment.amount.amountMinor / totalGranted
-      : weightedAvgUnitPrice(grants);
+    // DC-03/DC-04 — the persisted payment is the authoritative amount paid. This also preserves
+    // OT-17's quotient+remainder behavior: floor(paid * unused / granted), entirely in integer math.
+    const totalGrantValue = payment.amount.amountMinor;
 
     const computeUnused = (): { amount: number; credits: number } => {
       const unused = Math.max(0, totalGranted - consumed);
@@ -163,10 +157,10 @@ export async function evaluate(input: EvaluateInput): Promise<RefundDecision> {
       if (consumedRatio > elapsedRatio && policy.refund.overuseBehavior === 'deny') {
         return { amount: 0, credits: 0, denied: `overuse: consumed ${(consumedRatio * 100).toFixed(1)}% > elapsed ${(elapsedRatio * 100).toFixed(1)}%` };
       }
-      const credits = paymentGrants.hasAttributedUpgradeDelta && payment.amount.amountMinor > 0
+      const credits = payment.amount.amountMinor > 0
         ? scaleMinor(amount, totalGranted, payment.amount.amountMinor,
           policy.refund.rounding === 'ceil_credits' ? 'ceil' : policy.refund.rounding === 'round_credits' ? 'round' : 'floor')
-        : applyRounding(unitPrice > 0 ? amount / unitPrice : 0, policy.refund.rounding);
+        : 0;
       return { amount, credits, denied: null };
     };
 

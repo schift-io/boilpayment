@@ -84,7 +84,8 @@ export async function registerStorePurchase(input: RegisterStorePurchaseInput): 
 
   const snapshot: PurchaseSnapshot = {
     intentKey: `store:${input.provider}:${paymentRef}`, checkoutId: null, checkoutProviderRef: null, customerId, customerRef,
-    provider: input.provider, plan, price, policy: input.policy, capturedAt: clock.now().toISOString(), paymentId, paymentRef,
+    provider: input.provider, plan, price, policy: input.policy, capturedAt: clock.now().toISOString(),
+    allowDiscountCodes: false, presetDiscountCode: null, affiliateId: null, paymentId, paymentRef,
     purchasedAt: v.payment.occurredAt.toISOString(), subscriptionId,
     period: period ? { start: period.start.toISOString(), end: period.end.toISOString() } : null,
   };

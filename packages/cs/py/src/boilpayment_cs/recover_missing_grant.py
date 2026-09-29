@@ -27,7 +27,7 @@ from boilpayment_core import (
 
 from .apply_purchased_grant import apply_purchased_grant
 from .cases import EscalateInput, RejectInput, ResolveInput, escalate, reject, resolve
-from .purchase_snapshot import get_purchase_snapshot
+from .purchase_snapshot import get_purchase_snapshot, matches_captured_sale_amount
 from .support import (
     SupportDeps,
     SupportPaymentInput,
@@ -134,9 +134,10 @@ async def _resolve_reconciled_plan(
         and any(
             (
                 (price.provider_price_refs or {}).get(payment.provider) is not None
-                and _raw_contains(
-                    payment.raw,
-                    (price.provider_price_refs or {})[payment.provider],
+                and (
+                    payment.sale_evidence is not None
+                    and payment.sale_evidence.price_ref == (price.provider_price_refs or {})[payment.provider]
+                    or _raw_contains(payment.raw, (price.provider_price_refs or {})[payment.provider])
                 )
             )
             or (
@@ -153,7 +154,11 @@ async def _resolve_reconciled_plan(
         plan for plan in plans
         if any(
             (price.provider_price_refs or {}).get(payment.provider) is not None
-            and _raw_contains(payment.raw, (price.provider_price_refs or {})[payment.provider])
+            and (
+                payment.sale_evidence is not None
+                and payment.sale_evidence.price_ref == (price.provider_price_refs or {})[payment.provider]
+                or _raw_contains(payment.raw, (price.provider_price_refs or {})[payment.provider])
+            )
             for price in plan.prices
         )
     ]
@@ -225,8 +230,7 @@ async def recover_missing_grant(input: RecoverMissingGrantInput) -> CsCase:
         or snapshot.customer_id != input.customer_id
         or snapshot.payment_ref != payment.provider_ref
         or snapshot.provider != payment.provider
-        or snapshot.price.currency != payment.amount.currency
-        or snapshot.price.amount_minor != payment.amount.amount_minor
+        or not matches_captured_sale_amount(snapshot, payment)
         or snapshot.plan.credits_per_period <= 0
     ):
         return await hold("immutable purchase entitlement is missing or inconsistent")
@@ -356,6 +360,8 @@ async def recover_missing_grants(input: RecoverMissingGrantsInput) -> list[CsCas
                     occurred_at=remote.occurred_at, failure=remote.failure,
                     cash_receipt=existing.cash_receipt if existing else None,
                     raw=remote.raw, provider_ref_aliases=remote.provider_ref_aliases,
+                    sale_evidence=remote.sale_evidence or (existing.sale_evidence if existing else None),
+                    affiliate_id=remote.affiliate_id or current.affiliate_id or (existing.affiliate_id if existing else None),
                 )
                 trial_opening_raw = _preserved_trial_opening_invoice_raw(
                     payment, existing,

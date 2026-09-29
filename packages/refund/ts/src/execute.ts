@@ -5,6 +5,7 @@ import {
 } from 'boilpayment-core';
 import { requestRefund } from './execute-request.js';
 import { settleRefund } from './execute-settle.js';
+import { appendAffiliateReversals } from './affiliate-reversal.js';
 
 /** Injected instead of importing `boilpayment-cs` directly — keeps refund decoupled from cs (EC:D12). */
 export interface RefundFailedCaseOpener {
@@ -64,7 +65,11 @@ export async function execute(input: ExecuteInput): Promise<Refund> {
     fn: async () => {
       const providerResult = await requestRefund(input, key);
       const settled = await repo.refunds.get(providerResult.id);
-      if (settled && settled.status !== 'pending') return settled;
+      if (settled && settled.status !== 'pending') {
+        const payment = await repo.payments.get(decision.paymentId);
+        if (payment) await appendAffiliateReversals({ repo, ledger: input.ledger, clock, payment, refund: settled });
+        return settled;
+      }
       if (providerResult.status === 'pending') {
         await repo.refunds.put(providerResult);
         return providerResult;

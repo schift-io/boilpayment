@@ -58,7 +58,15 @@ describe('webhook.process — dispatch and status transitions', () => {
 
   it('[EC:E3] an event whose paymentRef does not resolve to a known local payment fails the record with unknown_provider_ref and notifies reconcile.mismatch', async () => {
     const { clock, repo } = setup();
-    const provider = new FakeProvider({ name: 'stripe', verify: jsonVerify('stripe') });
+    const provider = new FakeProvider({
+      name: 'stripe',
+      verify: jsonVerify('stripe'),
+      getPaymentImpl: () => ({
+        id: 'pi_UNKNOWN', customerId: '', provider: 'stripe', providerRef: 'pi_UNKNOWN', subscriptionId: null,
+        amount: { amountMinor: 1000, currency: 'USD' }, status: 'succeeded', kind: 'topup', period: null,
+        occurredAt: clock.now(), failure: null, cashReceipt: null, saleEvidence: null,
+      }),
+    });
     const notifier = new CollectingNotifier();
     const ledger = new InMemoryLedger(new SequentialIdGen('led_'));
 

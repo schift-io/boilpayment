@@ -38,6 +38,7 @@ from boilpayment_core import (
     ProviderCapabilities,
     ProviderError,
     Refund,
+    SaleEvidence,
     Subscription,
     WebhookSignatureError,
     money,
@@ -85,21 +86,46 @@ def _map_order_status(order: dict[str, Any]) -> str:
 # EC:E7 E12 — normalize Polar Order (raw REST, snake_case) -> Payment (pure)
 def normalize_order(order: dict[str, Any]) -> Payment:
     kind = "subscription" if order.get("subscription_id") else "topup"
+    metadata = order.get("metadata") or {}
+    currency = order.get("currency", "usd")
+    paid_amount = order.get("total_amount")
+    if paid_amount is None:
+        paid_amount = order.get("net_amount") or 0
+    provider_subtotal = order.get("subtotal_amount")
+    if provider_subtotal is None:
+        provider_subtotal = paid_amount
+    items = order.get("items") or []
+    first_item = items[0] if items else {}
     return Payment(
         id=order["id"],
         customer_id="",
         provider="polar",
         provider_ref=order["id"],
         subscription_id=order.get("subscription_id"),
-        amount=_money(
-            order.get("total_amount") or order.get("net_amount") or 0,
-            order.get("currency", "usd"),
-        ),
+        amount=_money(paid_amount, currency),
         status=_map_order_status(order),
         kind=kind,
         period=None,
         occurred_at=_parse_dt(order.get("created_at")),
         failure=None,
+        sale_evidence=SaleEvidence(
+            provider_subtotal=_money(provider_subtotal, currency),
+            discount_amount=_money(order.get("discount_amount") or 0, currency),
+            price_ref=order.get("product_id") or first_item.get("product_price_id"),
+            checkout_id=order.get("checkout_id"),
+            payment_link_id=order.get("checkout_link_id")
+            or metadata.get("checkout_link_id"),
+            link_reference=metadata.get("reference_id")
+            if isinstance(metadata.get("reference_id"), str)
+            else None,
+        ),
+        affiliate_id=(
+            metadata.get("affiliateId")
+            if isinstance(metadata.get("affiliateId"), str)
+            else metadata.get("affiliate_id")
+            if isinstance(metadata.get("affiliate_id"), str)
+            else None
+        ),
         raw=order,
     )
 
@@ -137,6 +163,13 @@ def normalize_subscription(sub: dict[str, Any]) -> Subscription:
         scheduled_plan_id=None,
         created_at=_parse_dt(sub.get("created_at")),
         currency=sub["currency"].upper() if isinstance(sub.get("currency"), str) else None,  # EC:A28
+        affiliate_id=(
+            md.get("affiliateId")
+            if isinstance(md.get("affiliateId"), str)
+            else md.get("affiliate_id")
+            if isinstance(md.get("affiliate_id"), str)
+            else None
+        ),
     )
 
 
@@ -456,15 +489,23 @@ class PolarProvider:
                 "missing_provider_price_ref",
                 {"plan_id": input.plan.id},
             )
+        metadata = {**(input.metadata or {}), "planId": input.plan.id}
+        if input.affiliate_id:
+            metadata["affiliateId"] = input.affiliate_id
+        body: dict[str, Any] = {
+            "products": [product_ref],
+            "customer_id": input.customer_ref,
+            "metadata": metadata,
+            "success_url": input.success_url,
+        }
+        if input.allow_discount_codes:
+            body["allow_discount_codes"] = True
+        if input.preset_discount_code:
+            body["discount_id"] = input.preset_discount_code
         checkout = await self._request(
             "POST",
             "/v1/checkouts/",
-            {
-                "products": [product_ref],
-                "customer_id": input.customer_ref,
-                "metadata": {**(input.metadata or {}), "planId": input.plan.id},
-                "success_url": input.success_url,
-            },
+            body,
             {"Idempotency-Key": input.idempotency_key},
         )
         return Checkout(

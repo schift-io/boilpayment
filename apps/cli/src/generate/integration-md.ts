@@ -255,6 +255,47 @@ export function generateIntegrationMd(config: PaykitConfig): string {
   if (py(config)) l.push('Python에서는 `kit["checkout"](customer_id=..., plan_id=..., provider=..., currency=..., request_id=..., success_url=..., cancel_url=...)`, 이후 `kit["register_completed_checkout"](customer_id=..., checkout_id=..., payment_ref=...)`를 호출합니다.');
   l.push('기존 플랜을 나중에 변경해도 이미 구매한 재화는 판매 당시 조건으로 지급합니다. 오래된 결제에 구매 근거가 없으면 자동 지급하지 않고 담당자 확인을 요청합니다.');
   l.push('');
+  l.push('### 할인 코드와 등록 보류 (DC-01..06, OT-09)');
+  l.push('');
+  l.push('`checkout`은 할인 코드 입력 허용과 미리 지정할 코드를 받습니다. 결제액이 정가보다 낮으면 provider가 돌려준 subtotal·discount·paid 근거가 모두 맞아야 등록됩니다. 지급 수량은 플랜 수량 그대로이고 환불 기준은 실제 결제액입니다.');
+  if (ts(config)) {
+    l.push('```ts');
+    l.push('await kit.checkout({ customerId, planId, provider: \'stripe\', currency: \'USD\', requestId, successUrl, cancelUrl,');
+    l.push('  allowDiscountCodes: true, presetDiscountCode: null, affiliateId: affiliateId ?? null });');
+    l.push('```');
+  }
+  if (py(config)) {
+    l.push('```python');
+    l.push('await kit["checkout"](customer_id=customer_id, plan_id=plan_id, provider="polar", currency="USD", request_id=request_id, success_url=success_url, cancel_url=cancel_url,');
+    l.push('                      allow_discount_codes=True, preset_discount_code=None, affiliate_id=affiliate_id)');
+    l.push('```');
+  }
+  l.push('결제 성공 웹훅이 `registerCompletedCheckout`보다 먼저 오면 결제만 기록하고 지급은 보류합니다. 나중에 등록하면 판매 시점 스냅샷으로 한 번만 지급됩니다.');
+  l.push('`checkout.registrationHoldHours`(기본 `24`)가 지나도 등록되지 않으면 `cron.reconcile(since)` / `cron["reconcile"](since)`가 `needs_human` 케이스를 엽니다.');
+  l.push('');
+  l.push('### Payment Link와 affiliate (PL-01..03, AF-01..04)');
+  l.push('');
+  l.push('Stripe/Polar Payment Link에는 기존 고객 ID를 안전하게 인코딩해 넣어야 합니다. 성공 웹훅은 provider price ref로 플랜을 찾고 현재 플랜 조건으로 한 번 지급합니다. 참조가 없거나 잘못됐거나 고객을 찾지 못하면 결제만 기록하고 `needs_human`으로 남깁니다.');
+  if (ts(config)) {
+    l.push('```ts');
+    l.push("const url = kit.buildPaymentLinkUrl({ provider: 'stripe', linkUrl: stripeLinkUrl, customerId, affiliateId });");
+    l.push('const rows = await kit.affiliate.list({ affiliateId });');
+    l.push("const usdMinor = await kit.affiliate.sum({ affiliateId, currency: 'USD' });");
+    l.push('const totalsByCurrency = await kit.affiliate.sum({ affiliateId });');
+    l.push('```');
+  }
+  if (py(config)) {
+    l.push('```python');
+    l.push('url = kit["build_payment_link_url"](provider="polar", link_url=polar_link_url, customer_id=customer_id, affiliate_id=affiliate_id)');
+    l.push('rows = await kit["affiliate"]["list"](affiliate_id=affiliate_id)');
+    l.push('usd_minor = await kit["affiliate"]["sum"](affiliate_id=affiliate_id, currency="USD")');
+    l.push('totals_by_currency = await kit["affiliate"]["sum"](affiliate_id=affiliate_id)');
+    l.push('```');
+  }
+  l.push('설정은 `affiliate.commission` (`{"type":"rate","rate":0.1}` 또는 `{"type":"fixed","amountMinor":500}`)과 `affiliate.renewals` (`first_only` 기본, 또는 `include`)입니다.');
+  l.push('TS `deps.affiliateCommission(payment)` / Python `deps.affiliate_commission(payment)`을 주입하면 설정 계산을 덮어씁니다. 반환값은 결제 통화의 minor-unit 정수입니다. 환불 시 reversal은 정수 내림 계산되며 원 accrual을 넘지 않습니다.');
+  l.push('통화 없이 `affiliate.sum`을 호출하면 통화를 섞지 않고 통화별 정수 합계를 반환합니다. payout 실행은 킷 범위 밖입니다.');
+  l.push('');
 
   // ── 3. 웹훅 ────────────────────────────────────────────────────────────────
   l.push('## 3. 웹훅 연결');

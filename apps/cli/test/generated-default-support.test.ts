@@ -59,13 +59,21 @@ const result = await kit.support.requestRefund({ customerId: 'unknown', paymentI
 assert.equal(result.status, 'rejected');
 assert.equal((await repo.csCases.get(result.id)).status, 'rejected');
 assert.deepEqual(await kit.cron.reconcile(new Date('2026-01-01')), []);
+const linked = new URL(kit.buildPaymentLinkUrl({ provider: 'stripe', linkUrl: 'https://buy.stripe.com/test?utm_source=docs', customerId: 'cus_1', affiliateId: 'aff_1' }));
+assert.equal(linked.searchParams.get('utm_source'), 'docs');
+assert.match(linked.searchParams.get('client_reference_id') ?? '', /^[A-Za-z0-9_-]{1,200}$/);
+await repo.affiliateCommissions.append({ id: 'a1', kind: 'accrual', affiliateId: 'aff_1', paymentId: 'p1', refundId: null, relatedAccrualId: null, amount: { amountMinor: 250, currency: 'USD' }, idempotencyKey: 'a1', createdAt: clock.now() });
+await repo.affiliateCommissions.append({ id: 'r1', kind: 'reversal', affiliateId: 'aff_1', paymentId: 'p1', refundId: 'r1', relatedAccrualId: 'a1', amount: { amountMinor: 40, currency: 'USD' }, idempotencyKey: 'r1', createdAt: clock.now() });
+assert.equal((await kit.affiliate.list({ affiliateId: 'aff_1' })).length, 2);
+assert.equal(await kit.affiliate.sum({ affiliateId: 'aff_1', currency: 'USD' }), 210);
+assert.deepEqual(await kit.affiliate.sum({ affiliateId: 'aff_1' }), { USD: 210 });
 console.log('PASS');
 `);
   await fs.writeFile(path.join(dir, 'run.py'), `
 import asyncio, json
 from datetime import datetime, timezone
 from paykit.index import create_payment_kit
-from boilpayment.core import Deps, InMemoryRepo, InMemoryLedger, FixedClock, SequentialIdGen, NoopLogger
+from boilpayment.core import AffiliateCommission, Deps, InMemoryRepo, InMemoryLedger, FixedClock, SequentialIdGen, NoopLogger, money
 async def main():
     repo = InMemoryRepo()
     clock = FixedClock(datetime(2026, 3, 1, tzinfo=timezone.utc))
@@ -87,13 +95,24 @@ async def main():
     assert result.status == 'rejected'
     assert (await repo.cs_cases.get(result.id)).status == 'rejected'
     assert await kit['cron']['reconcile'](datetime(2026, 1, 1, tzinfo=timezone.utc)) == []
+    linked = kit['build_payment_link_url'](provider='stripe', link_url='https://buy.stripe.com/test?utm_source=docs', customer_id='cus_1', affiliate_id='aff_1')
+    assert 'utm_source=docs' in linked and 'client_reference_id=' in linked
+    await repo.affiliate_commissions.append(AffiliateCommission(id='a1', kind='accrual', affiliate_id='aff_1', payment_id='p1', refund_id=None, related_accrual_id=None, amount=money(250, 'USD'), idempotency_key='a1', created_at=clock.now()))
+    await repo.affiliate_commissions.append(AffiliateCommission(id='r1', kind='reversal', affiliate_id='aff_1', payment_id='p1', refund_id='r1', related_accrual_id='a1', amount=money(40, 'USD'), idempotency_key='r1', created_at=clock.now()))
+    assert len(await kit['affiliate']['list'](affiliate_id='aff_1')) == 2
+    assert await kit['affiliate']['sum'](affiliate_id='aff_1', currency='USD') == 210
+    assert await kit['affiliate']['sum'](affiliate_id='aff_1') == {'USD': 210}
     print('PASS')
 asyncio.run(main())
 `);
   // When the generated runtimes initialize and reject an unverified refund request.
   const compiled = spawnSync(path.join(root, 'node_modules/.bin/tsc'), ['-p', path.join(dir, 'tsconfig.json')], { cwd: dir, encoding: 'utf8' });
   expect(compiled.status, compiled.stdout + compiled.stderr).toBe(0);
-  const ts = spawnSync(path.join(root, 'apps/cli/node_modules/.bin/tsx'), ['run.ts'], { cwd: dir, encoding: 'utf8' });
+  const ts = spawnSync(process.execPath, ['--import', path.join(root, 'apps/cli/node_modules/tsx/dist/loader.mjs'), 'run.ts'], {
+    cwd: dir,
+    encoding: 'utf8',
+    env: { ...process.env, NODE_PATH: path.join(root, 'node_modules') },
+  });
   const py = spawnSync(path.join(root, '.venv/bin/python'), ['run.py'], { cwd: dir, encoding: 'utf8' });
   // Then both preserve a reviewable case even with reporting disabled.
   expect(ts.status, ts.stdout + ts.stderr).toBe(0);

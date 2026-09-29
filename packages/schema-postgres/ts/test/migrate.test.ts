@@ -19,7 +19,7 @@ afterAll(async () => {
 });
 
 describe('migrate() idempotency', () => {
-  it('first call applies all 14 migration files in order and records them in paykit_migrations', async () => {
+  it('first call applies all 15 migration files in order and records them in paykit_migrations', async () => {
     const { applied } = await migrate({ pool, modules: ['core', 'credits', 'usage', 'webhook', 'refund', 'cs'] });
     expect(applied).toEqual([
       '0001_core.sql',
@@ -36,6 +36,7 @@ describe('migrate() idempotency', () => {
       '0013_ledger_consume_key.sql',
       '0014_subscription_billing_customer_ref.sql',
       '0015_grace_credit_expiry.sql',
+      '0016_affiliate_commissions.sql',
     ]);
 
     const rows = await pool.query('select name from paykit_migrations order by name');
@@ -54,6 +55,7 @@ describe('migrate() idempotency', () => {
       '0013_ledger_consume_key.sql',
       '0014_subscription_billing_customer_ref.sql',
       '0015_grace_credit_expiry.sql',
+      '0016_affiliate_commissions.sql',
     ]);
 
     // sanity: tables from every module actually exist
@@ -64,6 +66,7 @@ describe('migrate() idempotency', () => {
       'webhook_events', 'outbox',
       'refunds', 'refund_attempts',
       'cs_cases', 'cs_events', 'churn_reasons', 'notifications',
+      'affiliate_commissions',
     ]) {
       const res = await pool.query('select to_regclass($1) as reg', [table]);
       expect(res.rows[0].reg, `expected table ${table} to exist`).toBe(table);
@@ -76,13 +79,13 @@ describe('migrate() idempotency', () => {
     expect(applied).toEqual([]);
     const after = await pool.query('select count(*)::int as n from paykit_migrations');
     expect(after.rows[0].n).toBe(before.rows[0].n);
-    expect(after.rows[0].n).toBe(14);
+    expect(after.rows[0].n).toBe(15);
   });
 
   it('third call (repeat) is still a no-op — consistent final state across repeated calls', async () => {
     const { applied } = await migrate({ pool, modules: ['core', 'credits', 'usage', 'webhook', 'refund', 'cs'] });
     expect(applied).toEqual([]);
     const rows = await pool.query('select count(*)::int as n from paykit_migrations');
-    expect(rows.rows[0].n).toBe(14);
+    expect(rows.rows[0].n).toBe(15);
   });
 });

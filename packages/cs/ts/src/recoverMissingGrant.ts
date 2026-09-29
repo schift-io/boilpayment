@@ -1,7 +1,7 @@
 import { runIdempotent, serializeCsCase, deserializeCsCase, keyMatchesInstant, nextPeriod } from 'boilpayment-core';
 import type { CsCase, LedgerEntry, Payment, Period, Plan, Subscription } from 'boilpayment-core';
 import { escalate, reject, resolve } from './cases.js';
-import { getPurchaseSnapshot } from './purchaseSnapshot.js';
+import { getPurchaseSnapshot, matchesCapturedSaleAmount } from './purchaseSnapshot.js';
 import { applyPurchasedGrant } from './applyPurchasedGrant.js';
 import { verifySupportPayment } from './support.js';
 import type { SupportDeps, SupportPaymentInput } from './support.js';
@@ -66,14 +66,14 @@ async function resolveReconciledPlan(input: {
   const currency = payment.amount.currency.toUpperCase();
   const expectedMatches = expected?.interval !== null && expected?.prices.some((price) => {
     const ref = price.providerPriceRefs?.[payment.provider];
-    return (ref !== undefined && rawContains(payment.raw, ref))
+    return (ref !== undefined && (payment.saleEvidence?.priceRef === ref || rawContains(payment.raw, ref)))
       || (price.currency.toUpperCase() === currency && price.amountMinor === payment.amount.amountMinor);
   });
   if (expected && expectedMatches) return { plan: expected, mismatchCase: null };
   const plans = (await deps.repo.plans.list()).filter((plan) => plan.interval !== null);
   const byProviderRef = plans.filter((plan) => plan.prices.some((price) => {
     const ref = price.providerPriceRefs?.[payment.provider];
-    return ref !== undefined && rawContains(payment.raw, ref);
+    return ref !== undefined && (payment.saleEvidence?.priceRef === ref || rawContains(payment.raw, ref));
   }));
   const byAmount = plans.filter((plan) => plan.prices.some((price) =>
     price.currency.toUpperCase() === currency && price.amountMinor === payment.amount.amountMinor));
@@ -104,8 +104,8 @@ export async function recoverMissingGrant(input: RecoverMissingGrantInput): Prom
   if (policy.cs.regrant.mode === 'off') return reject({ case: csCase, reason: 'cs.regrant.mode=off', repo, clock, onCaseEvent, reporter: input.reporter });
   const snapshot = await getPurchaseSnapshot({ paymentId: payment.id, repo });
   if (!snapshot || snapshot.customerId !== input.customerId || snapshot.paymentRef !== payment.providerRef
-    || snapshot.provider !== payment.provider || snapshot.price.currency !== payment.amount.currency
-    || snapshot.price.amountMinor !== payment.amount.amountMinor || snapshot.plan.creditsPerPeriod <= 0) return hold('immutable purchase entitlement is missing or inconsistent');
+    || snapshot.provider !== payment.provider || !matchesCapturedSaleAmount(snapshot, payment)
+    || snapshot.plan.creditsPerPeriod <= 0) return hold('immutable purchase entitlement is missing or inconsistent');
   const credits = snapshot.plan.creditsPerPeriod;
   const grantKey = snapshot.plan.interval === null ? `topup:${payment.id}`
     : snapshot.subscriptionId && snapshot.period ? `grant:${snapshot.subscriptionId}:${snapshot.period.start}` : null;
@@ -159,7 +159,8 @@ export async function recoverMissingGrants(input: RecoverMissingGrantsInput): Pr
           providerRef: remote.providerRef, subscriptionId: current.id, amount: remote.amount, status: remote.status,
           kind: 'subscription', period: remote.period ?? existing?.period ?? null, occurredAt: remote.occurredAt, failure: remote.failure,
           cashReceipt: existing?.cashReceipt ?? null, raw: trialOpeningInvoice ? markTrialOpeningInvoice(raw) : raw,
-          providerRefAliases: remote.providerRefAliases,
+          providerRefAliases: remote.providerRefAliases, saleEvidence: remote.saleEvidence ?? existing?.saleEvidence ?? null,
+          affiliateId: remote.affiliateId ?? current.affiliateId ?? existing?.affiliateId ?? null,
         };
         await input.repo.payments.put(payment);
         if (trialOpeningInvoice) continue;

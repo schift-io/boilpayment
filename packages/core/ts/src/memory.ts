@@ -36,6 +36,7 @@ import {
 } from './types.js';
 import { SystemClock, UuidIdGen } from './clock.js';
 import { effectiveGrantExpiry } from './expiry.js';
+import { InMemoryAffiliateCommissionTable } from './affiliate.js';
 
 // ── Per-customer mutex (serializes consume()/transaction() calls for one customer) ──────────
 
@@ -100,6 +101,10 @@ export class VersionedMemTable<T extends { id: string; version: number }> extend
 }
 
 export class OperationMemTable extends MemTable<Operation> {
+  async delete(id: string): Promise<void> {
+    this.rows.delete(id);
+  }
+
   async claim(row: Operation): Promise<Operation | null> {
     const existing = this.rows.get(row.key);
     if (existing && (existing.status !== 'failed' || existing.payloadHash !== row.payloadHash)) return null;
@@ -127,6 +132,7 @@ export class InMemoryRepo implements Repo {
   webhookEvents = new MemTable<WebhookEventRecord>();
   outbox = new MemTable<OutboxItem>();
   operations = new OperationMemTable(); // EC:J1-J5
+  affiliateCommissions = new InMemoryAffiliateCommissionTable();
 }
 
 export class NoopNotifier implements Notifier {

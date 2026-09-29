@@ -1,5 +1,13 @@
 """boilpayment — core."""
 
+from .affiliate import (  # noqa: F401
+    AffiliateCommissionRule,
+    FixedCommissionRule,
+    InMemoryAffiliateCommissionTable,
+    RateCommissionRule,
+    calculate_affiliate_accrual,
+    calculate_affiliate_reversal,
+)
 from .attempt_review import expected_attempt_amount as expected_attempt_amount
 from .attempt_review import hold_attempt_for_review as hold_attempt_for_review
 from .attempt_review import is_closed_by_person as is_closed_by_person

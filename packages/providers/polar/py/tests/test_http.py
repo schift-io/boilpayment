@@ -160,6 +160,84 @@ class TestCreateCheckout:
             "success_url": "https://app.example.com/success",
         }
 
+    def test_dc_01_af_01_forwards_discount_controls_and_affiliate_metadata(
+        self, recorder
+    ):
+        recorder.queue(
+            json_response(
+                {
+                    "id": "checkout_discounted",
+                    "url": "https://polar.sh/checkout/checkout_discounted",
+                }
+            )
+        )
+        price = PlanPrice(
+            currency="usd",
+            amount_minor=1000,
+            provider_price_refs={"polar": "prod_polar_1"},
+        )
+        plan = Plan(
+            id="plan_pro",
+            name="Pro",
+            interval="month",
+            credits_per_period=1000,
+            usage_included=0,
+            trial_days=0,
+            prices=[price],
+        )
+        from boilpayment_core import CreateCheckoutInput
+
+        checkout_input = CreateCheckoutInput(
+            customer_ref="cust_abc",
+            plan=plan,
+            price=price,
+            mode="subscription",
+            success_url="https://app.example.com/success",
+            cancel_url="https://app.example.com/cancel",
+            idempotency_key="checkout:discounted",
+            allow_discount_codes=True,
+            preset_discount_code="discount_20pct",
+            affiliate_id="affiliate_alpha",
+        )
+
+        asyncio.run(provider().create_checkout(checkout_input))
+
+        assert recorder.body() == {
+            "products": ["prod_polar_1"],
+            "customer_id": "cust_abc",
+            "metadata": {"planId": "plan_pro", "affiliateId": "affiliate_alpha"},
+            "success_url": "https://app.example.com/success",
+            "allow_discount_codes": True,
+            "discount_id": "discount_20pct",
+        }
+
+    def test_dc_06_exhausted_discount_refusal_returns_no_checkout(self, recorder):
+        recorder.queue(
+            json_response({"detail": "discount max redemptions reached"}, status=422)
+        )
+        price = PlanPrice(
+            currency="usd",
+            amount_minor=1000,
+            provider_price_refs={"polar": "prod_polar_1"},
+        )
+        plan = Plan(
+            id="plan_pro", name="Pro", interval=None, credits_per_period=1000,
+            usage_included=0, trial_days=0, prices=[price],
+        )
+        from boilpayment_core import CreateCheckoutInput
+
+        with pytest.raises(ProviderError) as excinfo:
+            asyncio.run(provider().create_checkout(CreateCheckoutInput(
+                customer_ref="cust_abc", plan=plan, price=price, mode="one_time",
+                success_url="https://app.example.com/success",
+                cancel_url="https://app.example.com/cancel",
+                idempotency_key="checkout:exhausted",
+                preset_discount_code="discount_exhausted",
+            )))
+
+        assert excinfo.value.http_status == 422
+        assert len(recorder.requests) == 1
+
     def test_ec_f_polar_missing_provider_price_ref_raises_without_network_call(
         self, recorder
     ):

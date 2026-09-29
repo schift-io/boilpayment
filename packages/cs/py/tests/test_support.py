@@ -430,7 +430,7 @@ def test_ot_03_missing_provider_price_propagates_without_poisoning_retry(provide
     ("status", "expected_code"),
     [(400, "provider"), (500, "checkout_outcome_unknown"), (None, "checkout_outcome_unknown")],
 )
-def test_ot_03_only_uncertain_provider_http_outcomes_become_unknown(status, expected_code):
+def test_ot_03_dc_06_only_uncertain_provider_http_outcomes_become_unknown(status, expected_code):
     async def go():
         deps, provider, _payment = await setup()
 
@@ -455,6 +455,13 @@ def test_ot_03_only_uncertain_provider_http_outcomes_become_unknown(status, expe
         with pytest.raises(PaymentKitError) as excinfo:
             await start_checkout(request)
         assert excinfo.value.code == expected_code
+        if status == 400:
+            assert await deps["repo"].operations.get(
+                "checkout-entitlement:customer:provider-400"
+            ) is None
+            assert await deps["repo"].operations.get(
+                "checkout-result:customer:provider-400"
+            ) is None
 
     anyio.run(go)
 

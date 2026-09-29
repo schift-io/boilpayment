@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { toPaykitConfig } from '../src/wizard-state.js';
-import { emptyConfig } from '../src/config.js';
+import { emptyConfig, readConfig, writeConfig } from '../src/config.js';
 import type { WizardConfig } from '../src/wizard-state.js';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
 describe('toPaykitConfig', () => {
   it('strips csApiKey (secret — never written to paykit.config.json)', () => {
@@ -25,5 +28,39 @@ describe('toPaykitConfig', () => {
     expect(out.models).toEqual(['subscription']);
     expect(out.version).toBe(1);
     expect(out.policy).toBeDefined();
+  });
+});
+
+describe('0.3.0 config defaults', () => {
+  it('adds checkout hold and affiliate defaults to new configs', () => {
+    // Given / When
+    const config = emptyConfig();
+
+    // Then
+    expect(config.checkout.registrationHoldHours).toBe(24);
+    expect(config.affiliate).toEqual({
+      commission: { type: 'rate', rate: 0 },
+      renewals: 'first_only',
+    });
+  });
+
+  it('fills the defaults when reading a pre-0.3.0 config', async () => {
+    // Given
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'boilpayment-config-'));
+    const legacy = emptyConfig();
+    const serialized = { ...legacy, checkout: undefined, affiliate: undefined };
+    await writeConfig(dir, serialized as typeof legacy);
+
+    try {
+      // When
+      const config = await readConfig(dir);
+
+      // Then
+      expect(config?.checkout.registrationHoldHours).toBe(24);
+      expect(config?.affiliate.commission).toEqual({ type: 'rate', rate: 0 });
+      expect(config?.affiliate.renewals).toBe('first_only');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

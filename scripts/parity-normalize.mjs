@@ -34,13 +34,21 @@ result += outside(source.slice(cursor));
 result = result.replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\s+/g, (part) =>
   part.startsWith('"') || part.startsWith("'") ? part : '');
 // Sort object fields without parsing numbers or changing any value. Arrays retain order.
+const OPTIONAL_NULL_FIELDS = new Set(['affiliate_id', 'sale_evidence']);
 const frames = [{ open: '', parts: [], current: '' }];
 for (const token of result.match(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[{}\[\],]|[^"'{}\[\],]+/g) ?? []) {
   const frame = frames.at(-1);
   if (token === '{' || token === '[') {
     frames.push({ open: token, parts: [], current: '' });
   } else if ((token === '}' && frame.open === '{') || (token === ']' && frame.open === '[')) {
-    const parts = [...frame.parts, frame.current];
+    let parts = [...frame.parts, frame.current];
+    if (frame.open === '{') {
+      parts = parts.filter((part) => {
+        const separator = part.indexOf(':');
+        return separator < 0 || part.slice(separator + 1) !== 'null'
+          || !OPTIONAL_NULL_FIELDS.has(part.slice(0, separator));
+      });
+    }
     if (frame.open === '{' && parts.every((part) => /^[a-z_][a-z0-9_]*:/.test(part))) {
       parts.sort((a, b) => a.slice(0, a.indexOf(':')).localeCompare(b.slice(0, b.indexOf(':'))));
     }

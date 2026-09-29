@@ -7,6 +7,9 @@ import { createHash } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { PaymentKitError } from 'boilpayment-core';
 import type {
+  AffiliateCommission,
+  AffiliateCommissionFilter,
+  AffiliateCommissionTable,
   Customer,
   CsCase,
   CsCaseKind,
@@ -66,6 +69,7 @@ function subscriptionToRow(s: Subscription): Record<string, unknown> {
     currency: s.currency ?? null, // EC:A28
     // EC:A60 — written only when set, so a database without 0014 keeps working for rows that lack it.
     ...(s.billingCustomerRef ? { billing_customer_ref: s.billingCustomerRef } : {}),
+    affiliate_id: s.affiliateId ?? null,
     version: s.version ?? 0,
     created_at: s.createdAt,
   };
@@ -87,6 +91,9 @@ function rowToSubscription(r: Record<string, unknown>): Subscription {
     scheduledPlanId: (r.scheduled_plan_id as string) ?? null,
     ...(r.currency ? { currency: r.currency as string } : {}), // EC:A28 — absent on rows without one
     ...(r.billing_customer_ref ? { billingCustomerRef: r.billing_customer_ref as string } : {}), // EC:A60
+    ...(r.affiliate_id !== null && r.affiliate_id !== undefined
+      ? { affiliateId: r.affiliate_id as string }
+      : {}),
     version: Number(r.version ?? 0), // EC:K1
     createdAt: new Date(r.created_at as string),
   };
@@ -204,6 +211,8 @@ const paymentsTable = (pool: Pool) =>
       occurred_at: p.occurredAt,
       failure: jsonb(p.failure),
       cash_receipt: jsonb(p.cashReceipt ?? null), // EC:K2-K7
+      sale_evidence: jsonb(p.saleEvidence ?? null),
+      affiliate_id: p.affiliateId ?? null,
       raw: jsonb(p.raw ?? null),
     }),
     fromRow: (r) => ({
@@ -221,9 +230,87 @@ const paymentsTable = (pool: Pool) =>
       cashReceipt: r.cash_receipt // EC:K2-K7 — jsonb stores issuedAt as an ISO string
         ? (() => { const c = r.cash_receipt as { receiptKey: string; issuedAt: string; type: 'personal' | 'business' }; return { receiptKey: c.receiptKey, issuedAt: new Date(c.issuedAt), type: c.type }; })()
         : null,
+      ...(r.sale_evidence ? { saleEvidence: r.sale_evidence as Payment['saleEvidence'] } : {}),
+      ...(r.affiliate_id !== null && r.affiliate_id !== undefined
+        ? { affiliateId: r.affiliate_id as string }
+        : {}),
       raw: r.raw ?? undefined,
     }),
   });
+
+function rowToAffiliateCommission(r: Record<string, unknown>): AffiliateCommission {
+  return {
+    id: r.id as string,
+    kind: r.kind as AffiliateCommission['kind'],
+    affiliateId: r.affiliate_id as string,
+    paymentId: r.payment_id as string,
+    refundId: (r.refund_id as string) ?? null,
+    relatedAccrualId: (r.related_commission_id as string) ?? null,
+    amount: { amountMinor: Number(r.amount_minor), currency: r.currency as string },
+    idempotencyKey: r.idempotency_key as string,
+    createdAt: new Date(r.created_at as string),
+  };
+}
+
+class AffiliateCommissionsTable implements AffiliateCommissionTable {
+  constructor(private readonly pool: Pool) {}
+
+  private client(): Pool | PoolClient {
+    return runner(this.pool);
+  }
+
+  async append(row: AffiliateCommission): Promise<AffiliateCommission> {
+    const client = this.client();
+    const inserted = await client.query(
+      `insert into affiliate_commissions
+         (id, affiliate_id, payment_id, kind, amount_minor, currency, refund_id,
+          related_commission_id, idempotency_key, created_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       on conflict (idempotency_key) do nothing returning *`,
+      [
+        row.id,
+        row.affiliateId,
+        row.paymentId,
+        row.kind,
+        row.amount.amountMinor,
+        row.amount.currency,
+        row.refundId,
+        row.relatedAccrualId,
+        row.idempotencyKey,
+        row.createdAt,
+      ],
+    );
+    if (inserted.rows[0]) return rowToAffiliateCommission(inserted.rows[0]);
+
+    const existing = await client.query(
+      'select * from affiliate_commissions where idempotency_key = $1',
+      [row.idempotencyKey],
+    );
+    return rowToAffiliateCommission(existing.rows[0]);
+  }
+
+  async list(filter?: AffiliateCommissionFilter): Promise<AffiliateCommission[]> {
+    let sql = 'select * from affiliate_commissions';
+    const params: unknown[] = [];
+    const clauses: string[] = [];
+    if (filter?.affiliateId !== undefined) {
+      params.push(filter.affiliateId);
+      clauses.push(`affiliate_id = $${params.length}`);
+    }
+    if (filter?.paymentId !== undefined) {
+      params.push(filter.paymentId);
+      clauses.push(`payment_id = $${params.length}`);
+    }
+    if (filter?.kind !== undefined) {
+      params.push(filter.kind);
+      clauses.push(`kind = $${params.length}`);
+    }
+    if (clauses.length) sql += ` where ${clauses.join(' and ')}`;
+    sql += ' order by created_at, id';
+    const result = await this.client().query(sql, params);
+    return result.rows.map(rowToAffiliateCommission);
+  }
+}
 
 const usageEventsTable = (pool: Pool) =>
   new PgTable<UsageEvent>(pool, 'usage_events', {
@@ -362,6 +449,9 @@ function rowToOperation(r: Record<string, unknown>): Operation {
 }
 
 const operationsTable = (pool: Pool): OperationTable => ({
+  async delete(id: string): Promise<void> {
+    await runner(pool).query('delete from operations where key = $1', [id]);
+  },
   async claim(row: Operation): Promise<Operation | null> {
     const res = await runner(pool).query(
       `insert into operations (key, kind, payload_hash, status, result, error, created_at, completed_at, attempts)
@@ -605,6 +695,7 @@ export function createPostgresRepo(pool: Pool): Repo {
     webhookEvents: webhookEventsTable(pool),
     outbox: outboxTable(pool),
     operations: operationsTable(pool),
+    affiliateCommissions: new AffiliateCommissionsTable(pool),
   };
 }
 
@@ -619,6 +710,7 @@ export class PostgresRepo implements Repo {
   readonly webhookEvents: Table<WebhookEventRecord>;
   readonly outbox: Table<OutboxItem>;
   readonly operations: OperationTable;
+  readonly affiliateCommissions: AffiliateCommissionTable;
 
   constructor(pool: Pool) {
     const repo = createPostgresRepo(pool);
@@ -632,5 +724,6 @@ export class PostgresRepo implements Repo {
     this.webhookEvents = repo.webhookEvents;
     this.outbox = repo.outbox;
     this.operations = repo.operations;
+    this.affiliateCommissions = repo.affiliateCommissions;
   }
 }

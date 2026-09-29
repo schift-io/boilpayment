@@ -49,5 +49,7 @@ export { applyPurchasedGrant } from './applyPurchasedGrant.js';
 export type { ApplyPurchasedGrantInput } from './applyPurchasedGrant.js';
 export { finishRefundCases } from './finishRefundCases.js';
 export type { FinishRefundCasesInput } from './finishRefundCases.js';
+export { buildPaymentLinkUrl, decodePaymentLinkReference } from './paymentLink.js';
+export type { BuildPaymentLinkUrlInput, PaymentLinkReference } from './paymentLink.js';
 export { settlementReport } from './settlementReport.js';
 export type { SettlementReport, SettlementReportInput, PaymentLine, RefundLine, CreditLine } from './settlementReport.js';

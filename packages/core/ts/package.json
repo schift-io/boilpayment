@@ -1,6 +1,6 @@
 {
   "name": "boilpayment-core",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "description": "boilpayment — core types, policy, interfaces, in-memory stores",
   "license": "MIT",

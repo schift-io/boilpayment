@@ -15,7 +15,7 @@ from boilpayment_core import (
 )
 
 from .cases import EscalateInput, OpenCaseInput, escalate, open_case
-from .purchase_snapshot import get_purchase_snapshot
+from .purchase_snapshot import get_purchase_snapshot, matches_captured_sale_amount
 
 if TYPE_CHECKING:
     from .recover_missing_grant import RecoverMissingGrantInput, SupportGrantOutcome
@@ -41,8 +41,7 @@ async def apply_purchased_grant(input: RecoverMissingGrantInput) -> SupportGrant
         or payment.customer_id != input.customer_id
         or snapshot.payment_ref != payment.provider_ref
         or snapshot.provider != payment.provider
-        or snapshot.price.amount_minor != payment.amount.amount_minor
-        or snapshot.price.currency != payment.amount.currency
+        or not matches_captured_sale_amount(snapshot, payment)
         or payment.status != "succeeded"
     ):
         raise PaymentKitError(

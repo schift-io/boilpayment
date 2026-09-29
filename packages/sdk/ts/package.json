@@ -1,6 +1,6 @@
 {
   "name": "boilpayment-sdk",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "boilpayment — self-contained TypeScript SDK exposing every module via subpaths",
   "license": "MIT",
   "keywords": [

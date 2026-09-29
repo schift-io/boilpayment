@@ -2,6 +2,7 @@ import { roundHalfAwayFromZero } from 'boilpayment-core';
 // spec/refund.pseudo.md — EC:D8 D18
 import { Clock, effectiveGrantExpiry, IdGen, LedgerStore, NormalizedEvent, PaymentKitError, Refund, Repo } from 'boilpayment-core';
 import { revertRefundedUpgrade, upgradeInvoiceAttributedGrantIds, weightedAvgUnitPrice } from './util.js';
+import { appendAffiliateReversals } from './affiliate-reversal.js';
 
 /** Injected instead of importing `boilpayment-cs` directly (EC:D8). */
 export interface ReconcileMismatchCaseOpener {
@@ -59,7 +60,10 @@ export async function onExternalRefund(input: OnExternalRefundInput): Promise<Re
 
   const refunds = payment ? await repo.refunds.list({ paymentId: payment.id }) : [];
   const existing = refunds.find((refund) => Boolean(refundRef) && refund.providerRef === refundRef);
-  if (existing && existing.status !== 'pending') return existing;
+  if (existing && existing.status !== 'pending') {
+    if (payment) await appendAffiliateReversals({ repo, ledger, clock, payment, refund: existing });
+    return existing;
+  }
   const pending = refundRef && existing?.status === 'pending' ? existing : null;
   const unresolved = refunds.filter((refund) => refund.status === 'pending');
   if (!pending && unresolved.length > 0) {
@@ -90,7 +94,7 @@ export async function onExternalRefund(input: OnExternalRefundInput): Promise<Re
   // lock, the same one consume() takes, so a concurrent consume cannot spend the credits between the
   // balance read and the revoke (which drove the balance below zero under negativeBalance=block).
   const customerId = payment.customerId;
-  return ledger.transaction(customerId, async () => {
+  const refund = await ledger.transaction(customerId, async () => {
     // EC:D19 — the same provider refund can arrive twice at once (Stripe sends refund.created,
     // refund.updated and charge.refund.updated for one refund). The lookup above ran outside the lock;
     // the one that matters runs here, under it: a refund already settled with this reference wins.
@@ -187,6 +191,8 @@ export async function onExternalRefund(input: OnExternalRefundInput): Promise<Re
     }
     return refund;
   });
+  await appendAffiliateReversals({ repo, ledger, clock, payment, refund });
+  return refund;
 }
 
 /**

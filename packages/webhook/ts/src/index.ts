@@ -4,6 +4,7 @@ export { process, processPending } from './process.js';
 export type { HandlerCtx, Handler, HandlerMap, ProcessInput, ProcessPendingInput, ProcessPendingResult } from './process.js';
 export { defaultHandlers } from './handlers.js';
 export type { DefaultHandlersInput, LifecycleDeps, CreditsDeps, RefundDeps, CsDeps } from './handlers.js';
+export type { LinkMismatchReason } from './commerce.js';
 export { createNodeHandler, toFetchHandler } from './http.js';
 export type { NodeHandler, NodeRequest, NodeResponse } from './http.js';
 export { getGrantsForCheckout } from './grants.js';

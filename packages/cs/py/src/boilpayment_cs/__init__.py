@@ -52,6 +52,11 @@ from .metrics import (
     MetricsSnapshot,
     NoopLicenseReporter,
 )
+from .payment_link import (
+    PaymentLinkReference,
+    build_payment_link_url,
+    decode_payment_link_reference,
+)
 from .reconcile import BalanceMismatch, ReconcileInput, check_balances, reconcile
 from .recover_missing_grant import (
     ApplyPurchasedGrantInput,
@@ -126,6 +131,7 @@ __all__ = [
     "OnCaseEvent",
     "OpenCaseInput",
     "PaymentLine",
+    "PaymentLinkReference",
     "ReconcileInput",
     "RecoverMissingGrantInput",
     "RecoverMissingGrantsInput",
@@ -156,8 +162,10 @@ __all__ = [
     "TimelineRefs",
     "TimelineResult",
     "apply_purchased_grant",
+    "build_payment_link_url",
     "check_balances",
     "churn",
+    "decode_payment_link_reference",
     "dispute",
     "escalate",
     "evidence_checklist",

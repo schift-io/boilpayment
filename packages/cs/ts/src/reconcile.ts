@@ -1,6 +1,8 @@
 // spec/cs.pseudo.md — EC:E1 H4
-import { Clock, CsCase, IdGen, LedgerStore, PaymentProvider, Policy, ProviderName, Repo, keyMatchesInstant } from 'boilpayment-core';
-import { openCase, OnCaseEvent } from './cases.js';
+import { PaymentKitError, deserializeCsCase, keyMatchesInstant, runIdempotent, serializeCsCase } from 'boilpayment-core';
+import type { Clock, CsCase, IdGen, LedgerStore, PaymentProvider, Policy, ProviderName, Repo } from 'boilpayment-core';
+import { escalate, openCase } from './cases.js';
+import type { OnCaseEvent } from './cases.js';
 
 export interface ReconcileInput {
   customerId?: string | null;
@@ -12,6 +14,41 @@ export interface ReconcileInput {
   ids: IdGen;
   since: Date;
   onCaseEvent?: OnCaseEvent;
+  /** Hours a payment may remain held before human review. Defaults to 24. */
+  registrationHoldHours?: number;
+}
+
+function heldPayment(value: unknown): { readonly paymentId: string; readonly customerId: string; readonly receivedAt: string } | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)
+    || !('paymentId' in value) || typeof value.paymentId !== 'string'
+    || !('customerId' in value) || typeof value.customerId !== 'string'
+    || !('receivedAt' in value) || typeof value.receivedAt !== 'string') return null;
+  return { paymentId: value.paymentId, customerId: value.customerId, receivedAt: value.receivedAt };
+}
+
+async function reconcileRegistrationHolds(input: ReconcileInput): Promise<CsCase[]> {
+  const hours = input.registrationHoldHours ?? 24;
+  if (!Number.isFinite(hours) || hours < 0) throw new PaymentKitError('registration hold window must be non-negative', 'registration_hold_window_invalid');
+  const cases: CsCase[] = [];
+  for (const operation of await input.repo.operations.list({ kind: 'checkout.paymentHeld' })) {
+    if (operation.status !== 'done') continue;
+    const held = heldPayment(operation.result);
+    if (!held || (input.customerId && held.customerId !== input.customerId)
+      || await input.repo.operations.get(`purchase-entitlement:${held.paymentId}`)) continue;
+    const receivedAt = new Date(held.receivedAt);
+    if (!Number.isFinite(receivedAt.getTime()) || input.clock.now().getTime() - receivedAt.getTime() < hours * 3_600_000) continue;
+    const { result } = await runIdempotent({
+      repo: input.repo, clock: input.clock, key: `registration-hold-case:${held.paymentId}`, kind: 'cs.supportCase',
+      payload: { paymentId: held.paymentId, customerId: held.customerId }, serialize: serializeCsCase, deserialize: deserializeCsCase,
+      fn: async () => escalate({
+        case: await openCase({ customerId: held.customerId, kind: 'reconcile_mismatch', referenceId: held.paymentId,
+          policy: input.policy, repo: input.repo, clock: input.clock, ids: input.ids, onCaseEvent: input.onCaseEvent }),
+        reason: 'payment checkout registration is still missing', repo: input.repo, clock: input.clock, onCaseEvent: input.onCaseEvent,
+      }),
+    });
+    cases.push(result);
+  }
+  return cases;
 }
 
 /** EC:E1 — cs.reconcile({customerId?, providers, ledger, repo, policy, clock, ids, since}) -> CsCase[] */
@@ -21,7 +58,7 @@ export async function reconcile(input: ReconcileInput): Promise<CsCase[]> {
     ? [await repo.customers.get(customerId)].filter((c): c is NonNullable<typeof c> => c !== null)
     : await repo.customers.list();
 
-  const cases: CsCase[] = [];
+  const cases: CsCase[] = await reconcileRegistrationHolds(input);
   for (const customer of customers) {
     for (const pref of customer.providerRefs) {
       const provider = providers[pref.provider];

@@ -9,6 +9,7 @@ from boilpayment_core import Payment, PaymentKitError, run_idempotent
 
 from .purchase_snapshot import (
     PurchaseSnapshot,
+    matches_captured_sale_amount,
     matches_checkout_payment,
     parse_checkout_snapshot,
     parse_purchase_snapshot,
@@ -51,7 +52,11 @@ async def register_completed_checkout(input: RegisterCompletedCheckoutInput) -> 
             f"{snapshot.provider} subscriptions start with start_subscription (billing key), not a checkout payment",
             "use_start_subscription",
         )
-    live = await provider.get_payment(input.payment_ref)
+    live = await provider.get_payment(
+        snapshot.checkout_provider_ref or input.payment_ref
+        if snapshot.provider == "stripe"
+        else input.payment_ref
+    )
     subscription_evidence = None
     if snapshot.plan.interval is not None:
         subscription_ref = input.subscription_ref or live.subscription_id
@@ -83,11 +88,7 @@ async def register_completed_checkout(input: RegisterCompletedCheckoutInput) -> 
         or live.provider_ref != input.payment_ref
         or live.provider != snapshot.provider
         or live.status != "succeeded"
-        or (
-            live.amount.amount_minor != snapshot.price.amount_minor
-            and not trial_invoice
-        )
-        or live.amount.currency != snapshot.price.currency
+        or (not matches_captured_sale_amount(snapshot, live) and not trial_invoice)
         or (not bound and not any(payment.provider_ref == input.payment_ref for payment in listed))
         or live.customer_id not in ("", snapshot.customer_id, snapshot.customer_ref)
     ):
@@ -117,6 +118,7 @@ async def register_completed_checkout(input: RegisterCompletedCheckoutInput) -> 
                     provider_ref=subscription_ref,
                     # EC:A28 -- the subscription is charged in the currency it was bought in.
                     currency=snapshot.price.currency,
+                    affiliate_id=snapshot.affiliate_id,
                 )
             )
     purchase = PurchaseSnapshot(
@@ -130,6 +132,9 @@ async def register_completed_checkout(input: RegisterCompletedCheckoutInput) -> 
         price=snapshot.price,
         policy=snapshot.policy,
         captured_at=snapshot.captured_at,
+        allow_discount_codes=snapshot.allow_discount_codes,
+        preset_discount_code=snapshot.preset_discount_code,
+        affiliate_id=snapshot.affiliate_id,
         payment_id=payment_id,
         payment_ref=input.payment_ref,
         purchased_at=live.occurred_at.isoformat(),
@@ -159,7 +164,16 @@ async def register_completed_checkout(input: RegisterCompletedCheckoutInput) -> 
     )
     existing = await input.repo.payments.get(payment_id)
     if existing:
-        return existing
+        linked = replace(
+            existing,
+            customer_id=recorded.result.customer_id,
+            subscription_id=recorded.result.subscription_id,
+            kind="topup" if recorded.result.plan.interval is None else "subscription",
+            period=period,
+            affiliate_id=recorded.result.affiliate_id,
+        )
+        await input.repo.payments.put(linked)
+        return linked
     payment = replace(
         live,
         id=payment_id,
@@ -167,6 +181,7 @@ async def register_completed_checkout(input: RegisterCompletedCheckoutInput) -> 
         subscription_id=recorded.result.subscription_id,
         kind="topup" if recorded.result.plan.interval is None else "subscription",
         period=period,
+        affiliate_id=recorded.result.affiliate_id,
     )
     await input.repo.payments.put(payment)
     return payment

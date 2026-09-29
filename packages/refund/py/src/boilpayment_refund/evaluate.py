@@ -20,12 +20,10 @@ from boilpayment_core import (
 
 from .reason import RefundReasonInput, rule_for_reason
 from .util import (
-    _total_grant_value_minor,
     _upgrade_invoice_attributed_grant_ids,
     apply_rounding,
     days_between,
     proration_ratio,
-    weighted_avg_unit_price,
 )
 
 
@@ -165,7 +163,7 @@ async def evaluate(input: EvaluateInput) -> RefundDecision:
         if r.status == "succeeded"
     )
 
-    grants, has_attributed_upgrade_delta = await _granted_by_payment(
+    grants, _has_attributed_upgrade_delta = await _granted_by_payment(
         ledger, customer_id, payment.id
     )
     total_granted = sum(g.amount for g in grants)
@@ -194,18 +192,9 @@ async def evaluate(input: EvaluateInput) -> RefundDecision:
         consumed = await _consumed_from_grants(
             ledger, customer_id, grants, total_granted, clock.now()
         )
-        # SB-11 -- upgrade delta grants intentionally have no price; the attributed invoice is
-        # their payment evidence and supplies the exact value used for proportional refunds.
-        total_grant_value = (
-            payment.amount.amount_minor
-            if has_attributed_upgrade_delta
-            else _total_grant_value_minor(grants)
-        )
-        unit_price = (
-            payment.amount.amount_minor / total_granted
-            if has_attributed_upgrade_delta and total_granted > 0
-            else weighted_avg_unit_price(grants)
-        )
+        # DC-03/DC-04 -- the persisted payment is the authoritative amount paid. This also
+        # preserves OT-17: floor(paid * unused / granted), entirely in integer math.
+        total_grant_value = payment.amount.amount_minor
 
         def compute_unused() -> tuple[int, int]:
             unused = max(0, total_granted - consumed)
@@ -238,7 +227,7 @@ async def evaluate(input: EvaluateInput) -> RefundDecision:
                     0,
                     f"overuse: consumed {consumed_ratio * 100:.1f}% > elapsed {elapsed_ratio * 100:.1f}%",
                 )
-            if has_attributed_upgrade_delta and payment.amount.amount_minor > 0:
+            if payment.amount.amount_minor > 0:
                 rounding = {
                     "ceil_credits": "ceil",
                     "round_credits": "round",
@@ -251,8 +240,7 @@ async def evaluate(input: EvaluateInput) -> RefundDecision:
                     rounding,
                 )
             else:
-                raw_credits = (amount / unit_price) if unit_price > 0 else 0
-                credits = apply_rounding(raw_credits, policy.refund.rounding)
+                credits = 0
             return amount, credits, None
 
         rule_id = "D2"

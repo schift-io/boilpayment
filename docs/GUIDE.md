@@ -113,6 +113,174 @@ Toss and PortOne subscriptions are charged by the kit itself (`startSubscription
 `cron.schedulerTick`). Stripe and Polar subscriptions are charged by the provider and arrive as
 webhooks.
 
+### Discounts (Stripe and Polar)
+
+Let the customer enter a provider-managed code, or preset one code when you create the checkout.
+Use only one mode at a time. Stripe maps these fields to `allow_promotion_codes` or
+`discounts: [{ promotion_code }]`; Polar maps them to `allow_discount_codes` or `discount_id`.
+
+```ts
+const checkout = await kit.checkout({
+  customerId: userId, planId: 'pro', provider: 'stripe', currency: 'USD',
+  requestId: crypto.randomUUID(), successUrl, cancelUrl,
+  allowDiscountCodes: true,
+  // presetDiscountCode: 'promo_...', // use instead of allowDiscountCodes
+});
+await kit.registerCompletedCheckout({
+  customerId: userId, checkoutId: checkout.id, paymentRef: paymentIntentId,
+});
+```
+
+```python
+checkout = await kit["checkout"](
+    customer_id=user_id, plan_id="pro", provider="polar", currency="USD",
+    request_id=request_id, success_url=success_url, cancel_url=cancel_url,
+    allow_discount_codes=True,
+    # preset_discount_code="discount_...",  # use instead of allow_discount_codes
+)
+await kit["register_completed_checkout"](
+    customer_id=user_id, checkout_id=checkout.id, payment_ref=order_id,
+)
+```
+
+Registration accepts a lower payment only when the provider proves all three facts: its subtotal
+equals the captured sale price, a provider discount is present, and `subtotal - discount` equals
+the amount paid. Otherwise it throws `checkout_evidence_mismatch`. The payment records the amount
+actually paid, while the grant keeps the plan quantity. Subscription renewals resolve the plan by
+the provider price reference, so discounted renewals and the first full-price renewal after a
+repeating discount all grant that same quantity.
+
+Refunds also use the amount actually paid. Used credits are valued at `paid / granted` with the
+same exact-integer calculation as an undiscounted refund, and the result never exceeds the paid
+amount. An exhausted code is refused by Stripe or Polar before payment; the kit writes no payment
+or grant for that refused checkout.
+
+### Payment links (Stripe and Polar)
+
+Create the link in the provider dashboard, then add the existing kit customer before showing it.
+The optional affiliate travels in the same encoded reference.
+
+```ts
+const url = kit.buildPaymentLinkUrl({
+  provider: 'stripe',
+  linkUrl: 'https://buy.stripe.com/example',
+  customerId: userId,
+  affiliateId: 'partner-42', // optional
+});
+```
+
+```python
+url = kit["build_payment_link_url"](
+    provider="polar",
+    link_url="https://buy.polar.sh/polar_cl_example",
+    customer_id=user_id,
+    affiliate_id="partner-42",  # optional
+)
+```
+
+Stripe receives `client_reference_id`; Polar receives `reference_id`. The helper preserves other
+query parameters and emits a kit-encoded value that matches Stripe's
+`[A-Za-z0-9_-]{1,200}` limit. Empty or oversized references throw `PaymentKitError` instead of
+producing a URL that Stripe would silently strip.
+
+On `checkout.session.completed` with `payment_link` (Stripe), or `order.paid` whose metadata has
+`reference_id` (Polar), `handleWebhook` decodes the reference, finds the existing customer, resolves
+the plan from the provider price reference and grants once under the current plan terms. This works
+for one-time and subscription plans. A missing, invalid or unknown-customer reference records the
+payment, grants nothing and opens one `needs_human` case. Webhook replays do not duplicate the
+payment, case or grant.
+
+### Affiliate tracking
+
+Neither provider has native affiliate accounting. Pass `affiliateId` / `affiliate_id` to
+`checkout`, or to the payment-link helper above. The kit stores it on the payment and appends one
+commission accrual after the payment grants. Configure either a rate or a fixed minor-unit amount:
+
+```json
+{
+  "affiliate": {
+    "commission": { "type": "rate", "rate": 0.15 },
+    "renewals": "first_only"
+  }
+}
+```
+
+`affiliate.commission` may instead be `{ "type": "fixed", "amountMinor": 500 }`.
+`affiliate.renewals` is `first_only` (the default) or `include`. With `include`, renewals of a
+subscription that started with an affiliate also accrue commission. A dependency function overrides
+the configured commission and returns the commission in minor units:
+
+```ts
+const kit = createPaymentKit(config, {
+  repo, ledger, clock, ids, env: process.env,
+  affiliateCommission: (payment) => Math.min(500, payment.amount.amountMinor),
+});
+
+const rows = await kit.affiliate.list({ affiliateId: 'partner-42' });
+const usdMinor = await kit.affiliate.sum({ affiliateId: 'partner-42', currency: 'USD' });
+const totalsByCurrency = await kit.affiliate.sum({ affiliateId: 'partner-42' });
+```
+
+```python
+deps = Deps(
+    repo=repo, ledger=ledger, clock=SystemClock(), ids=UuidIdGen(),
+    notifier=None, logger=None, providers={}, policy=None,
+    affiliate_commission=lambda payment: min(500, payment.amount.amount_minor),
+)
+kit = create_payment_kit(config, deps, dict(os.environ))
+
+rows = await kit["affiliate"]["list"](affiliate_id="partner-42")
+usd_minor = await kit["affiliate"]["sum"](
+    affiliate_id="partner-42", currency="USD"
+)
+totals_by_currency = await kit["affiliate"]["sum"](
+    affiliate_id="partner-42"
+)
+```
+
+Commission rows are append-only and idempotent per payment. A refund appends a reversal equal to
+`accrual * refunded / paid`, rounded toward the affiliate receiving less; it never edits the
+accrual. `affiliate.list` accepts the affiliate id and optional payment id and kind (`accrual` or
+`reversal`). `affiliate.sum` returns one minor-unit integer when a currency is supplied, otherwise
+a currency-to-minor-unit map. Payouts are outside the kit's scope.
+
+### Payment webhook before checkout registration
+
+If a success webhook arrives before `registerCompletedCheckout`, the kit records the payment but
+holds the grant. Registering later releases exactly one grant from the checkout snapshot captured at
+sale time. Repeating either operation does not grant twice.
+
+```ts
+await kit.handleWebhook(rawBody, headers, { provider: 'stripe' });
+await kit.registerCompletedCheckout({
+  customerId: userId, checkoutId, paymentRef: paymentIntentId,
+});
+await kit.cron.reconcile(new Date(Date.now() - 24 * 60 * 60 * 1000));
+```
+
+```python
+from datetime import datetime, timedelta, timezone
+
+await kit["handle_webhook"](raw_body, headers, provider="polar")
+await kit["register_completed_checkout"](
+    customer_id=user_id, checkout_id=checkout_id, payment_ref=order_id,
+)
+await kit["cron"]["reconcile"](
+    datetime.now(timezone.utc) - timedelta(hours=24)
+)
+```
+
+Set `checkout.registrationHoldHours` in `paykit.config.json` to control how long reconciliation
+waits; the default is `24`:
+
+```json
+{ "checkout": { "registrationHoldHours": 24 } }
+```
+
+If registration still has not happened after that window,
+`cron.reconcile(since)` opens one `needs_human` case and does not grant. The `since` argument still
+defines the reconciliation scan's lower time bound.
+
 ## 3. Reference
 
 Every call is idempotent on the key shown: calling it again with the same key returns the first
@@ -122,8 +290,9 @@ result and changes nothing. Errors are `PaymentKitError` with a `code`.
 
 | Call | Input | Returns |
 |---|---|---|
-| `checkout` | `customerId, planId, provider, currency, requestId, successUrl, cancelUrl` | `{ id, url, providerRef }`. Key: `customerId + requestId` |
+| `checkout` | `customerId, planId, provider, currency, requestId, successUrl, cancelUrl, allowDiscountCodes?, presetDiscountCode?, affiliateId?` | `{ id, url, providerRef }`. Key: `customerId + requestId` |
 | `registerCompletedCheckout` | `customerId, checkoutId, paymentRef, subscriptionRef?` | the recorded `Payment`. Key: `checkoutId` |
+| `buildPaymentLinkUrl` | `provider, linkUrl, customerId, affiliateId?` | a Stripe or Polar link carrying the encoded customer and optional affiliate |
 | `startSubscription` (Toss, PortOne) | `customerId, planId, currency, billingKey, requestId, customerRef?, provider?` | `{ sub, payment }`. Charges the first period, then activates. Key: `requestId` |
 | `handleWebhook` | `rawBody` (string, unparsed), `headers`, `{ provider?, remoteAddress? }` | `{ status, eventId, duplicated }`. Answer the provider with HTTP `status` and no body |
 
@@ -219,4 +388,5 @@ Resend, Slack), or through `deps.notifier` if you pass your own `{ send(notifica
 
 Keep the CLI and the SDK at the same version. After upgrading, run `npx boilpayment migrate` and
 `npx boilpayment check` before serving traffic; `kit.initialize()` refuses to start against an
-older schema. 0.2.x has no upgrade path from 0.1.0.
+older schema. Upgrading to 0.3.0 requires migrations `0015_grace_credit_expiry.sql` and
+`0016_affiliate_commissions.sql`. There is no upgrade path from 0.1.0.

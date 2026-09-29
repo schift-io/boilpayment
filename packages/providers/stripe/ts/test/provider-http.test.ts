@@ -75,6 +75,45 @@ describe('[EC:F(Stripe)] createCustomer', () => {
 });
 
 describe('[EC:E6] createCheckout', () => {
+  it('[DC-01] enables customer-entered promotion codes when no preset code is supplied', async () => {
+    mock.respondJson(200, { id: 'cs_discount', object: 'checkout.session', url: 'https://checkout.stripe.com/cs_discount' });
+    const provider = makeProvider();
+    const input = checkoutInput();
+    Object.assign(input, { allowDiscountCodes: true });
+
+    await provider.createCheckout(input);
+
+    const body = new URLSearchParams(mock.requests[0].body);
+    expect(body.get('allow_promotion_codes')).toBe('true');
+    expect(body.get('discounts[0][promotion_code]')).toBeNull();
+  });
+
+  it('[DC-01] sends a preset promotion code instead of enabling code entry', async () => {
+    mock.respondJson(200, { id: 'cs_preset', object: 'checkout.session', url: 'https://checkout.stripe.com/cs_preset' });
+    const provider = makeProvider();
+    const input = checkoutInput();
+    Object.assign(input, { allowDiscountCodes: true, presetDiscountCode: 'promo_launch' });
+
+    await provider.createCheckout(input);
+
+    const body = new URLSearchParams(mock.requests[0].body);
+    expect(body.get('discounts[0][promotion_code]')).toBe('promo_launch');
+    expect(body.get('allow_promotion_codes')).toBeNull();
+  });
+
+  it('[AF-01] propagates the affiliate id through checkout, payment, and subscription metadata', async () => {
+    mock.respondJson(200, { id: 'cs_affiliate', object: 'checkout.session', url: 'https://checkout.stripe.com/cs_affiliate' });
+    const provider = makeProvider();
+    const input = checkoutInput();
+    Object.assign(input, { affiliateId: 'affiliate_7' });
+
+    await provider.createCheckout(input);
+
+    const body = new URLSearchParams(mock.requests[0].body);
+    expect(body.get('metadata[affiliateId]')).toBe('affiliate_7');
+    expect(body.get('subscription_data[metadata][affiliateId]')).toBe('affiliate_7');
+  });
+
   it('[SB-03] subscription checkout sends the plan trial days to Stripe', async () => {
     mock.respondJson(200, { id: 'cs_trial', object: 'checkout.session', url: 'https://checkout.stripe.com/cs_trial' });
     const provider = makeProvider();
@@ -146,6 +185,19 @@ describe('[EC:E6] createCheckout', () => {
     });
   });
 
+  it('[DC-06] an exhausted promotion code is a definitive provider refusal with no checkout result', async () => {
+    mock.respondJson(400, { error: { type: 'invalid_request_error', code: 'promotion_code_max_redemptions', message: 'refused' } });
+    const provider = makeProvider();
+    const input = checkoutInput();
+    Object.assign(input, { presetDiscountCode: 'promo_exhausted' });
+
+    const error = await provider.createCheckout(input).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ProviderError);
+    expect(error).toMatchObject({ httpStatus: 400, failure: { providerCode: 'promotion_code_max_redemptions', retryable: false } });
+    expect(mock.requests).toHaveLength(1);
+  });
+
   it('[OT-03] uncertain Stripe 500 checkout errors are retryable ProviderErrors', async () => {
     mock.respondJson(500, { error: { type: 'api_error', code: 'internal_error', message: 'temporary failure' } });
     mock.respondJson(500, { error: { type: 'api_error', code: 'internal_error', message: 'temporary failure' } });
@@ -164,6 +216,32 @@ describe('[EC:E6] createCheckout', () => {
 });
 
 describe('[EC:E7] getPayment', () => {
+  it('[DC-02 PL-02] cs_ ref retrieves authoritative checkout evidence and returns the underlying payment ref', async () => {
+    mock.respondJson(200, {
+      id: 'cs_link_1', object: 'checkout.session', mode: 'payment', payment_status: 'paid',
+      payment_intent: { id: 'pi_link_1', object: 'payment_intent', amount: 8000, currency: 'krw', status: 'succeeded', created: 1700000000, metadata: {}, last_payment_error: null },
+      invoice: null, subscription: null, amount_subtotal: 10000, amount_total: 8000,
+      total_details: { amount_discount: 2000 }, currency: 'krw', created: 1700000000,
+      client_reference_id: 'encoded_customer', payment_link: 'plink_1', metadata: { affiliateId: 'affiliate_7' },
+      line_items: { data: [{ price: { id: 'price_link' }, quantity: 1 }] },
+    });
+    const provider = makeProvider();
+
+    const payment = await provider.getPayment('cs_link_1');
+
+    expect(decodeURIComponent(mock.requests[0].path)).toContain('expand[0]=line_items');
+    expect(payment.providerRef).toBe('pi_link_1');
+    expect(payment.amount).toEqual({ amountMinor: 8000, currency: 'KRW' });
+    expect(payment).toMatchObject({
+      affiliateId: 'affiliate_7',
+      saleEvidence: {
+        providerSubtotal: { amountMinor: 10000, currency: 'KRW' },
+        discountAmount: { amountMinor: 2000, currency: 'KRW' },
+        priceRef: 'price_link', checkoutId: 'cs_link_1', paymentLinkId: 'plink_1', linkReference: 'encoded_customer',
+      },
+    });
+  });
+
   it('providerRef starting with pi_ -> GET /v1/payment_intents/{ref} expanding invoice and latest_charge (EC:E23)', async () => {
     mock.respondJson(200, { id: 'pi_1', object: 'payment_intent', amount: 10000, currency: 'krw', status: 'succeeded', created: 1700000000, last_payment_error: null, invoice: null });
     const provider = makeProvider();

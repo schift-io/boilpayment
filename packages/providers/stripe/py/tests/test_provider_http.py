@@ -151,6 +151,39 @@ def test_sb_03_subscription_checkout_sends_plan_trial_days_to_stripe(mock):
     assert body["subscription_data[trial_period_days]"] == ["14"]
 
 
+def test_dc_01_checkout_enables_customer_entered_promotion_codes(mock):
+    mock.respond_json(200, {"id": "cs_discount", "object": "checkout.session", "url": "https://checkout.stripe.com/cs_discount"})
+    provider = _provider()
+
+    asyncio.run(provider.create_checkout(_checkout_input(allow_discount_codes=True)))
+
+    body = parse_qs(mock.requests[0].post_data)
+    assert body["allow_promotion_codes"] == ["true"]
+    assert "discounts[0][promotion_code]" not in body
+
+
+def test_dc_01_checkout_sends_preset_promotion_code_instead_of_code_entry(mock):
+    mock.respond_json(200, {"id": "cs_preset", "object": "checkout.session", "url": "https://checkout.stripe.com/cs_preset"})
+    provider = _provider()
+
+    asyncio.run(provider.create_checkout(_checkout_input(allow_discount_codes=True, preset_discount_code="promo_launch")))
+
+    body = parse_qs(mock.requests[0].post_data)
+    assert body["discounts[0][promotion_code]"] == ["promo_launch"]
+    assert "allow_promotion_codes" not in body
+
+
+def test_af_01_checkout_propagates_affiliate_metadata(mock):
+    mock.respond_json(200, {"id": "cs_affiliate", "object": "checkout.session", "url": "https://checkout.stripe.com/cs_affiliate"})
+    provider = _provider()
+
+    asyncio.run(provider.create_checkout(_checkout_input(affiliate_id="affiliate_7")))
+
+    body = parse_qs(mock.requests[0].post_data)
+    assert body["metadata[affiliateId]"] == ["affiliate_7"]
+    assert body["subscription_data[metadata][affiliateId]"] == ["affiliate_7"]
+
+
 def test_ec_e6_create_checkout_subscription_idempotency_key_and_body(mock):
     mock.respond_json(
         200,
@@ -253,6 +286,26 @@ def test_ot_03_definitive_stripe_400_checkout_error_preserves_status_and_code(mo
     assert excinfo.value.failure.retryable is False
 
 
+def test_dc_06_exhausted_promotion_code_is_definitive_provider_refusal(mock):
+    mock.respond_json(
+        400,
+        {"error": {"type": "invalid_request_error", "code": "promotion_code_max_redemptions", "message": "refused"}},
+    )
+    provider = _provider()
+
+    with pytest.raises(ProviderError) as excinfo:
+        asyncio.run(
+            provider.create_checkout(
+                _checkout_input(preset_discount_code="promo_exhausted")
+            )
+        )
+
+    assert excinfo.value.http_status == 400
+    assert excinfo.value.failure.provider_code == "promotion_code_max_redemptions"
+    assert excinfo.value.failure.retryable is False
+    assert len(mock.requests) == 1
+
+
 def test_ot_03_uncertain_stripe_500_checkout_error_is_retryable(mock):
     mock.respond_json(
         500,
@@ -277,6 +330,32 @@ def test_ot_03_uncertain_stripe_500_checkout_error_is_retryable(mock):
 # ---------------------------------------------------------------------------
 # [EC:E7] get_payment
 # ---------------------------------------------------------------------------
+
+
+def test_dc_02_pl_02_checkout_ref_returns_authoritative_evidence(mock):
+    mock.respond_json(200, {
+        "id": "cs_link_1", "object": "checkout.session", "mode": "payment", "payment_status": "paid",
+        "payment_intent": {"id": "pi_link_1", "object": "payment_intent", "amount": 8000, "currency": "krw", "status": "succeeded", "created": 1700000000, "metadata": {}, "last_payment_error": None},
+        "invoice": None, "subscription": None, "amount_subtotal": 10000, "amount_total": 8000,
+        "total_details": {"amount_discount": 2000}, "currency": "krw", "created": 1700000000,
+        "client_reference_id": "encoded_customer", "payment_link": "plink_1", "metadata": {"affiliateId": "affiliate_7"},
+        "line_items": {"data": [{"price": {"id": "price_link"}, "quantity": 1}]},
+    })
+    provider = _provider()
+
+    payment = asyncio.run(provider.get_payment("cs_link_1"))
+
+    assert "expand[0]=line_items" in mock.requests[0].url
+    assert payment.provider_ref == "pi_link_1"
+    assert payment.amount.amount_minor == 8000
+    assert payment.affiliate_id == "affiliate_7"
+    assert payment.sale_evidence is not None
+    assert payment.sale_evidence.provider_subtotal.amount_minor == 10000
+    assert payment.sale_evidence.discount_amount.amount_minor == 2000
+    assert payment.sale_evidence.price_ref == "price_link"
+    assert payment.sale_evidence.checkout_id == "cs_link_1"
+    assert payment.sale_evidence.payment_link_id == "plink_1"
+    assert payment.sale_evidence.link_reference == "encoded_customer"
 
 
 def test_ec_e7_get_payment_pi_prefix_gets_with_expand_invoice(mock):

@@ -83,6 +83,41 @@ describe('[EC:E7][EC:E12] normalizeOrder — Payment status mapping', () => {
     expect(p.providerRef).toBe('order_test_2');
     expect(p.subscriptionId).toBe('sub_test_1');
   });
+
+  it('[DC-02][PL-01][AF-01] preserves authoritative discount, link, price, and affiliate evidence', () => {
+    const p = normalizeOrder({
+      ...BASE,
+      status: 'paid',
+      paid: true,
+      subtotal_amount: 1000,
+      discount_amount: 200,
+      net_amount: 800,
+      total_amount: 800,
+      product_id: 'prod_polar_1',
+      checkout_id: 'checkout_1',
+      checkout_link_id: 'link_1',
+      discount_id: 'discount_20pct',
+      discount: { id: 'discount_20pct', type: 'percentage', basis_points: 2000 },
+      metadata: { reference_id: 'customer_42', affiliateId: 'affiliate_alpha' },
+    });
+
+    expect(p.amount).toEqual({ amountMinor: 800, currency: 'USD' });
+    expect(p.affiliateId).toBe('affiliate_alpha');
+    expect(p.saleEvidence).toEqual({
+      providerSubtotal: { amountMinor: 1000, currency: 'USD' },
+      discountAmount: { amountMinor: 200, currency: 'USD' },
+      priceRef: 'prod_polar_1',
+      checkoutId: 'checkout_1',
+      paymentLinkId: 'link_1',
+      linkReference: 'customer_42',
+    });
+  });
+
+  it('[DC-02] records zero discount evidence when Polar reports no discount', () => {
+    const p = normalizeOrder({ ...BASE, status: 'paid', paid: true, subtotal_amount: 1000, discount_amount: 0, product_id: 'prod_polar_1' });
+
+    expect(p.saleEvidence?.discountAmount).toEqual({ amountMinor: 0, currency: 'USD' });
+  });
 });
 
 describe('[EC:F(Polar)] normalizeSubscription — status mapping and metadata contract', () => {
@@ -119,11 +154,12 @@ describe('[EC:F(Polar)] normalizeSubscription — status mapping and metadata co
     const withMeta = normalizeSubscription({
       ...BASE,
       status: 'active',
-      metadata: { customerId: 'internal_cust_1', planId: 'plan_pro', subscriptionId: 'internal_sub_1' },
+      metadata: { customerId: 'internal_cust_1', planId: 'plan_pro', subscriptionId: 'internal_sub_1', affiliateId: 'affiliate_alpha' },
     });
     expect(withMeta.id).toBe('internal_sub_1');
     expect(withMeta.customerId).toBe('internal_cust_1');
     expect(withMeta.planId).toBe('plan_pro');
+    expect(withMeta.affiliateId).toBe('affiliate_alpha');
 
     const withoutMeta = normalizeSubscription({ ...BASE, status: 'active' });
     expect(withoutMeta.id).toBe('sub_test_1'); // falls back to sub.id

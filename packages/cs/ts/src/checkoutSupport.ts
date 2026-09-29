@@ -1,16 +1,25 @@
 import { PaymentKitError, ProviderError, runIdempotent } from 'boilpayment-core';
 import type { Checkout, Payment, ProviderName, Subscription } from 'boilpayment-core';
 import type { SupportDeps } from './support.js';
-import { parseCheckoutSnapshot, parsePurchaseSnapshot, matchesCheckoutPayment } from './purchaseSnapshot.js';
+import { parseCheckoutSnapshot, parsePurchaseSnapshot, matchesCapturedSaleAmount, matchesCheckoutPayment } from './purchaseSnapshot.js';
 import type { CheckoutSnapshot, PurchaseSnapshot } from './purchaseSnapshot.js';
 
 export interface StartCheckoutInput extends SupportDeps {
   readonly customerId: string; readonly planId: string; readonly provider: ProviderName;
   readonly currency: string; readonly requestId: string; readonly successUrl: string; readonly cancelUrl: string;
+  readonly allowDiscountCodes?: boolean; readonly presetDiscountCode?: string | null; readonly affiliateId?: string | null;
 }
 export interface RegisterCompletedCheckoutInput extends SupportDeps {
   readonly customerId: string; readonly checkoutId: string; readonly paymentRef: string; readonly subscriptionRef?: string;
 }
+
+function isDefinitiveProviderRefusal(error: ProviderError): boolean {
+  const detailStatus = typeof error.details === 'object' && error.details !== null && 'status' in error.details
+    && typeof error.details.status === 'number' ? error.details.status : undefined;
+  const status = error.httpStatus ?? detailStatus;
+  return status !== undefined && status >= 400 && status < 500 && status !== 408 && status !== 409 && status !== 429;
+}
+
 /** Capture immutable sale rules before a provider checkout can be created. */
 export async function startCheckout(input: StartCheckoutInput): Promise<Checkout> {
   const key = `checkout-entitlement:${input.customerId}:${input.requestId}`;
@@ -24,7 +33,9 @@ export async function startCheckout(input: StartCheckoutInput): Promise<Checkout
     throw new PaymentKitError(`${input.provider} subscription plans start with startSubscription`, 'use_start_subscription', { planId: input.planId, provider: input.provider });
   }
   const { result: snapshot } = await runIdempotent<CheckoutSnapshot>({ repo: input.repo, clock: input.clock, key, kind: 'checkout.entitlement',
-    payload: { customerId: input.customerId, planId: input.planId, provider: input.provider, currency: input.currency },
+    payload: { customerId: input.customerId, planId: input.planId, provider: input.provider, currency: input.currency,
+      allowDiscountCodes: input.allowDiscountCodes ?? false, presetDiscountCode: input.presetDiscountCode ?? null,
+      affiliateId: input.affiliateId ?? null },
     serialize: (value) => value, deserialize: parseCheckoutSnapshot,
     fn: async () => {
       const customer = await input.repo.customers.get(input.customerId); const plan = await input.repo.plans.get(input.planId);
@@ -32,7 +43,7 @@ export async function startCheckout(input: StartCheckoutInput): Promise<Checkout
       const prices = plan?.prices.filter((price) => price.currency === input.currency) ?? [];
       const price = prices.length === 1 ? prices[0] : undefined;
       if (!customerRef || !plan || !price) throw new PaymentKitError('customer, plan or unique price missing', 'checkout_evidence_missing');
-      return structuredClone({ intentKey: key, checkoutId: null, checkoutProviderRef: null, customerId: input.customerId, customerRef, provider: input.provider, plan, price, policy: input.policy, capturedAt: input.clock.now().toISOString() });
+      return structuredClone({ intentKey: key, checkoutId: null, checkoutProviderRef: null, customerId: input.customerId, customerRef, provider: input.provider, plan, price, policy: input.policy, capturedAt: input.clock.now().toISOString(), allowDiscountCodes: input.allowDiscountCodes ?? false, presetDiscountCode: input.presetDiscountCode ?? null, affiliateId: input.affiliateId ?? null });
     } });
   const provider = input.providers[snapshot.provider];
   if (!provider) throw new PaymentKitError('checkout provider unavailable', 'checkout_evidence_missing');
@@ -57,15 +68,20 @@ export async function startCheckout(input: StartCheckoutInput): Promise<Checkout
       { planId: snapshot.plan.id },
     );
   }
-  const attempt = await runIdempotent<CheckoutAttempt>({ repo: input.repo, clock: input.clock,
-    key: `checkout-result:${input.customerId}:${input.requestId}`, kind: 'checkout.entitlement',
+  const resultKey = `checkout-result:${input.customerId}:${input.requestId}`;
+  let attempt;
+  try {
+    attempt = await runIdempotent<CheckoutAttempt>({ repo: input.repo, clock: input.clock,
+    key: resultKey, kind: 'checkout.entitlement',
     payload: { key, successUrl: input.successUrl, cancelUrl: input.cancelUrl },
     serialize: (value) => value, deserialize: parseCheckoutAttempt,
     fn: async () => {
       try {
         const checkout = await provider.createCheckout({ customerRef: snapshot.customerRef, plan: snapshot.plan, price: snapshot.price,
     mode: snapshot.plan.interval === null ? 'one_time' : 'subscription', successUrl: input.successUrl, cancelUrl: input.cancelUrl,
-    idempotencyKey: key, metadata: { customerId: snapshot.customerId, planId: snapshot.plan.id, checkoutEntitlementKey: key } });
+    idempotencyKey: key, allowDiscountCodes: snapshot.allowDiscountCodes, presetDiscountCode: snapshot.presetDiscountCode,
+    affiliateId: snapshot.affiliateId, metadata: { customerId: snapshot.customerId, planId: snapshot.plan.id, checkoutEntitlementKey: key,
+      ...(snapshot.affiliateId ? { affiliateId: snapshot.affiliateId } : {}) } });
 
         return { kind: 'succeeded', checkout };
       } catch (error) {
@@ -73,12 +89,7 @@ export async function startCheckout(input: StartCheckoutInput): Promise<Checkout
         // catalog repair is recaptured on retry. Provider/transport outcomes remain unknown here.
         if (error instanceof PaymentKitError) {
           if (error instanceof ProviderError) {
-            const detailStatus = typeof error.details === 'object' && error.details !== null && 'status' in error.details
-              && typeof error.details.status === 'number' ? error.details.status : undefined;
-            const status = error.httpStatus ?? detailStatus;
-            if (status !== undefined && status >= 400 && status < 500 && status !== 408 && status !== 409 && status !== 429) {
-              throw error;
-            }
+            if (isDefinitiveProviderRefusal(error)) throw error;
             return { kind: 'unknown' };
           }
           if (error.code === 'missing_provider_price_ref') {
@@ -92,6 +103,13 @@ export async function startCheckout(input: StartCheckoutInput): Promise<Checkout
         throw error;
       }
     } });
+  } catch (error) {
+    if (error instanceof ProviderError && isDefinitiveProviderRefusal(error)) {
+      await input.repo.operations.delete(resultKey);
+      await input.repo.operations.delete(key);
+    }
+    throw error;
+  }
   if (attempt.result.kind === 'unknown') throw new PaymentKitError('checkout creation outcome unknown; reconcile before a new request', 'checkout_outcome_unknown');
   const checkout = attempt.result.checkout;
   await runIdempotent({ repo: input.repo, clock: input.clock, key: `checkout-entitlement-by-id:${checkout.id}`, kind: 'checkout.entitlement',
@@ -112,7 +130,7 @@ export async function registerCompletedCheckout(input: RegisterCompletedCheckout
   if (snapshot.plan.interval !== null && bound) {
     throw new PaymentKitError(`${snapshot.provider} subscriptions start with startSubscription (billing key), not a checkout payment`, 'use_start_subscription');
   }
-  const live = await provider.getPayment(input.paymentRef);
+  const live = await provider.getPayment(snapshot.provider === 'stripe' ? snapshot.checkoutProviderRef ?? input.paymentRef : input.paymentRef);
   let subscriptionEvidence: { readonly ref: string; readonly live: Subscription } | null = null;
   if (snapshot.plan.interval !== null) {
     const subscriptionRef = input.subscriptionRef ?? live.subscriptionId;
@@ -127,7 +145,7 @@ export async function registerCompletedCheckout(input: RegisterCompletedCheckout
   const trialInvoice = snapshot.provider === 'stripe' && snapshot.plan.trialDays > 0
     && subscriptionEvidence?.live.status === 'trialing' && live.amount.amountMinor === 0;
   if (!matchesCheckoutPayment(snapshot, live.raw, input.paymentRef) || live.providerRef !== input.paymentRef || live.provider !== snapshot.provider || live.status !== 'succeeded'
-    || (live.amount.amountMinor !== snapshot.price.amountMinor && !trialInvoice) || live.amount.currency !== snapshot.price.currency
+    || (!matchesCapturedSaleAmount(snapshot, live) && !trialInvoice)
     || (!bound && !listed.some((payment) => payment.providerRef === input.paymentRef))
     || (live.customerId !== '' && live.customerId !== snapshot.customerId && live.customerId !== snapshot.customerRef)) {
     throw new PaymentKitError('provider payment does not match captured sale', 'checkout_evidence_mismatch');
@@ -141,7 +159,7 @@ export async function registerCompletedCheckout(input: RegisterCompletedCheckout
     period = live.period ?? subscriptionEvidence.live.currentPeriod;
     const existing = await input.repo.subscriptions.get(subscriptionId);
     // EC:A28 — the subscription is charged in the currency it was bought in.
-    if (!existing) await input.repo.subscriptions.put({ ...subscriptionEvidence.live, id: subscriptionId, customerId: snapshot.customerId, planId: snapshot.plan.id, provider: snapshot.provider, providerRef: subscriptionEvidence.ref, currency: snapshot.price.currency });
+    if (!existing) await input.repo.subscriptions.put({ ...subscriptionEvidence.live, id: subscriptionId, customerId: snapshot.customerId, planId: snapshot.plan.id, provider: snapshot.provider, providerRef: subscriptionEvidence.ref, currency: snapshot.price.currency, affiliateId: snapshot.affiliateId });
   }
   const purchase: PurchaseSnapshot = { ...snapshot, paymentId, paymentRef: input.paymentRef,
     purchasedAt: live.occurredAt.toISOString(), subscriptionId, period: period ? { start: period.start.toISOString(), end: period.end.toISOString() } : null };
@@ -149,9 +167,15 @@ export async function registerCompletedCheckout(input: RegisterCompletedCheckout
     key: `purchase-entitlement:${paymentId}`, kind: 'purchase.entitlement', payload: { checkoutId: input.checkoutId, paymentRef: input.paymentRef },
     serialize: (value) => value, deserialize: parsePurchaseSnapshot, fn: async () => purchase });
   const existing = await input.repo.payments.get(paymentId);
-  if (existing) return existing;
+  if (existing) {
+    const linked: Payment = { ...existing, customerId: recorded.customerId, subscriptionId: recorded.subscriptionId,
+      kind: recorded.plan.interval === null ? 'topup' : 'subscription', period, affiliateId: recorded.affiliateId };
+    await input.repo.payments.put(linked);
+    return linked;
+  }
   const payment: Payment = { ...live, id: paymentId, customerId: recorded.customerId, subscriptionId: recorded.subscriptionId,
-    kind: recorded.plan.interval === null ? 'topup' : 'subscription', period, cashReceipt: live.cashReceipt ?? null };
+    kind: recorded.plan.interval === null ? 'topup' : 'subscription', period, cashReceipt: live.cashReceipt ?? null,
+    affiliateId: recorded.affiliateId };
   await input.repo.payments.put(payment);
   return payment;
 }

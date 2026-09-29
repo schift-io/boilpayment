@@ -7,6 +7,7 @@ from pathlib import Path
 
 _PKG_SQL = Path(__file__).resolve().parents[1] / "src" / "boilpayment_schema_postgres" / "sql"
 _SOURCE_SQL = Path(__file__).resolve().parents[2] / "sql"  # packages/schema-postgres/sql
+_CLI_SQL = Path(__file__).resolve().parents[4] / "apps" / "cli" / "templates" / "sql"
 
 
 def test_bundled_sql_matches_the_source_of_truth():
@@ -23,3 +24,11 @@ def test_bundled_sql_matches_the_source_of_truth():
         f"bundled sql differs from the source of truth for {drifted} — "
         "run `node packages/schema-postgres/scripts/sync-sql.mjs`"
     )
+
+
+def test_affiliate_migration_matches_cli_template():
+    source = (_SOURCE_SQL / "0016_affiliate_commissions.sql").read_bytes()
+    bundled = (_PKG_SQL / "0016_affiliate_commissions.sql").read_bytes()
+    cli = (_CLI_SQL / "0016_affiliate_commissions.sql").read_bytes()
+
+    assert source == bundled == cli

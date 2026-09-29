@@ -1,6 +1,6 @@
 import { FixedClock, PaymentKitError, runIdempotent } from 'boilpayment-core';
 import { escalate, openCase } from './cases.js';
-import { getPurchaseSnapshot } from './purchaseSnapshot.js';
+import { getPurchaseSnapshot, matchesCapturedSaleAmount } from './purchaseSnapshot.js';
 import type { RecoverMissingGrantInput, SupportGrantOutcome } from './recoverMissingGrant.js';
 
 export type ApplyPurchasedGrantInput = RecoverMissingGrantInput;
@@ -11,7 +11,7 @@ export async function applyPurchasedGrant(input: ApplyPurchasedGrantInput): Prom
   const snapshot = await getPurchaseSnapshot({ paymentId: input.paymentId, repo: input.repo });
   if (!payment || !snapshot || snapshot.customerId !== input.customerId || payment.customerId !== input.customerId
     || snapshot.paymentRef !== payment.providerRef || snapshot.provider !== payment.provider
-    || snapshot.price.amountMinor !== payment.amount.amountMinor || snapshot.price.currency !== payment.amount.currency
+    || !matchesCapturedSaleAmount(snapshot, payment)
     || payment.status !== 'succeeded') throw new PaymentKitError('immutable purchase entitlement missing or inconsistent', 'purchase_evidence_missing');
   if (snapshot.plan.interval === null) {
     // EC:A85 — the payment remains evidence, but a banned customer cannot use the credits. Reuse

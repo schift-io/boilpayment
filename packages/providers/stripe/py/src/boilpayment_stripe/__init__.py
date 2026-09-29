@@ -10,6 +10,7 @@ from __future__ import annotations
 import time
 import urllib.parse
 import warnings
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -33,6 +34,7 @@ from boilpayment_core import (
     WebhookSignatureError,
     money,
 )
+from boilpayment_core.types import SaleEvidence
 
 
 # EC:L1 — the Python stripe SDK has no per-call request() choke point either (each resource method
@@ -338,6 +340,15 @@ def normalize_payment_intent(pi: Any, invoice: Any | None = None) -> Payment:
         period=_invoice_period(invoice) if invoice is not None else None,
         occurred_at=_dt(pi.created),
         failure=_failure_from_last_error(getattr(pi, "last_payment_error", None)),
+        sale_evidence=_invoice_sale_evidence(invoice) if invoice is not None else None,
+        affiliate_id=(
+            _get(_get(pi, "metadata"), "affiliateId")
+            or (
+                _invoice_subscription_metadata(invoice).get("affiliateId")
+                if invoice is not None
+                else None
+            )
+        ),
         raw=(
             {
                 **_as_dict(pi),
@@ -378,12 +389,23 @@ def normalize_invoice_as_payment(invoice: Any, pi: Any | None = None) -> Payment
         provider="stripe",
         provider_ref=invoice.id,
         subscription_id=sub if isinstance(sub, str) else None,
-        amount=_money(invoice.amount_paid or invoice.amount_due, invoice.currency),
+        amount=_money(
+            invoice.amount_paid
+            if invoice.status == "paid"
+            else invoice.amount_paid or invoice.amount_due,
+            invoice.currency,
+        ),
         status=status,
         kind="subscription",
         period=_invoice_period(invoice),
         occurred_at=_dt(invoice.created),
         failure=failure,
+        sale_evidence=_invoice_sale_evidence(invoice),
+        affiliate_id=(
+            _get(_get(invoice, "metadata"), "affiliateId")
+            or _invoice_subscription_metadata(invoice).get("affiliateId")
+            or (_get(_get(pi, "metadata"), "affiliateId") if pi is not None else None)
+        ),
         raw={
             **_as_dict(invoice),
             "metadata": {
@@ -394,6 +416,54 @@ def normalize_invoice_as_payment(invoice: Any, pi: Any | None = None) -> Payment
         provider_ref_aliases=_ref_aliases(  # EC:E24
             [invoice_payment_intent_ref(invoice), _get(pi, "latest_charge") if pi is not None else None]
         ),
+    )
+
+
+def _checkout_sale_evidence(session: Any) -> SaleEvidence | None:
+    subtotal = _get(session, "amount_subtotal")
+    total = _get(session, "amount_total")
+    if subtotal is None or total is None:
+        return None
+    currency = _get(session, "currency") or "usd"
+    lines = _get(_get(session, "line_items"), "data") or []
+    return SaleEvidence(
+        provider_subtotal=_money(subtotal, currency),
+        discount_amount=_money(
+            _get(_get(session, "total_details"), "amount_discount") or 0,
+            currency,
+        ),
+        price_ref=_line_item_price_ref(lines[0]) if lines else None,
+        checkout_id=_get(session, "id"),
+        payment_link_id=_ref_id(_get(session, "payment_link")),
+        link_reference=_get(session, "client_reference_id"),
+    )
+
+
+def normalize_checkout_session_as_payment(session: Any) -> Payment:
+    invoice = _get(session, "invoice")
+    expanded_invoice = invoice if invoice is not None and not isinstance(invoice, str) else None
+    intent = _get(session, "payment_intent")
+    expanded_intent = intent if intent is not None and not isinstance(intent, str) else None
+    if expanded_invoice is not None:
+        base = normalize_invoice_as_payment(expanded_invoice, expanded_intent)
+    elif expanded_intent is not None:
+        base = normalize_payment_intent(expanded_intent)
+    else:
+        raise PaymentKitError(
+            f"stripe checkout session {_get(session, 'id')} has no payable reference",
+            "provider_shape",
+        )
+    subscription = _get(session, "subscription")
+    subscription_id = _ref_id(subscription) or base.subscription_id
+    return replace(
+        base,
+        subscription_id=subscription_id,
+        kind="subscription" if _get(session, "mode") == "subscription" else "topup",
+        sale_evidence=_checkout_sale_evidence(session),
+        affiliate_id=(
+            _get(_get(session, "metadata"), "affiliateId") or base.affiliate_id
+        ),
+        raw=_as_dict(session),
     )
 
 
@@ -444,6 +514,37 @@ def _invoice_subscription_metadata(invoice: Any) -> dict[str, Any]:
     if metadata is None:
         metadata = _get(_get(invoice, "subscription_details"), "metadata")
     return _as_dict(metadata)
+
+
+def _line_item_price_ref(line: Any) -> str | None:
+    price = _get(line, "price")
+    if isinstance(price, str):
+        return price
+    price_id = _get(price, "id")
+    if isinstance(price_id, str):
+        return price_id
+    pricing_price = _get(_get(_get(line, "pricing"), "price_details"), "price")
+    if isinstance(pricing_price, str):
+        return pricing_price
+    pricing_price_id = _get(pricing_price, "id")
+    return pricing_price_id if isinstance(pricing_price_id, str) else None
+
+
+def _invoice_sale_evidence(invoice: Any) -> SaleEvidence | None:
+    subtotal = _get(invoice, "subtotal")
+    if subtotal is None:
+        return None
+    discounts = _get(invoice, "total_discount_amounts") or []
+    discount_amount = sum((_get(item, "amount") or 0) for item in discounts)
+    lines = _get(_get(invoice, "lines"), "data") or []
+    return SaleEvidence(
+        provider_subtotal=_money(subtotal, _get(invoice, "currency")),
+        discount_amount=_money(discount_amount, _get(invoice, "currency")),
+        price_ref=_line_item_price_ref(lines[0]) if lines else None,
+        checkout_id=None,
+        payment_link_id=None,
+        link_reference=None,
+    )
 
 
 def invoice_payment_intent_ref(invoice: Any) -> str | None:
@@ -567,7 +668,16 @@ def map_event_type(event: Any) -> str:
         return "subscription.payment_failed"
     if t == "checkout.session.completed":
         mode = obj.get("mode") if isinstance(obj, dict) else getattr(obj, "mode", None)
-        return "subscription.created" if mode == "subscription" else "payment.succeeded"
+        payment_link = (
+            obj.get("payment_link")
+            if isinstance(obj, dict)
+            else getattr(obj, "payment_link", None)
+        )
+        return (
+            "subscription.created"
+            if mode == "subscription" and not payment_link
+            else "payment.succeeded"
+        )
     if t == "payment_intent.succeeded":
         invoice = (
             obj.get("invoice")
@@ -634,13 +744,18 @@ def to_normalized_event(event: Any) -> NormalizedEvent:
         )
     elif t == "checkout.session.completed":
         customer = _get(obj, "customer")
+        payment_link = _ref_id(_get(obj, "payment_link"))
         customer_ref = (
-            customer if isinstance(customer, str) else _get(customer, "id")
-        ) or _get(obj, "client_reference_id")
+            _get(obj, "client_reference_id")
+            if payment_link
+            else (
+                customer if isinstance(customer, str) else _get(customer, "id")
+            )
+            or _get(obj, "client_reference_id")
+        )
         sub = _get(obj, "subscription")
         subscription_ref = sub if isinstance(sub, str) else None
-        pi = _get(obj, "payment_intent")
-        payment_ref = pi if isinstance(pi, str) else _get(pi, "id")
+        payment_ref = _get(obj, "id")
         amount_total = _get(obj, "amount_total")
         if amount_total is not None:
             amount = _money(amount_total, _get(obj, "currency") or "usd")
@@ -780,7 +895,11 @@ class StripeProvider:
                 {"plan_id": input.plan.id},
             )
         mode = "subscription" if input.mode == "subscription" else "payment"
-        metadata = {**(input.metadata or {}), "planId": input.plan.id}
+        metadata = {
+            **(input.metadata or {}),
+            "planId": input.plan.id,
+            **({"affiliateId": input.affiliate_id} if input.affiliate_id else {}),
+        }
         params: dict[str, Any] = {
             "mode": mode,
             "client_reference_id": input.customer_ref,
@@ -790,6 +909,12 @@ class StripeProvider:
             "cancel_url": input.cancel_url,
             "metadata": metadata,
         }
+        if input.preset_discount_code:
+            params["discounts"] = [
+                {"promotion_code": input.preset_discount_code}
+            ]
+        elif input.allow_discount_codes:
+            params["allow_promotion_codes"] = True
         if mode == "subscription":
             params["subscription_data"] = {"metadata": metadata}
             # SB-03 -- Stripe must own the trial so Checkout does not charge on day one.
@@ -839,6 +964,22 @@ class StripeProvider:
 
     # EC:E7 E12 — accepts pi_... or in_...
     async def get_payment(self, provider_ref: str) -> Payment:
+        if provider_ref.startswith("cs_"):
+            session = await self._client.v1.checkout.sessions.retrieve_async(
+                provider_ref,
+                {"expand": ["line_items", "payment_intent", "invoice"]},
+            )
+            intent = _get(session, "payment_intent")
+            if isinstance(intent, str):
+                intent = await self._client.v1.payment_intents.retrieve_async(
+                    intent, {"expand": ["latest_charge"]}
+                )
+                session = {**_as_dict(session), "payment_intent": intent}
+            invoice = _get(session, "invoice")
+            if isinstance(invoice, str):
+                invoice = await self._client.v1.invoices.retrieve_async(invoice)
+                session = {**_as_dict(session), "invoice": invoice}
+            return normalize_checkout_session_as_payment(session)
         if provider_ref.startswith("in_"):
             # No expand=payment_intent: the field does not exist on API >= 2025-03-31 (would 400).
             invoice = await self._client.v1.invoices.retrieve_async(provider_ref)

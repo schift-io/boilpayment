@@ -69,6 +69,47 @@ describe('[EC:F(Polar)] PolarProvider HTTP methods (fetch stubbed — no network
     });
   });
 
+  it('[DC-01][AF-01] createCheckout forwards discount controls and affiliate metadata', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ id: 'checkout_discounted', url: 'https://polar.sh/checkout/checkout_discounted' }));
+    const price: PlanPrice = { currency: 'usd', amountMinor: 1000, providerPriceRefs: { polar: 'prod_polar_1' } };
+    const plan: Plan = { id: 'plan_pro', name: 'Pro', interval: 'month', creditsPerPeriod: 1000, usageIncluded: 0, trialDays: 0, prices: [price] };
+
+    await provider.createCheckout({
+      customerRef: 'cust_abc',
+      plan,
+      price,
+      mode: 'subscription',
+      successUrl: 'https://app.example.com/success',
+      cancelUrl: 'https://app.example.com/cancel',
+      idempotencyKey: 'checkout:discounted',
+      allowDiscountCodes: true,
+      presetDiscountCode: 'discount_20pct',
+      affiliateId: 'affiliate_alpha',
+    });
+
+    expect(JSON.parse(lastCall().init.body as string)).toEqual({
+      products: ['prod_polar_1'],
+      customer_id: 'cust_abc',
+      metadata: { planId: 'plan_pro', affiliateId: 'affiliate_alpha' },
+      success_url: 'https://app.example.com/success',
+      allow_discount_codes: true,
+      discount_id: 'discount_20pct',
+    });
+  });
+
+  it('[DC-06] exhausted discount refusal is definitive and returns no checkout', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ detail: 'discount max redemptions reached' }, 422));
+    const price: PlanPrice = { currency: 'usd', amountMinor: 1000, providerPriceRefs: { polar: 'prod_polar_1' } };
+    const plan: Plan = { id: 'plan_pro', name: 'Pro', interval: null, creditsPerPeriod: 1000, usageIncluded: 0, trialDays: 0, prices: [price] };
+
+    await expect(provider.createCheckout({
+      customerRef: 'cust_abc', plan, price, mode: 'one_time',
+      successUrl: 'https://app.example.com/success', cancelUrl: 'https://app.example.com/cancel',
+      idempotencyKey: 'checkout:exhausted', presetDiscountCode: 'discount_exhausted',
+    })).rejects.toMatchObject({ code: 'provider', httpStatus: 422 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('[EC:F(Polar)] createCheckout -> missing providerPriceRefs.polar throws PaymentKitError(missing_provider_price_ref) without calling fetch', async () => {
     const price: PlanPrice = { currency: 'usd', amountMinor: 1000 };
     const plan: Plan = { id: 'plan_pro', name: 'Pro', interval: 'month', creditsPerPeriod: 1000, usageIncluded: 0, trialDays: 0, prices: [price] };

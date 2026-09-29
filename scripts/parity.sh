@@ -15,11 +15,11 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-TSX="$ROOT/apps/cli/node_modules/.bin/tsx"
+TSX_PACKAGE="$ROOT/apps/cli/node_modules/tsx"
 PYBIN="$ROOT/.venv/bin/python"
 
-if [[ ! -x "$TSX" ]]; then
-  echo "parity.sh: tsx not found at $TSX (pnpm install not run?)" >&2
+if [[ ! -d "$TSX_PACKAGE" ]]; then
+  echo "parity.sh: tsx not found at $TSX_PACKAGE (pnpm install not run?)" >&2
   exit 1
 fi
 if [[ ! -x "$PYBIN" ]]; then
@@ -102,8 +102,8 @@ run_pair() {
 
 for i in "${!PKG_NAMES[@]}"; do
   run_pair "${PKG_NAMES[$i]}" \
-    "\"$TSX\" \"${PKG_TS[$i]}\"" \
-    "\"$PYBIN\" \"${PKG_PY[$i]}\""
+    "cd \"$ROOT/apps/cli\" && node --import tsx \"${PKG_TS[$i]}\"" \
+    "env -u ALL_PROXY -u all_proxy \"$PYBIN\" \"${PKG_PY[$i]}\""
 done
 
 # --- e2e round-trip ------------------------------------------------------------
@@ -111,8 +111,8 @@ E2E_TS="$ROOT/examples/e2e/round-trip.ts"
 E2E_PY="$ROOT/examples/e2e/round_trip.py"
 if [[ -f "$E2E_TS" && -f "$E2E_PY" ]]; then
   run_pair "examples/e2e" \
-    "\"$TSX\" \"$E2E_TS\"" \
-    "\"$PYBIN\" \"$E2E_PY\""
+    "cd \"$ROOT/apps/cli\" && node --import tsx \"$E2E_TS\"" \
+    "env -u ALL_PROXY -u all_proxy \"$PYBIN\" \"$E2E_PY\""
 else
   echo "SKIP  examples/e2e (round-trip.ts / round_trip.py not found)"
 fi

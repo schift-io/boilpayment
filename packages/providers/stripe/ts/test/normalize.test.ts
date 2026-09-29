@@ -199,6 +199,28 @@ describe('[EC:F(Stripe)] normalizeInvoiceAsPayment', () => {
     const result = normalizeInvoiceAsPayment(invoice('open', { amount_paid: 0, amount_due: 7000 }));
     expect(result.amount).toEqual({ amountMinor: 7000, currency: 'KRW' });
   });
+
+  it('[DC-05 AF-04] records the charged renewal amount, invoice discount evidence, price ref, and affiliate', () => {
+    const result = normalizeInvoiceAsPayment(invoice('paid', {
+      amount_paid: 8000,
+      subtotal: 10000,
+      total: 8000,
+      total_discount_amounts: [{ amount: 2000, discount: 'di_1' }],
+      discounts: ['di_1'],
+      metadata: { affiliateId: 'affiliate_7' },
+      lines: { data: [{ price: { id: 'price_pro' }, period: { start: NOW, end: NOW + 2592000 } }] },
+    }));
+
+    expect(result.amount).toEqual({ amountMinor: 8000, currency: 'KRW' });
+    expect(result).toMatchObject({
+      affiliateId: 'affiliate_7',
+      saleEvidence: {
+        providerSubtotal: { amountMinor: 10000, currency: 'KRW' },
+        discountAmount: { amountMinor: 2000, currency: 'KRW' },
+        priceRef: 'price_pro', checkoutId: null, paymentLinkId: null, linkReference: null,
+      },
+    });
+  });
 });
 
 describe('[EC:F(Stripe)] normalizeSubscription', () => {
@@ -484,9 +506,21 @@ describe('[EC:F(Stripe)] toNormalizedEvent — field extraction per event type',
     } as unknown as Stripe.Event;
     const result = toNormalizedEvent(event);
     expect(result.customerRef).toBe('internal_cust_9');
-    expect(result.paymentRef).toBe('pi_1');
+    expect(result.paymentRef).toBe('cs_1');
     expect(result.amount).toEqual({ amountMinor: 4200, currency: 'USD' });
     expect(result.type).toBe('payment.succeeded');
+  });
+
+  it('[PL-01] payment-link checkout uses its encoded reference and session id even when a Stripe customer exists', () => {
+    const event = {
+      id: 'evt_link', type: 'checkout.session.completed', created: NOW,
+      data: { object: { id: 'cs_link', mode: 'payment', customer: 'cus_stripe', client_reference_id: 'encoded_customer', payment_intent: 'pi_link', payment_link: 'plink_1', amount_total: 4200, currency: 'usd' } },
+    } as unknown as Stripe.Event;
+
+    const result = toNormalizedEvent(event);
+
+    expect(result.customerRef).toBe('encoded_customer');
+    expect(result.paymentRef).toBe('cs_link');
   });
 
   it('checkout.session.completed (mode=subscription): subscriptionRef populated, type=subscription.created', () => {
@@ -499,6 +533,18 @@ describe('[EC:F(Stripe)] toNormalizedEvent — field extraction per event type',
     const result = toNormalizedEvent(event);
     expect(result.subscriptionRef).toBe('sub_2');
     expect(result.type).toBe('subscription.created');
+  });
+
+  it('[PL-02] subscription payment-link checkout is a payment success, not a kit subscription-created event', () => {
+    const event = {
+      id: 'evt_subscription_link', type: 'checkout.session.completed', created: NOW,
+      data: { object: { id: 'cs_link_sub', mode: 'subscription', customer: 'cus_2', subscription: 'sub_2',
+        payment_link: 'plink_2', client_reference_id: 'encoded_customer' } },
+    } as unknown as Stripe.Event;
+
+    expect(toNormalizedEvent(event)).toMatchObject({
+      type: 'payment.succeeded', paymentRef: 'cs_link_sub', subscriptionRef: 'sub_2', customerRef: 'encoded_customer',
+    });
   });
 
   it('payment_intent.payment_failed: paymentRef=pi.id, customerRef=pi.customer, amount=pi.amount', () => {

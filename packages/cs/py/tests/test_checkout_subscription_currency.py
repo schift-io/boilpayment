@@ -15,7 +15,7 @@ from boilpayment_cs import (
 from test_support import setup
 
 
-def test_ec_a28_checkout_subscription_currency() -> None:
+def test_ot_09_registration_links_held_subscription_payment() -> None:
     async def run():
         deps, provider, _ = await setup()
         period = Period(start=deps["clock"].now(), end=datetime(2026, 2, 1, tzinfo=UTC))
@@ -46,8 +46,15 @@ def test_ec_a28_checkout_subscription_currency() -> None:
         provider.create_checkout = create_checkout
         await start_checkout(StartCheckoutInput(**deps, customer_id="customer", plan_id="monthly", provider="stripe", currency="USD",
                                                 request_id="sub-sale", success_url="https://example.test/ok", cancel_url="https://example.test/cancel"))
-        await register_completed_checkout(RegisterCompletedCheckoutInput(**deps, customer_id="customer", checkout_id="cs_sub", payment_ref="pi_sub"))
+        held = replace(
+            await get_payment("cs_sub"),
+            id="payment:stripe:pi_sub",
+            customer_id="customer",
+            subscription_id=None,
+        )
+        await deps["repo"].payments.put(held)
+        payment = await register_completed_checkout(RegisterCompletedCheckoutInput(**deps, customer_id="customer", checkout_id="cs_sub", payment_ref="pi_sub"))
         sub = await deps["repo"].subscriptions.get("subscription:stripe:sub_remote")
-        return sub.currency if sub else "missing"
+        return payment.subscription_id, sub.currency if sub else "missing"
 
-    assert anyio.run(run) == "USD"
+    assert anyio.run(run) == ("subscription:stripe:sub_remote", "USD")

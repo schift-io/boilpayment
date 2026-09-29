@@ -69,13 +69,17 @@ function mapOrderStatus(order: Record<string, any>): PaymentStatus {
 // EC:E7 E12 — normalize Polar Order (raw REST, snake_case) -> Payment (pure)
 export function normalizeOrder(order: Record<string, any>): Payment {
   const kind: PaymentKind = order.subscription_id ? 'subscription' : 'topup';
+  const metadata = (order.metadata ?? {}) as Record<string, unknown>;
+  const currency = typeof order.currency === 'string' ? order.currency : 'usd';
+  const paidAmount = order.total_amount ?? order.net_amount ?? 0;
+  const firstItem = Array.isArray(order.items) ? order.items[0] : undefined;
   return {
     id: order.id,
     customerId: '',
     provider: 'polar',
     providerRef: order.id,
     subscriptionId: order.subscription_id ?? null,
-    amount: money(order.total_amount ?? order.net_amount ?? 0, order.currency),
+    amount: money(paidAmount, currency),
     status: mapOrderStatus(order),
     kind,
     period: null,
@@ -83,6 +87,17 @@ export function normalizeOrder(order: Record<string, any>): Payment {
     failure: null,
     cashReceipt: null,
     providerRefAliases: null, // EC:E24 — one ref per payment (py renders the key: parity)
+    saleEvidence: {
+      providerSubtotal: money(order.subtotal_amount ?? paidAmount, currency),
+      discountAmount: money(order.discount_amount ?? 0, currency),
+      priceRef: order.product_id ?? firstItem?.product_price_id ?? null,
+      checkoutId: order.checkout_id ?? null,
+      paymentLinkId: order.checkout_link_id ?? metadata.checkout_link_id ?? null,
+      linkReference: typeof metadata.reference_id === 'string' ? metadata.reference_id : null,
+    },
+    affiliateId: typeof metadata.affiliateId === 'string'
+      ? metadata.affiliateId
+      : (typeof metadata.affiliate_id === 'string' ? metadata.affiliate_id : null),
     raw: order,
   };
 }
@@ -119,6 +134,9 @@ export function normalizeSubscription(sub: Record<string, any>): Subscription {
     currency: typeof sub.currency === 'string' ? sub.currency.toUpperCase() : null, // EC:A28
     version: 0, // provider-side row; the local repo row owns the EC:K1 optimistic lock
     createdAt: new Date(sub.created_at),
+    affiliateId: typeof md.affiliateId === 'string'
+      ? md.affiliateId
+      : (typeof md.affiliate_id === 'string' ? md.affiliate_id : null),
   };
 }
 
@@ -360,8 +378,14 @@ export class PolarProvider implements PaymentProvider {
       {
         products: [productRef],
         customer_id: input.customerRef,
-        metadata: { ...(input.metadata ?? {}), planId: input.plan.id },
+        metadata: {
+          ...(input.metadata ?? {}),
+          planId: input.plan.id,
+          ...(input.affiliateId ? { affiliateId: input.affiliateId } : {}),
+        },
         success_url: input.successUrl,
+        ...(input.allowDiscountCodes ? { allow_discount_codes: true } : {}),
+        ...(input.presetDiscountCode ? { discount_id: input.presetDiscountCode } : {}),
       },
       { 'Idempotency-Key': input.idempotencyKey },
     );

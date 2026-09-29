@@ -54,6 +54,16 @@ test('parity compares JSON values regardless of object property order', () => {
   assert.equal(left.stdout, right.stdout);
 });
 
+test('parity treats absent optional commerce evidence like Python null defaults', () => {
+  // Given TS omits optional fields while Python dataclasses serialize their defaults as null.
+  const normalize = (input) => spawnSync('node', ['scripts/parity-normalize.mjs'], { input, encoding: 'utf8' });
+  const left = normalize('{"amount":{"amountMinor":100,"currency":"KRW"}}');
+  const right = normalize('{"affiliate_id":null,"amount":{"amount_minor":100,"currency":"KRW"},"sale_evidence":null}');
+  assert.equal(left.status, 0);
+  assert.equal(right.status, 0);
+  assert.equal(left.stdout, right.stdout);
+});
+
 for (const [providers, dryRun, expected] of [
   [[], false, 1],
   [[], true, 0],

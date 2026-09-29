@@ -1,7 +1,7 @@
 import { runIdempotent, serializeCsCase, deserializeCsCase } from 'boilpayment-core';
 import type { Clock, CsCase, IdGen, LedgerStore, Notifier, Payment, PaymentProvider, Policy, ProviderName, Repo } from 'boilpayment-core';
 import { escalate, openCase, reject } from './cases.js';
-import { getPurchaseSnapshot } from './purchaseSnapshot.js';
+import { getPurchaseSnapshot, matchesCapturedSaleAmount } from './purchaseSnapshot.js';
 import type { LicenseReporter } from './metrics.js';
 import type { OnCaseEvent } from './cases.js';
 
@@ -66,6 +66,6 @@ export async function resolveTopupCredits(input: { readonly payment: Payment; re
   const snapshot = await getPurchaseSnapshot({ paymentId: payment.id, repo });
   if (payment.kind !== 'topup' || !snapshot || snapshot.plan.interval !== null || snapshot.customerId !== payment.customerId
     || snapshot.paymentRef !== payment.providerRef || snapshot.provider !== payment.provider
-    || snapshot.price.currency !== payment.amount.currency || snapshot.price.amountMinor !== payment.amount.amountMinor) return null;
+    || !matchesCapturedSaleAmount(snapshot, payment)) return null;
   return snapshot.plan.creditsPerPeriod > 0 ? snapshot.plan.creditsPerPeriod : null;
 }

@@ -21,6 +21,10 @@ from boilpayment_core import (
 )
 from boilpayment_core.money import round_half_away_from_zero
 
+from .affiliate_reversal import (
+    AppendAffiliateReversalsInput,
+    append_affiliate_reversals,
+)
 from .util import (
     _upgrade_invoice_attributed_grant_ids,
     revert_refunded_upgrade,
@@ -108,6 +112,12 @@ async def on_external_refund(input: OnExternalRefundInput) -> Refund:
         None,
     )
     if existing is not None and existing.status != "pending":
+        if payment is not None:
+            await append_affiliate_reversals(
+                AppendAffiliateReversalsInput(
+                    repo=repo, ledger=ledger, clock=clock, payment=payment, refund=existing
+                )
+            )
         return existing
     pending = (
         existing
@@ -341,7 +351,13 @@ async def on_external_refund(input: OnExternalRefundInput) -> Refund:
             )
         return refund
 
-    return await ledger.transaction(payment.customer_id, _settle)
+    refund = await ledger.transaction(payment.customer_id, _settle)
+    await append_affiliate_reversals(
+        AppendAffiliateReversalsInput(
+            repo=repo, ledger=ledger, clock=clock, payment=payment, refund=refund
+        )
+    )
+    return refund
 
 
 async def _revoke_buckets(

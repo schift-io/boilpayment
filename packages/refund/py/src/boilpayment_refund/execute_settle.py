@@ -6,6 +6,10 @@ from typing import TYPE_CHECKING
 
 from boilpayment_core import LedgerReference, NewLedgerEntry, Payment, Refund
 
+from .affiliate_reversal import (
+    AppendAffiliateReversalsInput,
+    append_affiliate_reversals,
+)
 from .util import _upgrade_invoice_attributed_grant_ids, revert_refunded_upgrade
 
 if TYPE_CHECKING:
@@ -148,6 +152,11 @@ async def settle_refund(input: ExecuteInput, provider_result: Refund, payment: P
         created_at=clock.now(),
     )
     await repo.refunds.put(refund)
+    await append_affiliate_reversals(
+        AppendAffiliateReversalsInput(
+            repo=repo, ledger=ledger, clock=clock, payment=payment, refund=refund
+        )
+    )
 
     # EC:K5 K6 -- cancel the cash receipt AFTER the refund has already landed successfully. A
     # cash-receipt-cancel failure must NEVER roll back or downgrade the refund's own success --

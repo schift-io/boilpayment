@@ -12,6 +12,9 @@ export type OrmChoice = 'none' | 'prisma' | 'drizzle' | 'sqlalchemy';
 export type EmailNotifyChoice = 'none' | 'resend' | 'smtp';
 export type SchedulerChoice = 'provider' | 'self';
 export type LoggingChoice = 'none' | 'console' | 'postgres';
+export type AffiliateCommissionConfig =
+  | { type: 'rate'; rate: number }
+  | { type: 'fixed'; amountMinor: number };
 
 export interface PlanPriceConfig {
   currency: string;
@@ -56,6 +59,13 @@ export interface PaykitConfig {
   };
   /** enabled controls optional usage reporting; support rules and durable cases are always included. */
   cs: { enabled: boolean; widget: boolean };
+  /** OT-09 — wait this long for an unregistered kit checkout before human review. */
+  checkout: { registrationHoldHours: number };
+  /** AF-01..04 — user-owned affiliate commission and renewal attribution rules. */
+  affiliate: {
+    commission: AffiliateCommissionConfig;
+    renewals: 'first_only' | 'include';
+  };
   /** EC:C10 — generate kit.reservations (reserve/commit/release) and cron.sweepReservations. Needs credits. */
   reservations?: boolean;
   /** EC:I10 — generate kit.reports.settlement (monthly settlement totals). */
@@ -87,6 +97,11 @@ export function emptyConfig(): PaykitConfig {
       logging: 'postgres',
     },
     cs: { enabled: false, widget: false },
+    checkout: { registrationHoldHours: 24 },
+    affiliate: {
+      commission: { type: 'rate', rate: 0 },
+      renewals: 'first_only',
+    },
     plans: [],
   };
 }
@@ -106,6 +121,13 @@ export async function readConfig(dir: string): Promise<PaykitConfig | null> {
     const parsed = JSON.parse(raw) as PaykitConfig;
     // Re-resolve policy through core so partial/older configs still validate + fill new keys.
     parsed.policy = resolvePolicy(parsed.policy as Partial<Policy>);
+    parsed.checkout = {
+      registrationHoldHours: parsed.checkout?.registrationHoldHours ?? 24,
+    };
+    parsed.affiliate = {
+      commission: parsed.affiliate?.commission ?? { type: 'rate', rate: 0 },
+      renewals: parsed.affiliate?.renewals ?? 'first_only',
+    };
     return parsed;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;

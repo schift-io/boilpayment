@@ -87,7 +87,7 @@ class Provider:
         )
 
     async def get_payment(self, ref: str) -> Payment:
-        assert ref == self.payment.provider_ref
+        assert ref in (self.payment.provider_ref, "checkout_a85")
         return replace(
             self.payment,
             raw={

@@ -23,9 +23,11 @@ export function importsPy(config: PaykitConfig): string[] {
   const l: string[] = [];
   l.push(`from __future__ import annotations`);
   l.push('');
+  l.push(`import inspect`);
+  l.push(`from copy import deepcopy`);
   l.push(`from typing import Any`);
   l.push('');
-  l.push(`from boilpayment.core import Clock, ConsoleLogger, Deps, LedgerStore, Logger, Money, NoopLogger, Notification, Notifier, Payment, ${hasCredits || hasSelfScheduler ? 'PaymentKitError, ' : ''}PaymentProvider, Period, Plan, PlanPrice, Policy, Repo, Subscription, resolve_policy`);
+  l.push(`from boilpayment.core import AffiliateCommission, Clock, ConsoleLogger, CsCase, Deps, LedgerStore, Logger, Money, NoopLogger, Notification, Notifier, Payment, ${hasCredits || hasSubscription ? 'PaymentKitError, ' : ''}PaymentProvider, Period, Plan, PlanPrice, Policy, Repo, Subscription, calculate_affiliate_accrual, money, resolve_policy`);
   l.push(`from boilpayment.postgres import verify_schema`);
   if (config.infra.logging === 'postgres') {
     l.push(`from boilpayment.postgres import PostgresLogger`);
@@ -97,6 +99,7 @@ export function importsPy(config: PaykitConfig): string[] {
   l.push(`    HttpLicenseReporter,`);
   l.push(`    NoopLicenseReporter,`);
   l.push(`    OpenCaseInput,`);
+  l.push(`    ReconcileInput,`);
   l.push(`    StartCheckoutInput,
   RegisterCompletedCheckoutInput,
   ApplyPurchasedGrantInput,
@@ -106,7 +109,10 @@ export function importsPy(config: PaykitConfig): string[] {
   RecoverMissingGrantsInput,`);
   l.push(`    dispute,`);
   l.push(`    open_case,`);
-  l.push(`    start_checkout,
+  l.push(`    build_payment_link_url as build_provider_payment_link_url,
+  decode_payment_link_reference,
+  reconcile as reconcile_cases,
+  start_checkout,
   register_completed_checkout as register_checkout,
   apply_purchased_grant,
   finish_refund_cases,

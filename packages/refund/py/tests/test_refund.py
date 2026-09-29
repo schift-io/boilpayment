@@ -604,7 +604,10 @@ def test_d3_refund_time_prorated_anyway_computes_refund_despite_overuse():
 def test_d2_min_of_both_picks_unused_credits_when_smaller():
     async def run():
         clock, _ids, ledger, repo, policy = make_env()
-        pol = resolve_policy({"refund": {"method": "min_of_both"}})
+        pol = resolve_policy({"refund": {
+            "method": "min_of_both",
+            "overuse_behavior": "refund_time_prorated_anyway",
+        }})
         from boilpayment_core import Period
 
         period = Period(
@@ -625,9 +628,9 @@ def test_d2_min_of_both_picks_unused_credits_when_smaller():
             failure=None,
         )
         await repo.payments.put(p)
-        await do_grant(ledger, p.id, 20, 30)  # total value 600 minor
+        await do_grant(ledger, p.id, 100, 30)  # the 3,000-minor payment bought 100 credits
         await do_consume(
-            ledger, clock, policy, 1, "consume:mob1"
+            ledger, clock, policy, 81, "consume:mob1"
         )  # unused=19 -> 570 minor
         clock.advance(20 * DAY_MS)  # time_prorated amount = 1000 minor
         decision = await evaluate(

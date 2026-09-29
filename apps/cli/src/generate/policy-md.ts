@@ -22,6 +22,9 @@ export function generatePolicyMd(config: PaykitConfig): string {
   lines.push(`- Models: ${config.models.join(', ') || '(none)'}`);
   lines.push(`- Goods: ${config.goods.join(', ') || '(none)'}`);
   lines.push(`- Logging (docs/EDGE_CASES.md §L): \`${config.infra.logging}\`${config.infra.logging === 'none' ? ' — ⚠ 결제 실패를 재구성할 증거가 남지 않습니다' : ''}`);
+  lines.push(`- \`checkout.registrationHoldHours\`: \`${config.checkout.registrationHoldHours}\` (default 24)`);
+  lines.push(`- \`affiliate.commission\`: \`${JSON.stringify(config.affiliate.commission)}\``);
+  lines.push(`- \`affiliate.renewals\`: \`${config.affiliate.renewals}\` (default \`first_only\`)`);
   lines.push('');
   lines.push('---');
   lines.push('');

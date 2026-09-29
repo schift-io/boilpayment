@@ -134,7 +134,7 @@ it.each(['stripe', 'polar'] as const)('[OT-03] %s missing provider price propaga
   expect(calls).toBe(1);
 });
 
-it.each([[400, 'provider'], [500, 'checkout_outcome_unknown'], [null, 'checkout_outcome_unknown']] as const)('[OT-03] provider HTTP %s maps only uncertain outcomes to unknown', async (status, expectedCode) => {
+it.each([[400, 'provider'], [500, 'checkout_outcome_unknown'], [null, 'checkout_outcome_unknown']] as const)('[OT-03, DC-06] provider HTTP %s maps only uncertain outcomes to unknown', async (status, expectedCode) => {
   const input = await setup();
   const provider = input.providers.stripe;
   provider.createCheckout = async () => {
@@ -145,6 +145,10 @@ it.each([[400, 'provider'], [500, 'checkout_outcome_unknown'], [null, 'checkout_
   const call = startCheckout({ ...input, customerId: 'customer', planId: 'credits100', provider: 'stripe',
     currency: 'USD', requestId: `provider-${status ?? 'transport'}`, successUrl: 'https://example.test/ok', cancelUrl: 'https://example.test/cancel' });
   await expect(call).rejects.toMatchObject({ code: expectedCode });
+  if (status === 400) {
+    expect(await input.repo.operations.get('checkout-entitlement:customer:provider-400')).toBeNull();
+    expect(await input.repo.operations.get('checkout-result:customer:provider-400')).toBeNull();
+  }
 });
 
 it.each([[7, true], [0, false]] as const)('[SB-03] trialDays=%s accepts only a trialing zero-amount first invoice', async (trialDays, accepted) => {
@@ -453,7 +457,7 @@ it.each(['stripe', 'polar'] as const)('[SB-14] %s lost renewal webhook grants th
   expect(await input.ledger.entries('customer', { kind: 'grant', source: 'subscription' })).toHaveLength(1);
   expect((await input.repo.csCases.list({ referenceId: recorded.id }))).toHaveLength(1);
 });
-it('keeps native subscription entitlement from sale after catalog credits change', async () => {
+it('[OT-09] registration links a held subscription payment before granting captured entitlement', async () => {
   const input = await setup(); const provider = input.providers.stripe;
   const period = { start: input.clock.now(), end: new Date('2026-02-01T00:00:00Z') };
   const plan = { id: 'monthly', name: 'Monthly', interval: 'month' as const, creditsPerPeriod: 100, usageIncluded: 0, trialDays: 0, prices: [{ currency: 'USD', amountMinor: 1000, providerPriceRefs: { stripe: 'price_monthly' } }] };
@@ -463,8 +467,11 @@ it('keeps native subscription entitlement from sale after catalog credits change
   provider.listPayments = async () => [await provider.getPayment('pi_sub')];
   provider.getSubscription = async () => ({ id: 'sub_remote', customerId: 'cus_1', planId: 'monthly', provider: 'stripe', providerRef: 'sub_remote', status: 'active', currentPeriod: period, anchorDay: 1, cancelAtPeriodEnd: false, graceUntil: null, billingKey: null, scheduledPlanId: null, version: 0, createdAt: input.clock.now() });
   await startCheckout({ ...input, planId: 'monthly', provider: 'stripe', currency: 'USD', requestId: 'sub-sale', successUrl: 'https://example.test/ok', cancelUrl: 'https://example.test/cancel' });
+  const held = await provider.getPayment('cs_sub');
+  await input.repo.payments.put({ ...held, id: 'payment:stripe:pi_sub', customerId: 'customer', subscriptionId: null });
   await input.repo.plans.put({ ...plan, creditsPerPeriod: 500 });
   const payment = await registerCompletedCheckout({ ...input, checkoutId: 'cs_sub', paymentRef: 'pi_sub' });
+  expect(payment.subscriptionId).toBe('subscription:stripe:sub_remote');
   const result = await recoverMissingGrant({ ...input, paymentId: payment.id });
   expect(result.status).toBe('resolved_auto');
   const grants = await input.ledger.entries('customer', { kind: 'grant' });

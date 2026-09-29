@@ -1,5 +1,5 @@
 import { PaymentKitError, validatePolicy } from 'boilpayment-core';
-import type { Plan, PlanPrice, Policy, ProviderName, Repo } from 'boilpayment-core';
+import type { Payment, Plan, PlanPrice, Policy, ProviderName, Repo } from 'boilpayment-core';
 
 export interface CheckoutSnapshot {
   readonly intentKey: string;
@@ -12,6 +12,9 @@ export interface CheckoutSnapshot {
   readonly price: PlanPrice;
   readonly policy: Policy;
   readonly capturedAt: string;
+  readonly allowDiscountCodes: boolean;
+  readonly presetDiscountCode: string | null;
+  readonly affiliateId: string | null;
 }
 export interface PurchaseSnapshot extends CheckoutSnapshot {
   readonly paymentId: string;
@@ -28,6 +31,9 @@ function text(value: unknown): string {
 function integer(value: unknown): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new PaymentKitError('invalid purchase snapshot amount', 'purchase_snapshot_invalid');
   return value;
+}
+function optionalText(value: unknown): string | null {
+  return value === null || value === undefined ? null : text(value);
 }
 function price(value: unknown): PlanPrice {
   if (!record(value)) throw new PaymentKitError('invalid purchase price', 'purchase_snapshot_invalid');
@@ -48,7 +54,9 @@ export function parseCheckoutSnapshot(value: unknown): CheckoutSnapshot {
     creditsPerPeriod: integer(value.plan.creditsPerPeriod), usageIncluded: integer(value.plan.usageIncluded),
     trialDays: integer(value.plan.trialDays), prices: value.plan.prices.map(price) };
   return { intentKey: text(value.intentKey), checkoutId: value.checkoutId === null ? null : text(value.checkoutId), checkoutProviderRef: value.checkoutProviderRef === null ? null : text(value.checkoutProviderRef), customerId: text(value.customerId), customerRef: text(value.customerRef), provider, plan,
-    price: price(value.price), policy: validatePolicy(value.policy), capturedAt: text(value.capturedAt) };
+    price: price(value.price), policy: validatePolicy(value.policy), capturedAt: text(value.capturedAt),
+    allowDiscountCodes: value.allowDiscountCodes === true, presetDiscountCode: optionalText(value.presetDiscountCode),
+    affiliateId: optionalText(value.affiliateId) };
 }
 export function parsePurchaseSnapshot(value: unknown): PurchaseSnapshot {
   const checkout = parseCheckoutSnapshot(value);
@@ -68,4 +76,17 @@ export function matchesCheckoutPayment(snapshot: CheckoutSnapshot, raw: unknown,
   if (snapshot.provider === 'toss') return raw.orderId === snapshot.checkoutId;
   const metadata = record(raw.metadata) ? raw.metadata : null;
   return metadata?.checkoutEntitlementKey === snapshot.intentKey || (snapshot.provider === 'polar' && raw.checkout_id === snapshot.checkoutId);
+}
+
+/** Accept list price, or a lower amount only with provider-authored discount arithmetic. */
+export function matchesCapturedSaleAmount(snapshot: CheckoutSnapshot, payment: Payment): boolean {
+  if (snapshot.price.currency !== payment.amount.currency || payment.amount.amountMinor < 0) return false;
+  if (snapshot.price.amountMinor === payment.amount.amountMinor) return true;
+  const evidence = payment.saleEvidence;
+  if (!evidence || evidence.providerSubtotal.currency !== snapshot.price.currency
+    || evidence.discountAmount.currency !== snapshot.price.currency
+    || evidence.providerSubtotal.amountMinor !== snapshot.price.amountMinor || evidence.discountAmount.amountMinor <= 0
+    || evidence.providerSubtotal.amountMinor - evidence.discountAmount.amountMinor !== payment.amount.amountMinor) return false;
+  const capturedPriceRef = snapshot.price.providerPriceRefs?.[snapshot.provider];
+  return !capturedPriceRef || !evidence.priceRef || capturedPriceRef === evidence.priceRef;
 }

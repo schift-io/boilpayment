@@ -228,6 +228,28 @@ def test_ec_f_stripe_invoice_amount_falls_back_to_amount_due():
     assert result.amount.currency == "KRW"
 
 
+def test_dc_05_af_04_invoice_records_discount_evidence_and_affiliate():
+    result = normalize_invoice_as_payment(
+        _invoice(
+            "paid",
+            amount_paid=8000,
+            subtotal=10000,
+            total=8000,
+            total_discount_amounts=[{"amount": 2000, "discount": "di_1"}],
+            discounts=["di_1"],
+            metadata={"affiliateId": "affiliate_7"},
+            lines={"data": [{"price": {"id": "price_pro"}, "period": {"start": NOW, "end": NOW + 2592000}}]},
+        )
+    )
+
+    assert result.amount.amount_minor == 8000
+    assert result.affiliate_id == "affiliate_7"
+    assert result.sale_evidence is not None
+    assert result.sale_evidence.provider_subtotal.amount_minor == 10000
+    assert result.sale_evidence.discount_amount.amount_minor == 2000
+    assert result.sale_evidence.price_ref == "price_pro"
+
+
 # ---------------------------------------------------------------------------
 # [EC:F(Stripe)] normalize_subscription
 # ---------------------------------------------------------------------------
@@ -596,10 +618,31 @@ def test_to_normalized_event_checkout_customer_ref_falls_back_to_client_referenc
     )
     result = to_normalized_event(event)
     assert result.customer_ref == "internal_cust_9"
-    assert result.payment_ref == "pi_1"
+    assert result.payment_ref == "cs_1"
     assert result.amount.amount_minor == 4200
     assert result.amount.currency == "USD"
     assert result.type == "payment.succeeded"
+
+
+def test_pl_01_payment_link_event_uses_encoded_reference_and_checkout_id():
+    event = _evt(
+        "checkout.session.completed",
+        {
+            "id": "cs_link",
+            "mode": "payment",
+            "customer": "cus_stripe",
+            "client_reference_id": "encoded_customer",
+            "payment_intent": "pi_link",
+            "payment_link": "plink_1",
+            "amount_total": 4200,
+            "currency": "usd",
+        },
+    )
+
+    result = to_normalized_event(event)
+
+    assert result.customer_ref == "encoded_customer"
+    assert result.payment_ref == "cs_link"
 
 
 def test_to_normalized_event_checkout_subscription_mode():
@@ -615,6 +658,27 @@ def test_to_normalized_event_checkout_subscription_mode():
     result = to_normalized_event(event)
     assert result.subscription_ref == "sub_2"
     assert result.type == "subscription.created"
+
+
+def test_pl_02_subscription_payment_link_is_payment_success():
+    event = _evt(
+        "checkout.session.completed",
+        {
+            "id": "cs_link_sub",
+            "mode": "subscription",
+            "customer": "cus_2",
+            "subscription": "sub_2",
+            "payment_link": "plink_2",
+            "client_reference_id": "encoded_customer",
+        },
+    )
+
+    result = to_normalized_event(event)
+
+    assert result.type == "payment.succeeded"
+    assert result.payment_ref == "cs_link_sub"
+    assert result.subscription_ref == "sub_2"
+    assert result.customer_ref == "encoded_customer"
 
 
 def test_to_normalized_event_payment_intent_failed_fields():

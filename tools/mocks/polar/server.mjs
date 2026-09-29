@@ -14,6 +14,8 @@
 //   - POST   /v1/refunds/                   (api-reference/refunds/create)
 //   - POST   /v1/events/ingest              (api-reference/events/ingest)
 //   - webhook payload types                 (integrate/webhooks/events)
+//   - GET    /__mock/link/{product_id}       mock-only hosted checkout-link completion; accepts
+//                                             reference_id, discount_code and utm_* query params
 //
 // SIMPLIFICATION (documented, not a Polar API behavior): real Polar checkouts are completed on
 // Polar's own hosted page — there is no REST call that "completes" one. Since this mock is
@@ -56,6 +58,13 @@ const PRODUCTS = {
   prod_sub_basic: { id: 'prod_sub_basic', name: 'Basic Monthly', amount: 2900, currency: 'usd', recurring: true, recurring_interval: 'month' },
   prod_sub_pro: { id: 'prod_sub_pro', name: 'Pro Monthly', amount: 4900, currency: 'usd', recurring: true, recurring_interval: 'month' },
   prod_onetime_pack: { id: 'prod_onetime_pack', name: 'Credits Pack', amount: 999, currency: 'usd', recurring: false, recurring_interval: null },
+};
+
+const DISCOUNTS = {
+  discount_20pct: { id: 'discount_20pct', code: 'SAVE20', duration: 'repeating', duration_in_repeating_months: 3, type: 'percentage', basis_points: 2000, amount: null, currency: null, max_redemptions: 100, redemptions_count: 0 },
+  discount_500_fixed: { id: 'discount_500_fixed', code: 'LESS500', duration: 'once', duration_in_repeating_months: null, type: 'fixed', basis_points: null, amount: 500, currency: 'usd', max_redemptions: 100, redemptions_count: 0 },
+  discount_forever_10pct: { id: 'discount_forever_10pct', code: 'FOREVER10', duration: 'forever', duration_in_repeating_months: null, type: 'percentage', basis_points: 1000, amount: null, currency: null, max_redemptions: null, redemptions_count: 0 },
+  discount_exhausted: { id: 'discount_exhausted', code: 'EXHAUSTED', duration: 'once', duration_in_repeating_months: null, type: 'fixed', basis_points: null, amount: 100, currency: 'usd', max_redemptions: 1, redemptions_count: 1 },
 };
 
 // ── in-memory state ──────────────────────────────────────────────────────────
@@ -135,8 +144,30 @@ function buildCustomer({ email, name, metadata, external_id }) {
   return c;
 }
 
-function buildOrderForProduct({ product, customerId, subscriptionId, checkoutId }) {
+function discountAmount(product, discount) {
+  if (!discount) return 0;
+  if (discount.type === 'fixed') return Math.min(product.amount, discount.amount);
+  return Math.floor((product.amount * discount.basis_points) / 10_000);
+}
+
+function findDiscount(value) {
+  if (!value) return null;
+  return Object.values(DISCOUNTS).find((discount) => discount.id === value || discount.code === value) ?? null;
+}
+
+function availableDiscount(value) {
+  const discount = findDiscount(value);
+  if (!discount) return { discount: null, error: value ? 'discount_not_found' : null };
+  if (discount.max_redemptions !== null && discount.redemptions_count >= discount.max_redemptions) {
+    return { discount: null, error: 'discount_max_redemptions_reached' };
+  }
+  return { discount, error: null };
+}
+
+function buildOrderForProduct({ product, customerId, subscriptionId, checkoutId, checkoutLinkId = null, metadata = {}, discount = null }) {
   const id = uuid();
+  const appliedDiscountAmount = discountAmount(product, discount);
+  const paidAmount = product.amount - appliedDiscountAmount;
   const order = {
     id,
     created_at: nowIso(),
@@ -144,15 +175,15 @@ function buildOrderForProduct({ product, customerId, subscriptionId, checkoutId 
     status: 'paid',
     paid: true,
     subtotal_amount: product.amount,
-    discount_amount: 0,
-    net_amount: product.amount,
+    discount_amount: appliedDiscountAmount,
+    net_amount: paidAmount,
     tax_amount: 0,
-    total_amount: product.amount,
+    total_amount: paidAmount,
     applied_balance_amount: 0,
     due_amount: 0,
     refunded_amount: 0,
     refunded_tax_amount: 0,
-    refundable_amount: product.amount,
+    refundable_amount: paidAmount,
     refundable_tax_amount: 0,
     currency: product.currency,
     billing_reason: subscriptionId ? 'subscription_create' : 'purchase',
@@ -165,28 +196,29 @@ function buildOrderForProduct({ product, customerId, subscriptionId, checkoutId 
     units: null,
     customer_id: customerId,
     product_id: product.id,
-    discount_id: null,
+    discount_id: discount?.id ?? null,
     subscription_id: subscriptionId ?? null,
     checkout_id: checkoutId ?? null,
+    checkout_link_id: checkoutLinkId,
     next_payment_attempt_at: null,
-    metadata: {},
+    metadata: { ...metadata },
     custom_field_data: {},
     platform_fee_amount: Math.round(product.amount * 0.05),
     platform_fee_currency: product.currency,
     description: product.name,
     customer: null,
     product: null,
-    discount: null,
+    discount: discount ? { ...discount } : null,
     subscription: null,
     items: [
-      { id: uuid(), created_at: nowIso(), modified_at: nowIso(), label: product.name, amount: product.amount, tax_amount: 0, proration: false, product_price_id: null },
+      { id: uuid(), created_at: nowIso(), modified_at: nowIso(), label: product.name, amount: product.amount, tax_amount: 0, proration: false, product_price_id: product.id },
     ],
   };
   orders.set(id, order);
   return order;
 }
 
-function buildSubscriptionForProduct({ product, customerId, checkoutId }) {
+function buildSubscriptionForProduct({ product, customerId, checkoutId, metadata = {}, discount = null }) {
   const id = uuid();
   const start = new Date();
   const end = new Date(start.getTime());
@@ -216,17 +248,18 @@ function buildSubscriptionForProduct({ product, customerId, checkoutId }) {
     resumes_at: null,
     customer_id: customerId,
     product_id: product.id,
-    discount_id: null,
+    discount_id: discount?.id ?? null,
     checkout_id: checkoutId ?? null,
     seats: null,
     units: null,
     customer_cancellation_reason: null,
     customer_cancellation_comment: null,
-    metadata: {},
+    metadata: { ...metadata },
     custom_field_data: {},
     customer: null,
     product: null,
-    discount: null,
+    discount: discount ? { ...discount } : null,
+    _mock_discount_cycles_remaining: discount?.duration === 'repeating' ? Math.max(0, discount.duration_in_repeating_months - 1) : null,
     prices: [],
     meters: [],
     pending_update: null,
@@ -297,6 +330,61 @@ const server = createServer(async (req, res) => {
     return json(res, 200, result);
   }
 
+  // Mock-only stand-in for completing a Polar checkout link. Real buyers visit Polar's hosted
+  // page; this endpoint deterministically creates the resulting checkout, Order, and Subscription.
+  // Polar copies reference_id and utm_* into checkout metadata, then propagates that metadata.
+  let linkMatch = /^\/__mock\/link\/([^/]+)$/.exec(pathname);
+  if (method === 'GET' && linkMatch) {
+    const product = PRODUCTS[linkMatch[1]];
+    if (!product) return json(res, 404, { error: 'product_not_found' });
+    const requestedDiscount = url.searchParams.get('discount_code');
+    const resolvedDiscount = availableDiscount(requestedDiscount);
+    if (resolvedDiscount.error) return json(res, 422, { error: resolvedDiscount.error });
+
+    const metadata = {};
+    const referenceId = url.searchParams.get('reference_id');
+    if (referenceId) metadata.reference_id = referenceId;
+    for (const [key, value] of url.searchParams.entries()) {
+      if (key.startsWith('utm_')) metadata[key] = value;
+    }
+    const checkoutId = uuid();
+    const checkoutLinkId = `link_${product.id}`;
+    const discount = resolvedDiscount.discount;
+    let sub = null;
+    if (product.recurring) {
+      sub = buildSubscriptionForProduct({ product, customerId: null, checkoutId, metadata, discount });
+    }
+    const order = buildOrderForProduct({
+      product,
+      customerId: null,
+      subscriptionId: sub?.id ?? null,
+      checkoutId,
+      checkoutLinkId,
+      metadata,
+      discount,
+    });
+    if (discount) discount.redemptions_count += 1;
+    const checkout = {
+      id: checkoutId,
+      created_at: nowIso(),
+      modified_at: nowIso(),
+      status: 'succeeded',
+      url: `https://checkout.polar.sh/mock/${checkoutId}`,
+      amount: product.amount,
+      total_amount: order.total_amount,
+      discount_amount: order.discount_amount,
+      net_amount: order.net_amount,
+      currency: product.currency,
+      customer_id: null,
+      products: [{ id: product.id, name: product.name }],
+      discount_id: discount?.id ?? null,
+      discount: discount ? { ...discount } : null,
+      metadata: { ...metadata },
+    };
+    checkouts.set(checkoutId, checkout);
+    return json(res, 201, { checkout, order, subscription: sub, payment_link_id: checkoutLinkId });
+  }
+
   // -- control endpoint: renew a subscription for one period (round-5 audit follow-up). Polar itself
   // charges the subscription at period end and emits order.paid with billing_reason 'subscription_cycle';
   // this moves the subscription's period forward one interval and creates that renewal order.
@@ -313,7 +401,17 @@ const server = createServer(async (req, res) => {
     sub.current_period_start = start.toISOString();
     sub.current_period_end = end.toISOString();
     sub.modified_at = nowIso();
-    const order = buildOrderForProduct({ product, customerId: sub.customer_id, subscriptionId: sub.id, checkoutId: null });
+    let discount = null;
+    if (sub.discount?.duration === 'forever') discount = sub.discount;
+    if (sub.discount?.duration === 'repeating' && sub._mock_discount_cycles_remaining > 0) {
+      discount = sub.discount;
+      sub._mock_discount_cycles_remaining -= 1;
+    }
+    if (sub.discount?.duration === 'repeating' && sub._mock_discount_cycles_remaining === 0 && !discount) {
+      sub.discount_id = null;
+      sub.discount = null;
+    }
+    const order = buildOrderForProduct({ product, customerId: sub.customer_id, subscriptionId: sub.id, checkoutId: null, metadata: sub.metadata, discount });
     order.billing_reason = 'subscription_cycle';
     // Polar creates the cycle order when the new period starts; the wall clock made refund windows
     // (EC:D1) count from the test run instead of the period (round-6 I-4).
@@ -343,15 +441,21 @@ const server = createServer(async (req, res) => {
       const customerId = body.customer_id;
       if (!customerId || !customers.has(customerId)) return json(res, 422, { error: 'validation_error', detail: 'existing Polar customer_id required' });
 
+      const resolvedDiscount = availableDiscount(body.discount_id);
+      if (resolvedDiscount.error) return json(res, 422, { error: resolvedDiscount.error });
+      const discount = resolvedDiscount.discount;
+      const metadata = body.metadata ?? {};
+
       const checkoutId = uuid();
       let order;
       let sub = null;
       if (product.recurring) {
-        sub = buildSubscriptionForProduct({ product, customerId, checkoutId });
-        order = buildOrderForProduct({ product, customerId, subscriptionId: sub.id, checkoutId });
+        sub = buildSubscriptionForProduct({ product, customerId, checkoutId, metadata, discount });
+        order = buildOrderForProduct({ product, customerId, subscriptionId: sub.id, checkoutId, metadata, discount });
       } else {
-        order = buildOrderForProduct({ product, customerId, subscriptionId: null, checkoutId });
+        order = buildOrderForProduct({ product, customerId, subscriptionId: null, checkoutId, metadata, discount });
       }
+      if (discount) discount.redemptions_count += 1;
 
       const checkout = {
         id: checkoutId,
@@ -366,9 +470,9 @@ const server = createServer(async (req, res) => {
         success_url: body.success_url ?? null,
         return_url: body.return_url ?? null,
         amount: product.amount,
-        total_amount: product.amount,
-        discount_amount: 0,
-        net_amount: product.amount,
+        total_amount: order.total_amount,
+        discount_amount: order.discount_amount,
+        net_amount: order.net_amount,
         tax_amount: null,
         currency: product.currency,
         customer_id: customerId,
@@ -377,7 +481,10 @@ const server = createServer(async (req, res) => {
         customer_name: customers.get(customerId)?.name ?? null,
         is_business_customer: false,
         products: [{ id: product.id, name: product.name }],
-        metadata: body.metadata ?? {},
+        allow_discount_codes: !!body.allow_discount_codes,
+        discount_id: discount?.id ?? null,
+        discount: discount ? { ...discount } : null,
+        metadata: { ...metadata },
         payment_processor: 'stripe',
         // mock-only breadcrumbs so callers/tests don't need a second lookup call to find what
         // this checkout produced (not a real Polar field):
@@ -429,7 +536,7 @@ const server = createServer(async (req, res) => {
         if (body.proration_behavior === 'invoice' && product.amount > sub.amount) {
           const startMs = new Date(sub.current_period_start).getTime(); const endMs = new Date(sub.current_period_end).getTime();
           const share = Math.max(0, Math.min(1, (endMs - Date.now()) / (endMs - startMs)));
-          const order = buildOrderForProduct({ product, customerId: sub.customer_id, subscriptionId: sub.id, checkoutId: null });
+          const order = buildOrderForProduct({ product, customerId: sub.customer_id, subscriptionId: sub.id, checkoutId: null, metadata: sub.metadata });
           order.billing_reason = 'subscription_update';
           const amount = Math.round((product.amount - sub.amount) * share);
           Object.assign(order, { subtotal_amount: amount, net_amount: amount, total_amount: amount, refundable_amount: amount });

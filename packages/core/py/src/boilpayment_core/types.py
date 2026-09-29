@@ -367,6 +367,8 @@ class Subscription:
     # EC:A60 -- the provider customer key the billing key was issued under (Toss customerKey). Renewal
     # and upgrade charges send it. None on rows written before it existed (they send the local customer id).
     billing_customer_ref: str | None = None
+    # Affiliate captured when the subscription started; None means direct acquisition.
+    affiliate_id: str | None = None
 
 
 PaymentStatus = Literal[
@@ -417,6 +419,36 @@ class Payment:
     # EC:E24 -- other refs the provider uses for this same payment (Stripe invoice <-> PaymentIntent
     # <-> charge). Set by adapters on fetched payments; recorded as aliases by the webhook. Not stored.
     provider_ref_aliases: list[str] | None = None
+    # Provider-authoritative sale facts used for discounted and payment-link purchases.
+    sale_evidence: SaleEvidence | None = None
+    # User-owned affiliate attribution captured at checkout or decoded from a payment link.
+    affiliate_id: str | None = None
+
+
+@dataclass(kw_only=True, slots=True)
+class SaleEvidence:
+    provider_subtotal: Money
+    discount_amount: Money
+    price_ref: str | None
+    checkout_id: str | None
+    payment_link_id: str | None
+    link_reference: str | None
+
+
+AffiliateCommissionKind = Literal["accrual", "reversal"]
+
+
+@dataclass(kw_only=True, slots=True)
+class AffiliateCommission:
+    id: str
+    kind: AffiliateCommissionKind
+    affiliate_id: str
+    payment_id: str
+    refund_id: str | None
+    related_accrual_id: str | None
+    amount: Money
+    idempotency_key: str
+    created_at: datetime
 
 
 Pool = Literal["paid", "promo", "trial"]
@@ -749,6 +781,9 @@ class CreateCheckoutInput:
     cancel_url: str
     idempotency_key: str
     metadata: dict[str, str] | None = None
+    allow_discount_codes: bool = False
+    preset_discount_code: str | None = None
+    affiliate_id: str | None = None
 
 
 @dataclass(kw_only=True, slots=True)
@@ -910,9 +945,23 @@ class Table(Protocol[T]):
 
 class OperationTable(Table[Operation], Protocol):
     async def claim(self, row: Operation) -> Operation | None: ...  # stores row.result (EC:A48)
+    async def delete(self, id: str) -> None: ...
 
     # EC:A48 -- optional compare and set (see TS OperationTable.compareAndSet); tables without it
     # fall back to a plain put.
+
+
+class AffiliateCommissionTable(Protocol):
+    """Append-only commission store, idempotent by idempotency_key."""
+
+    async def append(self, row: AffiliateCommission) -> AffiliateCommission: ...
+    async def list(
+        self,
+        *,
+        affiliate_id: str | None = None,
+        payment_id: str | None = None,
+        kind: AffiliateCommissionKind | None = None,
+    ) -> list[AffiliateCommission]: ...
 
 
 class Repo(Protocol):
@@ -926,6 +975,7 @@ class Repo(Protocol):
     webhook_events: Table[WebhookEventRecord]
     outbox: Table[OutboxItem]
     operations: OperationTable  # EC:J1-J5
+    affiliate_commissions: AffiliateCommissionTable
 
 
 NotifyType = Literal[
@@ -979,3 +1029,5 @@ class Deps:
     policy: Policy
     # EC:L1 — optional; every caller falls back to NoopLogger so no existing Deps construction breaks.
     logger: Logger | None = None
+    # Optional user-supplied amount_minor calculator; overrides configured commission rules.
+    affiliate_commission: Callable[[Payment], int | Awaitable[int]] | None = None

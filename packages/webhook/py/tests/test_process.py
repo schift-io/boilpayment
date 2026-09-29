@@ -133,7 +133,25 @@ def test_ec_process_marks_failed_on_handler_error_and_retry_increments_attempts(
 def test_ec_e3_unknown_provider_ref_fails_record_and_notifies_reconcile_mismatch():
     async def run():
         clock, repo = _setup()
-        provider = FakeProvider(verify=json_verify("stripe"), name="stripe")
+        provider = FakeProvider(
+            verify=json_verify("stripe"),
+            name="stripe",
+            get_payment_impl=lambda _ref: Payment(
+                id="pi_UNKNOWN",
+                customer_id="",
+                provider="stripe",
+                provider_ref="pi_UNKNOWN",
+                subscription_id=None,
+                amount=Money(amount_minor=1_000, currency="USD"),
+                status="succeeded",
+                kind="topup",
+                period=None,
+                occurred_at=clock.now(),
+                failure=None,
+                cash_receipt=None,
+                sale_evidence=None,
+            ),
+        )
         notifier = CollectingNotifier()
         ledger = InMemoryLedger(SequentialIdGen("led_"))
 

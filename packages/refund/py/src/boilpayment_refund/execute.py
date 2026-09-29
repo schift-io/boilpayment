@@ -22,6 +22,10 @@ from boilpayment_core import (
     serialize_refund,
 )
 
+from .affiliate_reversal import (
+    AppendAffiliateReversalsInput,
+    append_affiliate_reversals,
+)
 from .execute_request import request_refund
 from .execute_settle import settle_refund
 
@@ -92,6 +96,17 @@ async def _do_execute(input: ExecuteInput, key: str) -> Refund:
     provider_result = await request_refund(input, key)
     settled = await repo.refunds.get(provider_result.id)
     if settled is not None and settled.status != "pending":
+        payment = await repo.payments.get(decision.payment_id)
+        if payment is not None:
+            await append_affiliate_reversals(
+                AppendAffiliateReversalsInput(
+                    repo=repo,
+                    ledger=input.ledger,
+                    clock=input.clock,
+                    payment=payment,
+                    refund=settled,
+                )
+            )
         return settled
     if provider_result.status == "pending":
         await repo.refunds.put(provider_result)

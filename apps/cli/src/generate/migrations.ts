@@ -24,6 +24,7 @@ const MODULE_FILES: { file: string; when: (c: PaykitConfig) => boolean }[] = [
   { file: '0014_subscription_billing_customer_ref.sql', when: () => true }, // EC:A60
   { file: '0013_ledger_consume_key.sql', when: (c) => c.goods.includes('credits') }, // EC:B21
   { file: '0015_grace_credit_expiry.sql', when: (c) => c.goods.includes('credits') }, // SB-07
+  { file: '0016_affiliate_commissions.sql', when: () => true }, // AF-01..04
 ];
 
 async function dirHasSqlFiles(dir: string): Promise<boolean> {

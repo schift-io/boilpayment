@@ -125,6 +125,59 @@ class TestNormalizeOrder:
         assert p.provider_ref == "order_test_2"
         assert p.subscription_id == "sub_test_1"
 
+    def test_dc_02_pl_01_af_01_authoritative_discount_link_and_affiliate_evidence(
+        self,
+    ):
+        p = normalize_order(
+            {
+                **BASE_ORDER,
+                "status": "paid",
+                "paid": True,
+                "subtotal_amount": 1000,
+                "discount_amount": 200,
+                "net_amount": 800,
+                "total_amount": 800,
+                "product_id": "prod_polar_1",
+                "checkout_id": "checkout_1",
+                "checkout_link_id": "link_1",
+                "discount_id": "discount_20pct",
+                "discount": {
+                    "id": "discount_20pct",
+                    "type": "percentage",
+                    "basis_points": 2000,
+                },
+                "metadata": {
+                    "reference_id": "customer_42",
+                    "affiliateId": "affiliate_alpha",
+                },
+            }
+        )
+
+        assert p.amount.amount_minor == 800
+        assert p.affiliate_id == "affiliate_alpha"
+        assert p.sale_evidence is not None
+        assert p.sale_evidence.provider_subtotal.amount_minor == 1000
+        assert p.sale_evidence.discount_amount.amount_minor == 200
+        assert p.sale_evidence.price_ref == "prod_polar_1"
+        assert p.sale_evidence.checkout_id == "checkout_1"
+        assert p.sale_evidence.payment_link_id == "link_1"
+        assert p.sale_evidence.link_reference == "customer_42"
+
+    def test_dc_02_records_zero_discount_evidence_without_discount(self):
+        p = normalize_order(
+            {
+                **BASE_ORDER,
+                "status": "paid",
+                "paid": True,
+                "subtotal_amount": 1000,
+                "discount_amount": 0,
+                "product_id": "prod_polar_1",
+            }
+        )
+
+        assert p.sale_evidence is not None
+        assert p.sale_evidence.discount_amount.amount_minor == 0
+
 
 BASE_SUB = {
     "id": "sub_test_1",
@@ -167,12 +220,14 @@ class TestNormalizeSubscription:
                     "customerId": "internal_cust_1",
                     "planId": "plan_pro",
                     "subscriptionId": "internal_sub_1",
+                    "affiliateId": "affiliate_alpha",
                 },
             }
         )
         assert with_meta.id == "internal_sub_1"
         assert with_meta.customer_id == "internal_cust_1"
         assert with_meta.plan_id == "plan_pro"
+        assert with_meta.affiliate_id == "affiliate_alpha"
 
         without_meta = normalize_subscription({**BASE_SUB, "status": "active"})
         assert without_meta.id == "sub_test_1"

@@ -132,6 +132,36 @@ function invoiceSubscriptionMetadata(invoice: SubscriptionInvoice): Stripe.Metad
   return invoice.parent?.subscription_details?.metadata ?? invoice.subscription_details?.metadata ?? {};
 }
 
+type StripeLineItemWithPrice = {
+  readonly price?: string | { readonly id: string } | null;
+  readonly pricing?: { readonly price_details?: { readonly price?: string | { readonly id: string } | null } | null } | null;
+};
+
+function lineItemPriceRef(line: StripeLineItemWithPrice | undefined): string | null {
+  const legacyPrice = line?.price;
+  if (typeof legacyPrice === 'string') return legacyPrice;
+  if (legacyPrice?.id) return legacyPrice.id;
+  const price = line?.pricing?.price_details?.price;
+  return typeof price === 'string' ? price : (price?.id ?? null);
+}
+
+function invoiceDiscountAmount(invoice: Stripe.Invoice): number {
+  return (invoice.total_discount_amounts ?? []).reduce((total, item) => total + item.amount, 0);
+}
+
+function invoiceSaleEvidence(invoice: Stripe.Invoice) {
+  const subtotal = invoice.subtotal;
+  if (subtotal == null) return null;
+  return {
+    providerSubtotal: money(subtotal, invoice.currency),
+    discountAmount: money(invoiceDiscountAmount(invoice), invoice.currency),
+    priceRef: lineItemPriceRef(invoice.lines?.data?.[0]),
+    checkoutId: null,
+    paymentLinkId: null,
+    linkReference: null,
+  };
+}
+
 // EC:E23 — a PaymentIntent stays 'succeeded' after its charge is refunded or disputed; the charge
 // says what happened to the money. Only an expanded charge object is read (a bare id says nothing).
 function chargeAdjustedStatus(status: PaymentStatus, charge: Stripe.PaymentIntent['latest_charge']): PaymentStatus {
@@ -159,6 +189,8 @@ export function normalizePaymentIntent(pi: Stripe.PaymentIntent, invoice?: Strip
     occurredAt: new Date(pi.created * 1000),
     failure: failureFromLastError(pi.last_payment_error),
     cashReceipt: null,
+    saleEvidence: invoice ? invoiceSaleEvidence(invoice) : null,
+    affiliateId: pi.metadata?.affiliateId ?? (invoice ? invoiceSubscriptionMetadata(invoice).affiliateId : undefined) ?? null,
     raw: invoice ? { ...pi, metadata: { ...pi.metadata, ...invoiceSubscriptionMetadata(invoice) } } : pi,
     providerRefAliases: refAliases([invoice?.id, (pi as unknown as { invoice?: unknown }).invoice, pi.latest_charge]), // EC:E24
   };
@@ -184,15 +216,53 @@ export function normalizeInvoiceAsPayment(invoice: Stripe.Invoice, pi?: Stripe.P
     provider: 'stripe',
     providerRef: invoice.id ?? '',
     subscriptionId: invoiceSubscriptionRef(invoice),
-    amount: money(invoice.amount_paid || invoice.amount_due, invoice.currency),
+    amount: money(invoice.status === 'paid' ? invoice.amount_paid : (invoice.amount_paid || invoice.amount_due), invoice.currency),
     status,
     kind: 'subscription',
     period: invoicePeriod(invoice),
     occurredAt: new Date(invoice.created * 1000),
     failure,
     cashReceipt: null,
+    saleEvidence: invoiceSaleEvidence(invoice),
+    affiliateId: invoice.metadata?.affiliateId ?? invoiceSubscriptionMetadata(invoice).affiliateId ?? pi?.metadata?.affiliateId ?? null,
     raw: { ...invoice, metadata: { ...invoice.metadata, ...invoiceSubscriptionMetadata(invoice) } },
     providerRefAliases: refAliases([invoicePaymentIntentRef(invoice), pi?.latest_charge]), // EC:E24
+  };
+}
+
+type ExpandedCheckoutSession = Stripe.Checkout.Session & {
+  readonly payment_intent?: string | Stripe.PaymentIntent | null;
+  readonly invoice?: string | Stripe.Invoice | null;
+  readonly line_items?: { readonly data?: readonly StripeLineItemWithPrice[] } | null;
+};
+
+function checkoutSaleEvidence(session: ExpandedCheckoutSession) {
+  if (session.amount_subtotal == null || session.amount_total == null) return null;
+  return {
+    providerSubtotal: money(session.amount_subtotal, session.currency ?? 'usd'),
+    discountAmount: money(session.total_details?.amount_discount ?? 0, session.currency ?? 'usd'),
+    priceRef: lineItemPriceRef(session.line_items?.data?.[0]),
+    checkoutId: session.id,
+    paymentLinkId: typeof session.payment_link === 'string' ? session.payment_link : (session.payment_link?.id ?? null),
+    linkReference: session.client_reference_id ?? null,
+  };
+}
+
+export function normalizeCheckoutSessionAsPayment(session: ExpandedCheckoutSession): Payment {
+  const invoice = typeof session.invoice === 'object' && session.invoice ? session.invoice : null;
+  const intent = typeof session.payment_intent === 'object' && session.payment_intent ? session.payment_intent : null;
+  const base = invoice ? normalizeInvoiceAsPayment(invoice, intent) : intent ? normalizePaymentIntent(intent, null) : null;
+  if (!base) {
+    throw new PaymentKitError(`stripe checkout session ${session.id} has no payable reference`, 'provider_shape');
+  }
+  const subscriptionId = typeof session.subscription === 'string' ? session.subscription : (session.subscription?.id ?? base.subscriptionId);
+  return {
+    ...base,
+    subscriptionId,
+    kind: session.mode === 'subscription' ? 'subscription' : 'topup',
+    saleEvidence: checkoutSaleEvidence(session),
+    affiliateId: session.metadata?.affiliateId ?? base.affiliateId ?? null,
+    raw: session,
   };
 }
 
@@ -304,7 +374,9 @@ export function mapEventType(event: Stripe.Event): NormalizedEventType {
       return 'subscription.payment_failed';
     case 'checkout.session.completed': {
       const session = event.data.object as Stripe.Checkout.Session;
-      return session.mode === 'subscription' ? 'subscription.created' : 'payment.succeeded';
+      return session.mode === 'subscription' && !session.payment_link
+        ? 'subscription.created'
+        : 'payment.succeeded';
     }
     case 'payment_intent.succeeded': {
       const pi = event.data.object as Stripe.PaymentIntent;
@@ -362,9 +434,12 @@ export function toNormalizedEvent(event: Stripe.Event): NormalizedEvent {
     }
     case 'checkout.session.completed': {
       const s = obj as unknown as Stripe.Checkout.Session;
-      customerRef = (typeof s.customer === 'string' ? s.customer : s.customer?.id) ?? s.client_reference_id ?? null;
+      const paymentLinkId = typeof s.payment_link === 'string' ? s.payment_link : s.payment_link?.id;
+      customerRef = paymentLinkId
+        ? s.client_reference_id ?? null
+        : (typeof s.customer === 'string' ? s.customer : s.customer?.id) ?? s.client_reference_id ?? null;
       subscriptionRef = typeof s.subscription === 'string' ? s.subscription : null;
-      paymentRef = typeof s.payment_intent === 'string' ? s.payment_intent : (s.payment_intent?.id ?? null);
+      paymentRef = s.id;
       if (s.amount_total != null) amount = money(s.amount_total, s.currency ?? 'usd');
       break;
     }
@@ -505,7 +580,11 @@ export class StripeProvider implements PaymentProvider {
       );
     }
     const mode: Stripe.Checkout.SessionCreateParams.Mode = input.mode === 'subscription' ? 'subscription' : 'payment';
-    const metadata = { ...(input.metadata ?? {}), planId: input.plan.id };
+    const metadata = {
+      ...(input.metadata ?? {}),
+      planId: input.plan.id,
+      ...(input.affiliateId ? { affiliateId: input.affiliateId } : {}),
+    };
     try {
       const session = await this.client.checkout.sessions.create(
         {
@@ -516,6 +595,9 @@ export class StripeProvider implements PaymentProvider {
           success_url: input.successUrl,
           cancel_url: input.cancelUrl,
           metadata,
+          ...(input.presetDiscountCode
+            ? { discounts: [{ promotion_code: input.presetDiscountCode }] }
+            : input.allowDiscountCodes ? { allow_promotion_codes: true } : {}),
           ...(mode === 'subscription'
             ? {
                 subscription_data: {
@@ -548,6 +630,18 @@ export class StripeProvider implements PaymentProvider {
 
   // EC:E7 E12 — accepts pi_... or in_...
   async getPayment(providerRef: string): Promise<Payment> {
+    if (providerRef.startsWith('cs_')) {
+      const session = await this.client.checkout.sessions.retrieve(providerRef, {
+        expand: ['line_items', 'payment_intent', 'invoice'],
+      });
+      const withIntent = typeof session.payment_intent === 'string'
+        ? { ...session, payment_intent: await this.client.paymentIntents.retrieve(session.payment_intent, { expand: ['latest_charge'] }) }
+        : session;
+      const withInvoice = typeof withIntent.invoice === 'string'
+        ? { ...withIntent, invoice: await this.client.invoices.retrieve(withIntent.invoice) }
+        : withIntent;
+      return normalizeCheckoutSessionAsPayment(withInvoice);
+    }
     if (providerRef.startsWith('in_')) {
       // No `expand: ['payment_intent']` — the field does not exist on API >= 2025-03-31 and the expand would 400.
       const invoice = await this.client.invoices.retrieve(providerRef);
